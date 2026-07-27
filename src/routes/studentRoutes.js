@@ -9,6 +9,7 @@ const {
   updateStudent,
   deleteStudent,
   searchStudents,
+  getStudentAnalytics,
 } = require("../controllers/studentController");
 
 const validateRequestBody = require("../middlewares/validateRequestBody");
@@ -22,6 +23,8 @@ studentRouter.post("/", validateRequestBody, createStudentAdmission);
 studentRouter.get("/", getAllStudents);
 
 studentRouter.get("/search", searchStudents);
+
+studentRouter.get("/analytics", getStudentAnalytics);
 
 studentRouter.get("/:student_id", getStudentById);
 

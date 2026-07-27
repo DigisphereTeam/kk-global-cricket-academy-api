@@ -15,6 +15,7 @@ exports.createStudentAdmission = async (req, res) => {
     school,
     playing_role,
     batting_style,
+    batch,
     admission_fee,
     father_name,
     father_phone,
@@ -29,29 +30,29 @@ exports.createStudentAdmission = async (req, res) => {
     medical_conditions,
   } = req.body;
 
-
   try {
 
+    // Check Duplicate Student
     const existingStudent = await pool.query(
       `
       SELECT 1
       FROM tbl_students
-      WHERE admission_id = $1
-        OR phone_number = $2
-        OR email = $3
-      LIMIT 1;
+      WHERE phone_number = $1
+         OR email = $2
+      LIMIT 1
       `,
-      [admission_id, phone_number, email]
+      [phone_number, email]
     );
 
     if (existingStudent.rowCount > 0) {
       return sendErrorResponse(
         res,
         409,
-        "Student already exists"
+        "Student already exists."
       );
     }
 
+    // Create Student
     const result = await pool.query(
       `
       INSERT INTO tbl_students
@@ -66,6 +67,7 @@ exports.createStudentAdmission = async (req, res) => {
         school,
         playing_role,
         batting_style,
+        batch,
         admission_fee,
         father_name,
         father_phone,
@@ -82,7 +84,8 @@ exports.createStudentAdmission = async (req, res) => {
       VALUES
       (
         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-        $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22
+        COALESCE($11,'Morning'),
+        $12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23
       )
       RETURNING *
       `,
@@ -97,6 +100,7 @@ exports.createStudentAdmission = async (req, res) => {
         school,
         playing_role,
         batting_style,
+        batch,
         admission_fee,
         father_name,
         father_phone,
@@ -112,14 +116,12 @@ exports.createStudentAdmission = async (req, res) => {
       ]
     );
 
-
     return sendSuccessResponse(
       res,
       201,
       "Student admission created successfully.",
       result.rows[0]
     );
-
 
   } catch (error) {
 
@@ -132,7 +134,6 @@ exports.createStudentAdmission = async (req, res) => {
   }
 
 };
-
 
 exports.getAllStudents = async (req, res) => {
 
@@ -479,4 +480,52 @@ exports.searchStudents = async (req, res) => {
       error.message || "Internal Server Error"
     );
   }
+};
+
+exports.getStudentAnalytics = async (req, res) => {
+
+  try {
+
+    const analytics = await pool.query(
+      `
+      SELECT
+        COUNT(*) AS total_students,
+
+        COUNT(*) FILTER (
+          WHERE batch = 'Morning'
+        ) AS morning_students,
+
+        COUNT(*) FILTER (
+          WHERE batch = 'Evening'
+        ) AS evening_students,
+
+        COUNT(*) FILTER (
+          WHERE gender = 'Male'
+        ) AS male_students,
+
+        COUNT(*) FILTER (
+          WHERE gender = 'Female'
+        ) AS female_students
+
+      FROM tbl_students
+      `
+    );
+
+    return sendSuccessResponse(
+      res,
+      200,
+      "Student analytics fetched successfully.",
+      analytics.rows[0]
+    );
+
+  } catch (error) {
+
+    return sendErrorResponse(
+      res,
+      500,
+      error.message || "Internal Server Error"
+    );
+
+  }
+
 };
