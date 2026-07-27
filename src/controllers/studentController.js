@@ -296,9 +296,58 @@ exports.updateStudent = async (req, res) => {
     }
 
     if (updates.length === 0) {
-      return sendErrorResponse(res, 400, "No fields provided to update");
+      return sendErrorResponse(
+        res,
+        400,
+        "No fields provided to update"
+      );
     }
 
+    // Check duplicate phone number
+    if (req.body.phone_number) {
+      const existingStudent = await pool.query(
+        `
+        SELECT 1
+        FROM tbl_students
+        WHERE phone_number = $1
+          AND student_id <> $2
+        LIMIT 1
+        `,
+        [req.body.phone_number, student_id]
+      );
+
+      if (existingStudent.rowCount > 0) {
+        return sendErrorResponse(
+          res,
+          409,
+          "Phone number already exists"
+        );
+      }
+    }
+
+    // Check duplicate email
+    if (req.body.email) {
+      const existingEmail = await pool.query(
+        `
+        SELECT 1
+        FROM tbl_students
+        WHERE email = $1
+          AND student_id <> $2
+        LIMIT 1
+        `,
+        [req.body.email, student_id]
+      );
+
+      if (existingEmail.rowCount > 0) {
+        return sendErrorResponse(
+          res,
+          409,
+          "Email already exists"
+        );
+      }
+    }
+
+    // Add student_id for WHERE clause
     values.push(student_id);
 
     const result = await pool.query(
@@ -312,7 +361,11 @@ exports.updateStudent = async (req, res) => {
     );
 
     if (result.rowCount === 0) {
-      return sendErrorResponse(res, 404, "Student not found");
+      return sendErrorResponse(
+        res,
+        404,
+        "Student not found"
+      );
     }
 
     return sendSuccessResponse(
