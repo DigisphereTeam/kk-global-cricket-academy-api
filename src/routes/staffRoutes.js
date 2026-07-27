@@ -4,6 +4,11 @@ const staffRouter = express.Router();
 
 const { addStaff, getAllStaff, searchStaff, getStaffById, updateStaff, deleteStaff } = require("../controllers/staffController");
 const validateRequestBody = require("../middlewares/validateRequestBody");
+const verifyToken = require("../middlewares/verifyToken");
+
+
+// Protect all student routes
+staffRouter.use(verifyToken);
 
 // Add staff
 staffRouter.post("/", validateRequestBody, addStaff);

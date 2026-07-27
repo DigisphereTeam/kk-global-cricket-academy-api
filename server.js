@@ -8,6 +8,7 @@ const pool = require("./src/config/dbConfig");
 const studentRouter = require("./src/routes/studentRoutes");
 const coachRouter = require("./src/routes/coachRoutes");
 const staffRouter = require("./src/routes/staffRoutes");
+const authRouter = require("./src/routes/authRoutes");
 
 
 const app = express();
@@ -21,6 +22,7 @@ app.get("/", (_req, res) => {
   sendSuccessResponse(res, 200, "Server is up and running!");
 });
 
+app.use("/auth", authRouter)
 app.use("/students", studentRouter);
 app.use("/coaches", coachRouter);
 app.use("/staff", staffRouter);

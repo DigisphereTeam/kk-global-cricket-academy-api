@@ -11,7 +11,10 @@ const {
   searchStudents,
 } = require("../controllers/studentController");
 const validateRequestBody = require("../middlewares/validateRequestBody");
+const verifyToken = require("../middlewares/verifyToken");
 
+// Protect all student routes
+studentRouter.use(verifyToken);
 
 // Create student admission
 studentRouter.post("/", validateRequestBody, createStudentAdmission);

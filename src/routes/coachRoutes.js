@@ -1,10 +1,12 @@
 const express = require("express");
 const validateRequestBody = require("../middlewares/validateRequestBody");
 const { addCoach, getAllCoaches, searchCoaches, getCoachById, updateCoach, deleteCoach } = require("../controllers/coachController");
+const verifyToken = require("../middlewares/verifyToken");
 
 const coachRouter = express.Router();
 
-
+// Protect all student routes
+coachRouter.use(verifyToken);
 
 // Add coach
 coachRouter.post("/", validateRequestBody, addCoach);
