@@ -10,6 +10,7 @@ const coachRouter = require("./src/routes/coachRoutes");
 const staffRouter = require("./src/routes/staffRoutes");
 const authRouter = require("./src/routes/authRoutes");
 const oneOnOneRouter = require("./src/routes/oneOnOneRoutes");
+const groundBookingRouter = require("./src/routes/groundbookingRoutes");
 
 
 const app = express();
@@ -28,6 +29,7 @@ app.use("/students", studentRouter);
 app.use("/coaches", coachRouter);
 app.use("/staff", staffRouter);
 app.use("/one-on-one-applications", oneOnOneRouter);
+app.use("/ground-bookings", groundBookingRouter);
 
 app.use(notFoundHandler);
 app.use(globalErrorHandler)
