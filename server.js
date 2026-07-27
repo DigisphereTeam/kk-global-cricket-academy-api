@@ -10,7 +10,8 @@ const coachRouter = require("./src/routes/coachRoutes");
 const staffRouter = require("./src/routes/staffRoutes");
 const authRouter = require("./src/routes/authRoutes");
 const oneOnOneRouter = require("./src/routes/oneOnOneRoutes");
-const groundBookingRouter = require("./src/routes/groundbookingRoutes");
+const groundBookingRouter = require("./src/routes/groundBookingRoutes");
+
 
 
 const app = express();
