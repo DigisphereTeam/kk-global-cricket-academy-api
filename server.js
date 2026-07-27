@@ -7,6 +7,7 @@ const globalErrorHandler = require("./src/middlewares/errorHandler");
 const pool = require("./src/config/dbConfig");
 const studentRouter = require("./src/routes/studentRoutes");
 const coachRouter = require("./src/routes/coachRoutes");
+const groundbookingRouter = require("./src/routes/groundbookingRoutes");
 
 
 const app = express();
@@ -22,6 +23,7 @@ app.get("/", (_req, res) => {
 
 app.use("/students", studentRouter);
 app.use("/coaches", coachRouter);
+app.use("/groundbookings", groundbookingRouter);
 
 app.use(notFoundHandler);
 app.use(globalErrorHandler)
