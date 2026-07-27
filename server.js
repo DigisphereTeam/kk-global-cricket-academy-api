@@ -11,6 +11,7 @@ const staffRouter = require("./src/routes/staffRoutes");
 const authRouter = require("./src/routes/authRoutes");
 const oneOnOneRouter = require("./src/routes/oneOnOneRoutes");
 const groundBookingRouter = require("./src/routes/groundBookingRoutes");
+const eventRouter = require("./src/routes/eventRoutes");
 
 
 
@@ -31,6 +32,7 @@ app.use("/coaches", coachRouter);
 app.use("/staff", staffRouter);
 app.use("/one-on-one-applications", oneOnOneRouter);
 app.use("/ground-bookings", groundBookingRouter);
+app.use("/events", eventRouter)
 
 app.use(notFoundHandler);
 app.use(globalErrorHandler)

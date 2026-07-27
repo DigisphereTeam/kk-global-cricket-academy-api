@@ -6,26 +6,19 @@ const { addStaff, getAllStaff, searchStaff, getStaffById, updateStaff, deleteSta
 const validateRequestBody = require("../middlewares/validateRequestBody");
 const verifyToken = require("../middlewares/verifyToken");
 
-
-// Protect all student routes
 staffRouter.use(verifyToken);
 
-// Add staff
 staffRouter.post("/", validateRequestBody, addStaff);
 
-// Get all staff
 staffRouter.get("/", getAllStaff);
 
-// Search staff
+
 staffRouter.get("/search", searchStaff);
 
-// Get staff by ID
 staffRouter.get("/:id", getStaffById);
 
-// Update staff
 staffRouter.patch("/:id", validateRequestBody, updateStaff);
 
-// Delete staff
 staffRouter.delete("/:id", deleteStaff);
 
 module.exports = staffRouter;

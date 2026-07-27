@@ -1,12 +1,7 @@
-
-
-// ==========================
-// Add Coach
-
 const pool = require("../config/dbConfig");
 const { sendErrorResponse, sendSuccessResponse } = require("../utils/apiResponse");
 
-// ==========================
+
 exports.addCoach = async (req, res) => {
 
   const {
@@ -79,9 +74,7 @@ exports.addCoach = async (req, res) => {
   }
 };
 
-// ==========================
-// Get All Coaches
-// ==========================
+
 exports.getAllCoaches = async (req, res) => {
   try {
     const result = await pool.query(
@@ -109,9 +102,8 @@ exports.getAllCoaches = async (req, res) => {
     );
   }
 };
-// ==========================
-// Get Coach By ID
-// ==========================
+
+
 exports.getCoachById = async (req, res) => {
   const { id } = req.params;
 
@@ -164,9 +156,8 @@ exports.getCoachById = async (req, res) => {
   }
 };
 
-// ==========================
-// Update Coach
-// ==========================
+
+
 exports.updateCoach = async (req, res) => {
   const { id } = req.params;
 
@@ -282,9 +273,8 @@ exports.updateCoach = async (req, res) => {
     );
   }
 };
-// ==========================
-// Delete Coach
-// ==========================
+
+
 exports.deleteCoach = async (req, res) => {
   const { id } = req.params;
 
@@ -336,9 +326,8 @@ exports.deleteCoach = async (req, res) => {
   }
 };
 
-// ==========================
-// Search Coaches
-// ==========================
+
+
 exports.searchCoaches = async (req, res) => {
   const { keyword } = req.query;
 

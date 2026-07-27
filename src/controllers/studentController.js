@@ -134,10 +134,6 @@ exports.createStudentAdmission = async (req, res) => {
 };
 
 
-
-// ==========================
-// Get All Students
-// ==========================
 exports.getAllStudents = async (req, res) => {
 
   try {
@@ -175,10 +171,6 @@ exports.getAllStudents = async (req, res) => {
 };
 
 
-
-// ==========================
-// Get Student By ID
-// ==========================
 exports.getStudentById = async (req, res) => {
 
   const { student_id } = req.params;
@@ -243,10 +235,6 @@ exports.getStudentById = async (req, res) => {
 };
 
 
-
-// ==========================
-// Update Student
-// ==========================
 exports.updateStudent = async (req, res) => {
   const { student_id } = req.params;
 
@@ -384,10 +372,6 @@ exports.updateStudent = async (req, res) => {
 };
 
 
-
-// ==========================
-// Delete Student
-// ==========================
 exports.deleteStudent = async (req, res) => {
 
   const { student_id } = req.params;
@@ -451,10 +435,6 @@ exports.deleteStudent = async (req, res) => {
 };
 
 
-
-// ==========================
-// Search Students
-// ==========================
 exports.searchStudents = async (req, res) => {
   const { keyword } = req.query;
 

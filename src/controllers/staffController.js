@@ -1,12 +1,6 @@
-
-
-// ==========================
-// Add Staff
-
 const pool = require("../config/dbConfig");
 const { sendErrorResponse, sendSuccessResponse } = require("../utils/apiResponse");
 
-// ==========================
 exports.addStaff = async (req, res) => {
   const {
     full_name,
@@ -79,9 +73,6 @@ exports.addStaff = async (req, res) => {
   }
 };
 
-// ==========================
-// Get All Staff
-// ==========================
 exports.getAllStaff = async (req, res) => {
   try {
     const result = await pool.query(
@@ -110,9 +101,7 @@ exports.getAllStaff = async (req, res) => {
   }
 };
 
-// ==========================
-// Get Staff By ID
-// ==========================
+
 exports.getStaffById = async (req, res) => {
   const { id } = req.params;
 
@@ -165,9 +154,7 @@ exports.getStaffById = async (req, res) => {
   }
 };
 
-// ==========================
-// Update Staff
-// ==========================
+
 exports.updateStaff = async (req, res) => {
   const { id } = req.params;
 
@@ -283,9 +270,9 @@ exports.updateStaff = async (req, res) => {
     );
   }
 };
-// ==========================
-// Delete Staff
-// ==========================
+
+
+
 exports.deleteStaff = async (req, res) => {
   const { id } = req.params;
 
@@ -337,9 +324,8 @@ exports.deleteStaff = async (req, res) => {
   }
 };
 
-// ==========================
-// Search Staff
-// ==========================
+
+
 exports.searchStaff = async (req, res) => {
   const { keyword } = req.query;
 

@@ -5,18 +5,15 @@ const { getAllApplications, getApplicationById, updateApplication, deleteApplica
 
 const oneOnOneRouter = express.Router();
 
-// Protect all one-on-one routes
 oneOnOneRouter.use(verifyToken);
 
 
-// Apply one-on-one training
 oneOnOneRouter.post(
   "/",
   validateRequestBody,
   applyOneOnOne
 );
 
-// Renew existing one-on-one training
 oneOnOneRouter.post(
   "/renew",
   validateRequestBody,
@@ -28,29 +25,22 @@ oneOnOneRouter.get(
   getStudentApplications
 );
 
-// Get all applications
 oneOnOneRouter.get(
   "/",
   getAllApplications
 );
 
-
-// Get application by ID
 oneOnOneRouter.get(
   "/:application_id",
   getApplicationById
 );
 
-
-// Update application
 oneOnOneRouter.patch(
   "/:application_id",
   validateRequestBody,
   updateApplication
 );
 
-
-// Delete application
 oneOnOneRouter.delete(
   "/:application_id",
   deleteApplication

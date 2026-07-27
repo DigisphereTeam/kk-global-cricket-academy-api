@@ -15,32 +15,24 @@ const groundBookingRouter = express.Router();
 // );
 
 
-// Protect all student routes
 groundBookingRouter.use(verifyToken);
 
-// Create ground booking
 groundBookingRouter.post(
   "/",
   validateRequestBody,
   createGroundBooking
 );
 
-
-// Get all ground bookings
 groundBookingRouter.get(
   "/",
   getAllGroundBookings
 );
 
-
-// Get booking by ID
 groundBookingRouter.get(
   "/:booking_id",
   getGroundBookingById
 );
 
-
-// Update booking
 groundBookingRouter.put(
   "/:booking_id",
   validateRequestBody,

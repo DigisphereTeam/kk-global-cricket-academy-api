@@ -160,10 +160,6 @@ exports.createGroundBooking = async (req, res) => {
 };
 
 
-
-// ==========================
-// Get All Ground Bookings
-// ==========================
 exports.getAllGroundBookings = async (req, res) => {
 
     try {
@@ -201,10 +197,6 @@ exports.getAllGroundBookings = async (req, res) => {
 };
 
 
-
-// ==========================
-// Get Ground Booking By ID
-// ==========================
 exports.getGroundBookingById = async (req, res) => {
 
     const { booking_id } = req.params;

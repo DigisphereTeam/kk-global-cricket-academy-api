@@ -1,7 +1,7 @@
 const pool = require("../config/dbConfig");
 const { sendErrorResponse, sendSuccessResponse } = require("../utils/apiResponse");
 
-// ==========================
+
 exports.applyOneOnOne = async (req, res) => {
   const {
     student_id,
@@ -103,9 +103,7 @@ exports.applyOneOnOne = async (req, res) => {
   }
 };
 
-// ==========================
-// Renew One-on-One Training
-// ==========================
+
 exports.renewOneOnOne = async (req, res) => {
 
   const {
@@ -229,9 +227,7 @@ exports.renewOneOnOne = async (req, res) => {
   }
 };
 
-// ==========================
-// Get All Applications
-// ==========================
+
 exports.getAllApplications = async (req, res) => {
 
   try {
@@ -294,9 +290,8 @@ exports.getAllApplications = async (req, res) => {
 
 };
 
-// ==========================
-// Get Student One-on-One Applications
-// ==========================
+
+
 exports.getStudentApplications = async (req, res) => {
 
   const { student_id } = req.params;
@@ -406,9 +401,8 @@ exports.getStudentApplications = async (req, res) => {
 
 };
 
-// ==========================
-// Get Application By ID
-// ==========================
+
+
 exports.getApplicationById = async (req, res) => {
 
   const { application_id } = req.params;
@@ -502,9 +496,6 @@ exports.getApplicationById = async (req, res) => {
 
 
 
-// ==========================
-// Update Application
-// ==========================
 exports.updateApplication = async (req, res) => {
 
   const { application_id } = req.params;
@@ -650,10 +641,6 @@ exports.updateApplication = async (req, res) => {
 };
 
 
-
-// ==========================
-// Delete Application
-// ==========================
 exports.deleteApplication = async (req, res) => {
 
   const { application_id } = req.params;
