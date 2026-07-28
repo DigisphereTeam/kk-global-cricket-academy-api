@@ -1,4 +1,3 @@
-
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { sendErrorResponse, sendSuccessResponse } = require("../utils/apiResponse");
@@ -25,7 +24,7 @@ exports.signUp = async (req, res) => {
     return sendErrorResponse(res, 400, "Password is required");
   }
 
-  const allowedRoles = ["PRIMARY"]; // "ADMIN"
+  const allowedRoles = ["ADMIN"];
 
   if (role && !allowedRoles.includes(role.toUpperCase())) {
     return sendErrorResponse(

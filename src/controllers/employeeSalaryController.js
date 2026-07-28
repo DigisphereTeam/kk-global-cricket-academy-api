@@ -106,8 +106,10 @@ exports.createEmployeeSalary = async (req, res) => {
 };
 
 exports.getEmployeeSalaries = async (req, res) => {
+  const { employee_type } = req.query;
+
   try {
-    const result = await pool.query(`
+    let query = `
       SELECT
         es.salary_id,
         es.staff_id,
@@ -141,9 +143,19 @@ exports.getEmployeeSalaries = async (req, res) => {
 
       LEFT JOIN tbl_coach c
         ON es.coach_id = c.coach_id
+    `;
 
-      ORDER BY es.created_at DESC
-    `);
+    const params = [];
+
+    if (employee_type === "Staff") {
+      query += ` WHERE es.staff_id IS NOT NULL`;
+    } else if (employee_type === "Coach") {
+      query += ` WHERE es.coach_id IS NOT NULL`;
+    }
+
+    query += ` ORDER BY es.created_at DESC`;
+
+    const result = await pool.query(query, params);
 
     return sendSuccessResponse(
       res,
