@@ -25,13 +25,13 @@ exports.signUp = async (req, res) => {
     return sendErrorResponse(res, 400, "Password is required");
   }
 
-  const allowedRoles = ["PRIMARY", "ADMIN"];
+  const allowedRoles = ["PRIMARY"]; // "ADMIN"
 
   if (role && !allowedRoles.includes(role.toUpperCase())) {
     return sendErrorResponse(
       res,
       400,
-      "Invalid role. Allowed roles are PRIMARY and ADMIN"
+      "Invalid role."
     );
   }
 

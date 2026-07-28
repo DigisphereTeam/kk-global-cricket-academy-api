@@ -266,6 +266,7 @@ exports.updateStudent = async (req, res) => {
       "mother_phone",
       "contact_name",
       "relation",
+      "batch",
       "contact_phone",
       "blood_group",
       "allergies",
