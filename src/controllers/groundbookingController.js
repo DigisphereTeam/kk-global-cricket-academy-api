@@ -151,8 +151,7 @@ exports.createGroundBooking = async (req, res) => {
         return sendErrorResponse(
             res,
             500,
-            "Internal Server Error",
-            error.message
+            error.message || "Internal Server Error"
         );
 
     }
@@ -188,8 +187,7 @@ exports.getAllGroundBookings = async (req, res) => {
         return sendErrorResponse(
             res,
             500,
-            "Internal Server Error",
-            error.message
+            error.message || "Internal Server Error"
         );
 
     }
@@ -247,8 +245,7 @@ exports.getGroundBookingById = async (req, res) => {
         return sendErrorResponse(
             res,
             500,
-            "Internal Server Error",
-            error.message
+            error.message || "Internal Server Error"
         );
 
     }
@@ -375,8 +372,7 @@ exports.updateGroundBooking = async (req, res) => {
         return sendErrorResponse(
             res,
             500,
-            "Internal Server Error",
-            error.message
+            error.message || "Internal Server Error"
         );
 
     }
@@ -432,8 +428,7 @@ exports.deleteGroundBooking = async (req, res) => {
         return sendErrorResponse(
             res,
             500,
-            "Internal Server Error",
-            error.message
+            error.message || "Internal Server Error"
         );
 
     }

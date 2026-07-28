@@ -96,8 +96,7 @@ exports.applyOneOnOne = async (req, res) => {
     return sendErrorResponse(
       res,
       500,
-      "Internal Server Error",
-      error.message
+      error.message || "Internal Server Error"
     );
 
   }
@@ -220,8 +219,7 @@ exports.renewOneOnOne = async (req, res) => {
     return sendErrorResponse(
       res,
       500,
-      "Internal Server Error",
-      error.message
+      error.message || "Internal Server Error"
     );
 
   }
@@ -282,8 +280,7 @@ exports.getAllApplications = async (req, res) => {
     return sendErrorResponse(
       res,
       500,
-      "Internal Server Error",
-      error.message
+      error.message || "Internal Server Error"
     );
 
   }
@@ -393,8 +390,7 @@ exports.getStudentApplications = async (req, res) => {
     return sendErrorResponse(
       res,
       500,
-      "Internal Server Error",
-      error.message
+      error.message || "Internal Server Error"
     );
 
   }
@@ -486,8 +482,7 @@ exports.getApplicationById = async (req, res) => {
     return sendErrorResponse(
       res,
       500,
-      "Internal Server Error",
-      error.message
+      error.message || "Internal Server Error"
     );
 
   }
@@ -702,8 +697,7 @@ exports.deleteApplication = async (req, res) => {
     return sendErrorResponse(
       res,
       500,
-      "Internal Server Error",
-      error.message
+      error.message || "Internal Server Error"
     );
 
   }

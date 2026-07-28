@@ -76,8 +76,7 @@ exports.createEvent = async (req, res) => {
     return sendErrorResponse(
       res,
       500,
-      "Internal Server Error",
-      error.message
+      error.message || "Internal Server Error"
     );
   }
 };
@@ -117,8 +116,7 @@ exports.getAllEvents = async (req, res) => {
     return sendErrorResponse(
       res,
       500,
-      "Internal Server Error",
-      error.message
+      error.message || "Internal Server Error"
     );
   }
 };
@@ -184,8 +182,7 @@ exports.getEventById = async (req, res) => {
     return sendErrorResponse(
       res,
       500,
-      "Internal Server Error",
-      error.message
+      error.message || "Internal Server Error"
     );
   }
 };
@@ -317,8 +314,7 @@ exports.updateEvent = async (req, res) => {
     return sendErrorResponse(
       res,
       500,
-      "Internal Server Error",
-      error.message
+      error.message || "Internal Server Error"
     );
   }
 };
@@ -384,8 +380,7 @@ exports.deleteEvent = async (req, res) => {
     return sendErrorResponse(
       res,
       500,
-      "Internal Server Error",
-      error.message
+      error.message || "Internal Server Error"
     );
 
   }
