@@ -77,21 +77,36 @@ exports.addCoach = async (req, res) => {
 
 
 exports.getAllCoaches = async (req, res) => {
+
   try {
-    const result = await pool.query(
-      `
-      SELECT *
-      FROM tbl_coach
-      ORDER BY coach_id DESC
-      `
-    );
+    const [result, statistics] = await Promise.all([
+      pool.query(`
+        SELECT *
+        FROM tbl_coach
+        ORDER BY coach_id DESC
+      `),
+
+      pool.query(`
+        SELECT
+          COUNT(*) AS total_trainers,
+          COUNT(*) AS active_trainers,
+          COALESCE(ROUND(AVG(rating), 1), 0) AS average_rating,
+          COALESCE(ROUND(AVG(experience::NUMERIC), 1),0) AS average_experience
+        FROM tbl_coach
+      `),
+    ]);
 
     return sendSuccessResponse(
       res,
       200,
       "Coaches retrieved successfully.",
       {
-        total_coaches: result.rowCount,
+        statistics: {
+          total_trainers: Number(statistics.rows[0].total_trainers),
+          active_trainers: Number(statistics.rows[0].active_trainers),
+          average_rating: Number(statistics.rows[0].average_rating),
+          average_experience: Number(statistics.rows[0].average_experience),
+        },
         coaches: result.rows,
       }
     );
@@ -226,6 +241,7 @@ exports.updateCoach = async (req, res) => {
       "experience",
       "salary",
       "join_date",
+      "rating"
     ];
 
     const updates = [];

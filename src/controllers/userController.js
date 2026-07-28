@@ -1,8 +1,7 @@
-const pool = require("../config/db");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { sendErrorResponse, sendSuccessResponse } = require("../utils/apiResponse");
-
+const pool = require("../config/dbConfig");
 
 exports.registerPrimary = async (req, res) => {
   const {
@@ -127,11 +126,11 @@ exports.getUsers = async (req, res) => {
 exports.getUserById = async (req, res) => {
   const { user_id } = req.params;
 
-  if (!user_id) {
+  if (!user_id || isNaN(user_id) || Number(user_id) <= 0) {
     return sendErrorResponse(
       res,
       400,
-      "User ID is required."
+      "Invalid user ID."
     );
   }
 
@@ -178,40 +177,27 @@ exports.getUserById = async (req, res) => {
 
 exports.updateUser = async (req, res) => {
   const { user_id } = req.params;
+  const { full_name, email, phone_number } = req.body;
 
-  const {
-    full_name,
-    email,
-    phone_number,
-  } = req.body;
-
-  if (!user_id) {
+  if (!user_id || isNaN(user_id) || Number(user_id) <= 0) {
     return sendErrorResponse(
       res,
       400,
-      "User ID is required."
-    );
-  }
-
-  if (!full_name || !email || !phone_number) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Full name, email and phone number are required."
+      "Invalid user ID."
     );
   }
 
   try {
-    const checkUser = await pool.query(
+    const user = await pool.query(
       `
-      SELECT user_id
+      SELECT *
       FROM tbl_users
       WHERE user_id = $1
       `,
       [user_id]
     );
 
-    if (checkUser.rows.length === 0) {
+    if (user.rowCount === 0) {
       return sendErrorResponse(
         res,
         404,
@@ -226,10 +212,14 @@ exports.updateUser = async (req, res) => {
       WHERE (email = $1 OR phone_number = $2)
       AND user_id <> $3
       `,
-      [email, phone_number, user_id]
+      [
+        email || user.rows[0].email,
+        phone_number || user.rows[0].phone_number,
+        user_id,
+      ]
     );
 
-    if (existingUser.rows.length > 0) {
+    if (existingUser.rowCount > 0) {
       return sendErrorResponse(
         res,
         409,
@@ -241,9 +231,10 @@ exports.updateUser = async (req, res) => {
       `
       UPDATE tbl_users
       SET
-        full_name = $1,
-        email = $2,
-        phone_number = $3
+        full_name = COALESCE($1, full_name),
+        email = COALESCE($2, email),
+        phone_number = COALESCE($3, phone_number),
+        updated_at = CURRENT_TIMESTAMP
       WHERE user_id = $4
       RETURNING
         user_id,
@@ -251,7 +242,8 @@ exports.updateUser = async (req, res) => {
         email,
         phone_number,
         role,
-        created_at
+        created_at,
+        updated_at
       `,
       [
         full_name,
@@ -268,8 +260,6 @@ exports.updateUser = async (req, res) => {
       result.rows[0]
     );
   } catch (error) {
-    console.error(error);
-
     return sendErrorResponse(
       res,
       500,
@@ -281,11 +271,11 @@ exports.updateUser = async (req, res) => {
 exports.deleteUser = async (req, res) => {
   const { user_id } = req.params;
 
-  if (!user_id) {
+  if (!user_id || isNaN(user_id) || Number(user_id) <= 0) {
     return sendErrorResponse(
       res,
       400,
-      "User ID is required."
+      "Invalid user ID."
     );
   }
 

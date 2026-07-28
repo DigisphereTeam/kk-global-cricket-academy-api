@@ -103,21 +103,36 @@ exports.addStaff = async (req, res) => {
 };
 
 exports.getAllStaff = async (req, res) => {
+
   try {
-    const result = await pool.query(
-      `
-      SELECT *
-      FROM tbl_staff
-      ORDER BY staff_id DESC
-      `
-    );
+    const [result, statistics] = await Promise.all([
+      pool.query(`
+        SELECT *
+        FROM tbl_staff
+        ORDER BY staff_id DESC
+      `),
+
+      pool.query(`
+        SELECT
+          COUNT(*) AS total_staff,
+          COUNT(*) AS active_staff,
+          COUNT(DISTINCT department) AS total_departments,
+          0 AS leave_staff
+        FROM tbl_staff
+      `),
+    ]);
 
     return sendSuccessResponse(
       res,
       200,
       "Staff retrieved successfully.",
       {
-        total_staff: result.rowCount,
+        statistics: {
+          total_staff: Number(statistics.rows[0].total_staff),
+          active_staff: Number(statistics.rows[0].active_staff),
+          total_departments: Number(statistics.rows[0].total_departments),
+          leave_staff: Number(statistics.rows[0].leave_staff),
+        },
         staff: result.rows,
       }
     );
