@@ -8,8 +8,6 @@ exports.createEvent = async (req, res) => {
     event_date,
     venue,
     total_teams,
-    winner,
-    status,
     description,
   } = req.body;
 
@@ -44,13 +42,11 @@ exports.createEvent = async (req, res) => {
         event_date,
         venue,
         total_teams,
-        winner,
-        status,
         description
       )
       VALUES
       (
-        $1,$2,$3,$4,$5,$6,$7,$8
+        $1,$2,$3,$4,$5,$6
       )
       RETURNING *
       `,
@@ -60,8 +56,6 @@ exports.createEvent = async (req, res) => {
         event_date,
         venue,
         total_teams,
-        winner,
-        status,
         description,
       ]
     );
@@ -84,31 +78,47 @@ exports.createEvent = async (req, res) => {
 
 exports.getAllEvents = async (req, res) => {
   try {
-    const events = await pool.query(
-      `
-      SELECT
-        event_id,
-        event_name,
-        event_type,
-        event_date,
-        venue,
-        total_teams,
-        winner,
-        status,
-        description,
-        created_at,
-        updated_at
-      FROM tbl_events
-      ORDER BY event_date DESC, event_id DESC
-      `
-    );
+    const [events, statistics] = await Promise.all([
+      pool.query(
+        `
+        SELECT
+          event_id,
+          event_name,
+          event_type,
+          event_date,
+          venue,
+          total_teams,
+          winner,
+          status,
+          description,
+          created_at,
+          updated_at
+        FROM tbl_events
+        ORDER BY event_date DESC, event_id DESC
+        `
+      ),
+
+      pool.query(`
+        SELECT
+          COUNT(*) AS total_events,
+          COUNT(*) FILTER (WHERE LOWER(status) = 'upcoming') AS upcoming_events,
+          COUNT(*) FILTER (WHERE LOWER(status) = 'completed') AS completed_events,
+          COALESCE(SUM(total_teams), 0) AS total_teams
+        FROM tbl_events
+      `),
+    ]);
 
     return sendSuccessResponse(
       res,
       200,
       "Events fetched successfully.",
       {
-        total_events: events.rowCount,
+        statistics: {
+          total_events: Number(statistics.rows[0].total_events),
+          upcoming_events: Number(statistics.rows[0].upcoming_events),
+          completed_events: Number(statistics.rows[0].completed_events),
+          total_teams: Number(statistics.rows[0].total_teams),
+        },
         events: events.rows,
       }
     );
@@ -206,6 +216,24 @@ exports.updateEvent = async (req, res) => {
       res,
       400,
       "Event ID must be a positive number."
+    );
+  }
+
+  const allowedStatuses = [
+    "Upcoming",
+    "Ongoing",
+    "Completed",
+    "Cancelled",
+  ];
+
+  if (
+    req.body.status !== undefined &&
+    !allowedStatuses.includes(req.body.status)
+  ) {
+    return sendErrorResponse(
+      res,
+      400,
+      `Invalid status. Allowed values are: ${allowedStatuses.join(", ")}.`
     );
   }
 
