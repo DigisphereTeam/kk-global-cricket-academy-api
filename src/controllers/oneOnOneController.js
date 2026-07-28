@@ -1,6 +1,8 @@
 const pool = require("../config/dbConfig");
-const { sendErrorResponse, sendSuccessResponse } = require("../utils/apiResponse");
-
+const {
+  sendErrorResponse,
+  sendSuccessResponse,
+} = require("../utils/apiResponse");
 
 exports.applyOneOnOne = async (req, res) => {
   const {
@@ -14,47 +16,61 @@ exports.applyOneOnOne = async (req, res) => {
   } = req.body;
 
   try {
+    if (
+      !student_id ||
+      !coach_id ||
+      !focus_area ||
+      !payment_type ||
+      fee_amount == null ||
+      !preferred_slot
+    ) {
+      return sendErrorResponse(
+        res,
+        400,
+        "All required fields must be provided.",
+      );
+    }
+
+    if (fee_amount <= 0) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Fee amount must be greater than zero.",
+      );
+    }
 
     const [student, coach] = await Promise.all([
-      pool.query(
-        `
-        SELECT student_id
-        FROM tbl_students
-        WHERE student_id = $1
-        `,
-        [student_id]
-      ),
-
-      pool.query(
-        `
-        SELECT coach_id
-        FROM tbl_coach
-        WHERE coach_id = $1
-        `,
-        [coach_id]
-      ),
+      pool.query(`SELECT 1 FROM tbl_students WHERE student_id = $1`, [
+        student_id,
+      ]),
+      pool.query(`SELECT 1 FROM tbl_coach WHERE coach_id = $1`, [coach_id]),
     ]);
 
-
     if (student.rowCount === 0) {
-      return sendErrorResponse(
-        res,
-        404,
-        "Student not found."
-      );
+      return sendErrorResponse(res, 404, "Student not found.");
     }
-
 
     if (coach.rowCount === 0) {
+      return sendErrorResponse(res, 404, "Coach not found.");
+    }
+
+    const existingApplication = await pool.query(
+      `SELECT 1
+       FROM tbl_one_on_one_applications
+       WHERE student_id = $1
+       AND coach_id = $2
+       AND preferred_slot = $3`,
+      [student_id, coach_id, preferred_slot],
+    );
+
+    if (existingApplication.rowCount > 0) {
       return sendErrorResponse(
         res,
-        404,
-        "Coach not found."
+        409,
+        "An application already exists for the selected coach and preferred slot.",
       );
     }
 
-
-    // Insert Application
     const application = await pool.query(
       `
       INSERT INTO tbl_one_on_one_applications
@@ -74,38 +90,30 @@ exports.applyOneOnOne = async (req, res) => {
       [
         student_id,
         coach_id,
-        focus_area,
+        focus_area.trim(),
         payment_type,
         fee_amount,
         preferred_slot,
         remarks,
-      ]
+      ],
     );
-
 
     return sendSuccessResponse(
       res,
       201,
       "One-on-one training application submitted successfully.",
-      application.rows[0]
+      application.rows[0],
     );
-
-
-  } catch (error) {
-
+    } catch (error) {
     return sendErrorResponse(
       res,
       500,
-      "Internal Server Error",
-      error.message
+      error.message || "Internal Server Error",
     );
-
-  }
+    }
 };
 
-
 exports.renewOneOnOne = async (req, res) => {
-
   const {
     student_id,
     coach_id,
@@ -116,9 +124,7 @@ exports.renewOneOnOne = async (req, res) => {
     remarks,
   } = req.body;
 
-
   try {
-
     const [student, coach] = await Promise.all([
       pool.query(
         `
@@ -126,7 +132,7 @@ exports.renewOneOnOne = async (req, res) => {
         FROM tbl_students
         WHERE student_id = $1
         `,
-        [student_id]
+        [student_id],
       ),
 
       pool.query(
@@ -135,28 +141,17 @@ exports.renewOneOnOne = async (req, res) => {
         FROM tbl_coach
         WHERE coach_id = $1
         `,
-        [coach_id]
+        [coach_id],
       ),
     ]);
 
-
     if (student.rowCount === 0) {
-      return sendErrorResponse(
-        res,
-        404,
-        "Student not found."
-      );
+      return sendErrorResponse(res, 404, "Student not found.");
     }
-
 
     if (coach.rowCount === 0) {
-      return sendErrorResponse(
-        res,
-        404,
-        "Coach not found."
-      );
+      return sendErrorResponse(res, 404, "Coach not found.");
     }
-
 
     // Check Previous New Application
     const previousApplication = await pool.query(
@@ -166,15 +161,14 @@ exports.renewOneOnOne = async (req, res) => {
       WHERE student_id = $1
       LIMIT 1
       `,
-      [student_id]
+      [student_id],
     );
-
 
     if (previousApplication.rowCount === 0) {
       return sendErrorResponse(
         res,
         400,
-        "Student does not have an active one-on-one application to renew."
+        "Student does not have an active one-on-one application to renew.",
       );
     }
 
@@ -204,34 +198,22 @@ exports.renewOneOnOne = async (req, res) => {
         fee_amount,
         preferred_slot,
         remarks,
-      ]
+      ],
     );
 
     return sendSuccessResponse(
       res,
       201,
       "One-on-one training renewed successfully.",
-      renewal.rows[0]
+      renewal.rows[0],
     );
-
-
   } catch (error) {
-
-    return sendErrorResponse(
-      res,
-      500,
-      "Internal Server Error",
-      error.message
-    );
-
+    return sendErrorResponse(res, 500, "Internal Server Error", error.message);
   }
 };
 
-
 exports.getAllApplications = async (req, res) => {
-
   try {
-
     const applications = await pool.query(
       `
       SELECT
@@ -262,59 +244,30 @@ exports.getAllApplications = async (req, res) => {
       ON oa.coach_id = c.coach_id
 
       ORDER BY oa.application_id DESC
-      `
+      `,
     );
 
-
-    return sendSuccessResponse(
-      res,
-      200,
-      "Applications fetched successfully.",
-      {
-        total_applications: applications.rowCount,
-        applications: applications.rows,
-      }
-    );
-
-
+    return sendSuccessResponse(res, 200, "Applications fetched successfully.", {
+      total_applications: applications.rowCount,
+      applications: applications.rows,
+    });
   } catch (error) {
-
-    return sendErrorResponse(
-      res,
-      500,
-      "Internal Server Error",
-      error.message
-    );
-
+    return sendErrorResponse(res, 500, "Internal Server Error", error.message);
   }
-
 };
 
-
-
 exports.getStudentApplications = async (req, res) => {
-
   const { student_id } = req.params;
 
   if (!student_id) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Student ID is required."
-    );
+    return sendErrorResponse(res, 400, "Student ID is required.");
   }
 
   if (isNaN(student_id) || Number(student_id) <= 0) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Invalid student ID."
-    );
+    return sendErrorResponse(res, 400, "Invalid student ID.");
   }
 
-
   try {
-
     // Check Student
     const student = await pool.query(
       `
@@ -322,19 +275,12 @@ exports.getStudentApplications = async (req, res) => {
       FROM tbl_students
       WHERE student_id = $1
       `,
-      [student_id]
+      [student_id],
     );
 
-
     if (student.rowCount === 0) {
-      return sendErrorResponse(
-        res,
-        404,
-        "Student not found."
-      );
+      return sendErrorResponse(res, 404, "Student not found.");
     }
-
-
 
     // Get Student Applications
     const applications = await pool.query(
@@ -373,9 +319,8 @@ exports.getStudentApplications = async (req, res) => {
 
       ORDER BY oa.application_id DESC
       `,
-      [student_id]
+      [student_id],
     );
-
 
     return sendSuccessResponse(
       res,
@@ -384,35 +329,18 @@ exports.getStudentApplications = async (req, res) => {
       {
         total_applications: applications.rowCount,
         applications: applications.rows,
-      }
+      },
     );
-
-
   } catch (error) {
-
-    return sendErrorResponse(
-      res,
-      500,
-      "Internal Server Error",
-      error.message
-    );
-
+    return sendErrorResponse(res, 500, "Internal Server Error", error.message);
   }
-
 };
 
-
-
 exports.getApplicationById = async (req, res) => {
-
   const { application_id } = req.params;
 
   if (!application_id || isNaN(application_id)) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Invalid application ID."
-    );
+    return sendErrorResponse(res, 400, "Invalid application ID.");
   }
 
   const applicationId = Number(application_id);
@@ -421,12 +349,11 @@ exports.getApplicationById = async (req, res) => {
     return sendErrorResponse(
       res,
       400,
-      "Application ID must be a positive number."
+      "Application ID must be a positive number.",
     );
   }
 
   try {
-
     const application = await pool.query(
       `
       SELECT
@@ -458,69 +385,36 @@ exports.getApplicationById = async (req, res) => {
 
       WHERE oa.application_id = $1
       `,
-      [application_id]
+      [application_id],
     );
 
-
     if (application.rowCount === 0) {
-
-      return sendErrorResponse(
-        res,
-        404,
-        "Application not found."
-      );
-
+      return sendErrorResponse(res, 404, "Application not found.");
     }
-
 
     return sendSuccessResponse(
       res,
       200,
       "Application fetched successfully.",
-      application.rows[0]
+      application.rows[0],
     );
-
-
   } catch (error) {
-
-    return sendErrorResponse(
-      res,
-      500,
-      "Internal Server Error",
-      error.message
-    );
-
+    return sendErrorResponse(res, 500, "Internal Server Error", error.message);
   }
-
 };
 
-
-
 exports.updateApplication = async (req, res) => {
-
   const { application_id } = req.params;
 
-
   if (!application_id) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Application ID is required"
-    );
+    return sendErrorResponse(res, 400, "Application ID is required");
   }
-
 
   if (isNaN(application_id)) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Invalid application ID"
-    );
+    return sendErrorResponse(res, 400, "Invalid application ID");
   }
 
-
   try {
-
     const allowedFields = [
       "coach_id",
       "focus_area",
@@ -530,30 +424,21 @@ exports.updateApplication = async (req, res) => {
       "remarks",
     ];
 
-
     const updates = [];
     const values = [];
 
     let index = 1;
 
-
     for (const field of allowedFields) {
-
       if (req.body[field] !== undefined) {
-        updates.push(
-          `${field} = $${index}`
-        );
+        updates.push(`${field} = $${index}`);
         values.push(req.body[field]);
         index++;
       }
     }
 
     if (updates.length === 0) {
-      return sendErrorResponse(
-        res,
-        400,
-        "No fields provided to update"
-      );
+      return sendErrorResponse(res, 400, "No fields provided to update");
     }
 
     // Check application exists
@@ -563,46 +448,30 @@ exports.updateApplication = async (req, res) => {
       FROM tbl_one_on_one_applications
       WHERE application_id = $1
       `,
-      [application_id]
+      [application_id],
     );
 
     if (existingApplication.rowCount === 0) {
-      return sendErrorResponse(
-        res,
-        404,
-        "Application not found"
-      );
-
+      return sendErrorResponse(res, 404, "Application not found");
     }
 
     // Check coach if updating coach_id
     if (req.body.coach_id !== undefined) {
-
       const coach = await pool.query(
         `
         SELECT coach_id
         FROM tbl_coach
         WHERE coach_id = $1
         `,
-        [req.body.coach_id]
+        [req.body.coach_id],
       );
 
-
       if (coach.rowCount === 0) {
-
-        return sendErrorResponse(
-          res,
-          404,
-          "Coach not found"
-        );
-
+        return sendErrorResponse(res, 404, "Coach not found");
       }
-
     }
 
-    updates.push(
-      "updated_at = CURRENT_TIMESTAMP"
-    );
+    updates.push("updated_at = CURRENT_TIMESTAMP");
 
     // Add application_id for WHERE condition
     values.push(application_id);
@@ -614,43 +483,29 @@ exports.updateApplication = async (req, res) => {
       WHERE application_id = $${index}
       RETURNING *
       `,
-      values
+      values,
     );
-
-
 
     return sendSuccessResponse(
       res,
       200,
       "One-on-one application updated successfully",
-      result.rows[0]
+      result.rows[0],
     );
-
-
-
   } catch (error) {
-
     return sendErrorResponse(
       res,
       500,
-      error.message || "Internal Server Error"
+      error.message || "Internal Server Error",
     );
-
   }
-
 };
 
-
 exports.deleteApplication = async (req, res) => {
-
   const { application_id } = req.params;
 
   if (!application_id || isNaN(application_id)) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Invalid application ID."
-    );
+    return sendErrorResponse(res, 400, "Invalid application ID.");
   }
 
   const applicationId = Number(application_id);
@@ -659,53 +514,28 @@ exports.deleteApplication = async (req, res) => {
     return sendErrorResponse(
       res,
       400,
-      "Application ID must be a positive number."
+      "Application ID must be a positive number.",
     );
   }
 
-
   try {
-
     const deleted = await pool.query(
       `
       DELETE FROM tbl_one_on_one_applications
       WHERE application_id = $1
       RETURNING application_id
       `,
-      [application_id]
+      [application_id],
     );
-
 
     if (deleted.rowCount === 0) {
-
-      return sendErrorResponse(
-        res,
-        404,
-        "Application not found."
-      );
-
+      return sendErrorResponse(res, 404, "Application not found.");
     }
 
-
-    return sendSuccessResponse(
-      res,
-      200,
-      "Application deleted successfully.",
-      {
-        application_id: deleted.rows[0].application_id,
-      }
-    );
-
-
+    return sendSuccessResponse(res, 200, "Application deleted successfully.", {
+      application_id: deleted.rows[0].application_id,
+    });
   } catch (error) {
-
-    return sendErrorResponse(
-      res,
-      500,
-      "Internal Server Error",
-      error.message
-    );
-
+    return sendErrorResponse(res, 500, "Internal Server Error", error.message);
   }
-
 };

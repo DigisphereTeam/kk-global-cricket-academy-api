@@ -3,7 +3,6 @@ const { sendErrorResponse, sendSuccessResponse } = require("../utils/apiResponse
 
 
 exports.addCoach = async (req, res) => {
-
   const {
     full_name,
     phone_number,
@@ -14,45 +13,47 @@ exports.addCoach = async (req, res) => {
   } = req.body;
 
   try {
+    if (
+      !full_name ||
+      !phone_number ||
+      !specialization ||
+      experience == null ||
+      salary == null ||
+      !join_date
+    ) {
+      return sendErrorResponse(res, 400, "All fields are required.");
+    }
+
+    if (!/^[6-9]\d{9}$/.test(phone_number)) {
+      return sendErrorResponse(res, 400, "Invalid phone number.");
+    }
+
+    if (experience < 0 || salary <= 0) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Experience or salary is invalid."
+      );
+    }
+
     const existingCoach = await pool.query(
-      `
-      SELECT 1
-      FROM tbl_coach
-      WHERE phone_number = $1
-      LIMIT 1
-      `,
+      `SELECT 1 FROM tbl_coach WHERE phone_number = $1`,
       [phone_number]
     );
 
     if (existingCoach.rowCount > 0) {
-      return sendErrorResponse(
-        res,
-        409,
-        "Phone number already exists"
-      );
+      return sendErrorResponse(res, 409, "Phone number already exists.");
     }
 
     const result = await pool.query(
-      `
-      INSERT INTO tbl_coach
-      (
-        full_name,
-        phone_number,
-        specialization,
-        experience,
-        salary,
-        join_date
-      )
-      VALUES
-      (
-        $1,$2,$3,$4,$5,$6
-      )
-      RETURNING *
-      `,
+      `INSERT INTO tbl_coach
+      (full_name, phone_number, specialization, experience, salary, join_date)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING *`,
       [
-        full_name,
+        full_name.trim(),
         phone_number,
-        specialization,
+        specialization.trim(),
         experience,
         salary,
         join_date,

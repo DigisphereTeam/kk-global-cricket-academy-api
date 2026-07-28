@@ -12,7 +12,37 @@ exports.addStaff = async (req, res) => {
   } = req.body;
 
   try {
-    // Check duplicate phone number
+    if (
+      !full_name ||
+      !phone_number ||
+      !department ||
+      !designation ||
+      salary == null ||
+      !join_date
+    ) {
+      return sendErrorResponse(
+        res,
+        400,
+        "All required fields must be provided."
+      );
+    }
+
+    if (!/^[6-9]\d{9}$/.test(phone_number)) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Invalid phone number."
+      );
+    }
+
+    if (salary <= 0) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Salary must be greater than zero."
+      );
+    }
+
     const existingStaff = await pool.query(
       `
       SELECT 1
@@ -27,7 +57,7 @@ exports.addStaff = async (req, res) => {
       return sendErrorResponse(
         res,
         409,
-        "Phone number already exists"
+        "Phone number already exists."
       );
     }
 
@@ -43,16 +73,14 @@ exports.addStaff = async (req, res) => {
         join_date
       )
       VALUES
-      (
-        $1,$2,$3,$4,$5,$6
-      )
+      ($1,$2,$3,$4,$5,$6)
       RETURNING *
       `,
       [
-        full_name,
+        full_name.trim(),
         phone_number,
-        department,
-        designation,
+        department.trim(),
+        designation.trim(),
         salary,
         join_date,
       ]
@@ -64,6 +92,7 @@ exports.addStaff = async (req, res) => {
       "Staff added successfully.",
       result.rows[0]
     );
+
   } catch (error) {
     return sendErrorResponse(
       res,

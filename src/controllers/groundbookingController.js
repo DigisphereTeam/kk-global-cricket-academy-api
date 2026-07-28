@@ -64,8 +64,89 @@ const { sendErrorResponse, sendSuccessResponse } = require("../utils/apiResponse
 // };
 
 exports.createGroundBooking = async (req, res) => {
+  const {
+    customer_name,
+    customer_phone,
+    ground_name,
+    purpose,
+    booking_date,
+    time_slot,
+    payment_type,
+    total_amount,
+    advance_paid,
+  } = req.body;
 
-    const {
+  try {
+
+    if (
+      !customer_name ||
+      !customer_phone ||
+      !ground_name ||
+      !purpose ||
+      !booking_date ||
+      !time_slot ||
+      !payment_type ||
+      total_amount == null ||
+      advance_paid == null
+    ) {
+      return sendErrorResponse(
+        res,
+        400,
+        "All fields are required."
+      );
+    }
+
+    if (!/^[6-9]\d{9}$/.test(customer_phone)) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Invalid customer phone number."
+      );
+    }
+
+    if (total_amount <= 0 || advance_paid < 0) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Invalid payment amount."
+      );
+    }
+
+    if (advance_paid > total_amount) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Advance amount cannot be greater than total amount."
+      );
+    }
+
+    const existingBooking = await pool.query(
+      `
+      SELECT 1
+      FROM tbl_ground_booking
+      WHERE LOWER(ground_name) = LOWER($1)
+      AND booking_date = $2
+      AND time_slot = $3
+      `,
+      [
+        ground_name.trim(),
+        booking_date,
+        time_slot,
+      ]
+    );
+
+    if (existingBooking.rowCount > 0) {
+      return sendErrorResponse(
+        res,
+        409,
+        "This ground is already booked for the selected date and time slot."
+      );
+    }
+
+    const booking = await pool.query(
+      `
+      INSERT INTO tbl_ground_booking
+      (
         customer_name,
         customer_phone,
         ground_name,
@@ -74,89 +155,39 @@ exports.createGroundBooking = async (req, res) => {
         time_slot,
         payment_type,
         total_amount,
+        advance_paid
+      )
+      VALUES
+      ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      RETURNING *
+      `,
+      [
+        customer_name.trim(),
+        customer_phone,
+        ground_name.trim(),
+        purpose.trim(),
+        booking_date,
+        time_slot,
+        payment_type,
+        total_amount,
         advance_paid,
-    } = req.body;
+      ]
+    );
 
+    return sendSuccessResponse(
+      res,
+      201,
+      "Ground booking created successfully.",
+      booking.rows[0]
+    );
 
-    try {
-
-        // Check duplicate booking
-        const existingBooking = await pool.query(
-            `
-            SELECT booking_id
-            FROM tbl_ground_booking
-            WHERE ground_name = $1
-            AND booking_date = $2
-            AND time_slot = $3
-            `,
-            [
-                ground_name,
-                booking_date,
-                time_slot,
-            ]
-        );
-
-
-        if (existingBooking.rowCount > 0) {
-            return sendErrorResponse(
-                res,
-                409,
-                "This ground is already booked for the selected date and time slot."
-            );
-        }
-
-
-
-        const booking = await pool.query(
-            `
-            INSERT INTO tbl_ground_booking
-            (
-                customer_name,
-                customer_phone,
-                ground_name,
-                purpose,
-                booking_date,
-                time_slot,
-                payment_type,
-                total_amount,
-                advance_paid
-            )
-            VALUES
-            ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-            RETURNING *
-            `,
-            [
-                customer_name,
-                customer_phone,
-                ground_name,
-                purpose,
-                booking_date,
-                time_slot,
-                payment_type,
-                total_amount,
-                advance_paid,
-            ]
-        );
-
-        return sendSuccessResponse(
-            res,
-            201,
-            "Ground booking created successfully.",
-            booking.rows[0]
-        );
-
-
-    } catch (error) {
-
-        return sendErrorResponse(
-            res,
-            500,
-            "Internal Server Error",
-            error.message
-        );
-
-    }
-
+  } catch (error) {
+    return sendErrorResponse(
+      res,
+      500,
+      error.message || "Internal Server Error"
+    );
+  }
 };
 
 

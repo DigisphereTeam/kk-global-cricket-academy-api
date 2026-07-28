@@ -31,7 +31,7 @@ exports.signUp = async (req, res) => {
     return sendErrorResponse(
       res,
       400,
-      "Invalid role. Allowed roles are PRIMARY and ADMIN"
+      "Invalid role"
     );
   }
 
