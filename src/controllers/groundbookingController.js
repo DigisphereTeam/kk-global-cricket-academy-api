@@ -192,38 +192,51 @@ exports.createGroundBooking = async (req, res) => {
 
 
 exports.getAllGroundBookings = async (req, res) => {
-
     try {
+        const [bookings, statistics] = await Promise.all([
+            pool.query(
+                `
+                SELECT *
+                FROM tbl_ground_booking
+                ORDER BY booking_id DESC
+                `
+            ),
 
-        const bookings = await pool.query(
-            `
-            SELECT *
+            pool.query(
+                `
+            SELECT
+                COUNT(*) AS total_bookings,
+                COUNT(*) FILTER ( WHERE LOWER(status) = 'confirmed') AS confirmed_bookings,
+                COUNT(*) FILTER ( WHERE LOWER(status) = 'pending' ) AS pending_bookings,
+                COUNT(*) FILTER ( WHERE LOWER(status) = 'completed' ) AS completed_bookings,
+                COUNT(*) FILTER ( WHERE booking_date >= CURRENT_DATE ) AS upcoming_bookings
             FROM tbl_ground_booking
-            ORDER BY booking_id DESC
             `
-        );
+            ),
+        ]);
 
         return sendSuccessResponse(
             res,
             200,
             "Ground bookings fetched successfully.",
             {
-                total_bookings: bookings.rowCount,
+                statistics: {
+                    total_bookings: Number(statistics.rows[0].total_bookings),
+                    confirmed_bookings: Number(statistics.rows[0].confirmed_bookings),
+                    pending_bookings: Number(statistics.rows[0].pending_bookings),
+                    upcoming_bookings: Number(statistics.rows[0].upcoming_bookings),
+                },
                 bookings: bookings.rows,
             }
         );
 
-
     } catch (error) {
-
         return sendErrorResponse(
             res,
             500,
             error.message || "Internal Server Error"
         );
-
     }
-
 };
 
 
@@ -289,29 +302,45 @@ exports.updateGroundBooking = async (req, res) => {
 
     const { booking_id } = req.params;
 
-
     if (!booking_id) {
-
         return sendErrorResponse(
             res,
             400,
             "Booking ID is required."
         );
-
     }
 
     if (isNaN(booking_id)) {
-
         return sendErrorResponse(
             res,
             400,
             "Invalid booking ID."
         );
+    }
 
+    const allowedStatuses = [
+        "Pending",
+        "Confirmed",
+        "Completed",
+        "Cancelled",
+    ];
+
+    if (req.body.status !== undefined) {
+        const isValidStatus = allowedStatuses.some(
+            (status) =>
+                status === req.body.status
+        );
+
+        if (!isValidStatus) {
+            return sendErrorResponse(
+                res,
+                400,
+                `Invalid status. Allowed values are: ${allowedStatuses.join(", ")}.`
+            );
+        }
     }
 
     try {
-
 
         const allowedFields = [
             "customer_name",
@@ -326,8 +355,6 @@ exports.updateGroundBooking = async (req, res) => {
             "status"
         ];
 
-
-
         const updates = [];
         const values = [];
 
@@ -335,15 +362,10 @@ exports.updateGroundBooking = async (req, res) => {
 
         for (const field of allowedFields) {
             if (req.body[field] !== undefined) {
-                updates.push(
-                    `${field} = $${index}`
-                );
-                values.push(
-                    req.body[field]
-                );
+                updates.push(`${field} = $${index}`);
+                values.push(req.body[field]);
                 index++;
             }
-
         }
 
         if (updates.length === 0) {
@@ -352,7 +374,6 @@ exports.updateGroundBooking = async (req, res) => {
                 400,
                 "No fields provided to update."
             );
-
         }
 
         const existingBooking = await pool.query(
@@ -371,13 +392,9 @@ exports.updateGroundBooking = async (req, res) => {
                 404,
                 "Ground booking not found."
             );
-
         }
 
-        updates.push(
-            "updated_at = CURRENT_TIMESTAMP"
-        );
-
+        updates.push("updated_at = CURRENT_TIMESTAMP");
         values.push(booking_id);
 
         const updatedBooking = await pool.query(

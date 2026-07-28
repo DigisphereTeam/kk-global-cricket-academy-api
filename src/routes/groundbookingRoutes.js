@@ -17,27 +17,13 @@ const groundBookingRouter = express.Router();
 
 groundBookingRouter.use(verifyToken);
 
-groundBookingRouter.post(
-  "/",
-  validateRequestBody,
-  createGroundBooking
-);
+groundBookingRouter.post("/", validateRequestBody, createGroundBooking);
 
-groundBookingRouter.get(
-  "/",
-  getAllGroundBookings
-);
+groundBookingRouter.get("/", getAllGroundBookings);
 
-groundBookingRouter.get(
-  "/:booking_id",
-  getGroundBookingById
-);
+groundBookingRouter.get("/:booking_id", getGroundBookingById);
 
-groundBookingRouter.put(
-  "/:booking_id",
-  validateRequestBody,
-  updateGroundBooking
-);
+groundBookingRouter.patch("/:booking_id", validateRequestBody, updateGroundBooking);
 
 
 module.exports = groundBookingRouter;
