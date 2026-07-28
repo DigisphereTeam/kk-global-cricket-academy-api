@@ -3,7 +3,6 @@ const { sendSuccessResponse, sendErrorResponse } = require("../utils/apiResponse
 
 
 exports.createStudentAdmission = async (req, res) => {
-
   const {
     admission_id,
     full_name,
@@ -32,7 +31,72 @@ exports.createStudentAdmission = async (req, res) => {
 
   try {
 
-    // Check Duplicate Student
+    if (
+      !admission_id ||
+      !full_name ||
+      !gender ||
+      age == null ||
+      !phone_number ||
+      !email ||
+      !address ||
+      !school ||
+      !playing_role ||
+      !batting_style ||
+      admission_fee == null ||
+      !father_name ||
+      !father_phone
+    ) {
+      return sendErrorResponse(
+        res,
+        400,
+        "All required fields must be provided."
+      );
+    }
+
+    if (
+      !/^[6-9]\d{9}$/.test(phone_number) ||
+      !/^[6-9]\d{9}$/.test(father_phone)
+    ) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Invalid phone number."
+      );
+    }
+
+    if (mother_phone && !/^[6-9]\d{9}$/.test(mother_phone)) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Invalid mother phone number."
+      );
+    }
+
+    if (contact_phone && !/^[6-9]\d{9}$/.test(contact_phone)) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Invalid emergency contact phone number."
+      );
+    }
+
+    if (!/^\S+@\S+\.\S+$/.test(email)) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Invalid email address."
+      );
+    }
+
+    if (age <= 0 || admission_fee < 0) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Invalid age or admission fee."
+      );
+    }
+
+    // Duplicate check
     const existingStudent = await pool.query(
       `
       SELECT 1
@@ -91,18 +155,18 @@ exports.createStudentAdmission = async (req, res) => {
       `,
       [
         admission_id,
-        full_name,
+        full_name.trim(),
         gender,
         age,
         phone_number,
-        email,
-        address,
-        school,
+        email.trim().toLowerCase(),
+        address.trim(),
+        school.trim(),
         playing_role,
         batting_style,
         batch,
         admission_fee,
-        father_name,
+        father_name.trim(),
         father_phone,
         father_occupation,
         mother_name,
@@ -124,15 +188,12 @@ exports.createStudentAdmission = async (req, res) => {
     );
 
   } catch (error) {
-
     return sendErrorResponse(
       res,
       500,
       error.message || "Internal Server Error"
     );
-
   }
-
 };
 
 exports.getAllStudents = async (req, res) => {

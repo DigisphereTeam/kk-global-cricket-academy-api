@@ -64,7 +64,6 @@ const { sendErrorResponse, sendSuccessResponse } = require("../utils/apiResponse
 // };
 
 exports.createGroundBooking = async (req, res) => {
-
     const {
         customer_name,
         customer_phone,
@@ -77,25 +76,64 @@ exports.createGroundBooking = async (req, res) => {
         advance_paid,
     } = req.body;
 
-
     try {
 
-        // Check duplicate booking
+        if (
+            !customer_name ||
+            !customer_phone ||
+            !ground_name ||
+            !purpose ||
+            !booking_date ||
+            !time_slot ||
+            !payment_type ||
+            total_amount == null ||
+            advance_paid == null
+        ) {
+            return sendErrorResponse(
+                res,
+                400,
+                "All fields are required."
+            );
+        }
+
+        if (!/^[6-9]\d{9}$/.test(customer_phone)) {
+            return sendErrorResponse(
+                res,
+                400,
+                "Invalid customer phone number."
+            );
+        }
+
+        if (total_amount <= 0 || advance_paid < 0) {
+            return sendErrorResponse(
+                res,
+                400,
+                "Invalid payment amount."
+            );
+        }
+
+        if (advance_paid > total_amount) {
+            return sendErrorResponse(
+                res,
+                400,
+                "Advance amount cannot be greater than total amount."
+            );
+        }
+
         const existingBooking = await pool.query(
             `
-            SELECT booking_id
+            SELECT 1
             FROM tbl_ground_booking
-            WHERE ground_name = $1
+            WHERE LOWER(ground_name) = LOWER($1)
             AND booking_date = $2
             AND time_slot = $3
             `,
             [
-                ground_name,
+                ground_name.trim(),
                 booking_date,
                 time_slot,
             ]
         );
-
 
         if (existingBooking.rowCount > 0) {
             return sendErrorResponse(
@@ -104,8 +142,6 @@ exports.createGroundBooking = async (req, res) => {
                 "This ground is already booked for the selected date and time slot."
             );
         }
-
-
 
         const booking = await pool.query(
             `
@@ -126,10 +162,10 @@ exports.createGroundBooking = async (req, res) => {
             RETURNING *
             `,
             [
-                customer_name,
+                customer_name.trim(),
                 customer_phone,
-                ground_name,
-                purpose,
+                ground_name.trim(),
+                purpose.trim(),
                 booking_date,
                 time_slot,
                 payment_type,
@@ -145,17 +181,13 @@ exports.createGroundBooking = async (req, res) => {
             booking.rows[0]
         );
 
-
     } catch (error) {
-
         return sendErrorResponse(
             res,
             500,
             error.message || "Internal Server Error"
         );
-
     }
-
 };
 
 

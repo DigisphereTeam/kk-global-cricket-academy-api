@@ -12,17 +12,30 @@ exports.createEvent = async (req, res) => {
   } = req.body;
 
   try {
+    if (
+      !event_name ||
+      !event_type ||
+      !event_date ||
+      !venue ||
+      total_teams == null
+    ) {
+      return sendErrorResponse(res, 400, "Required fields are missing.");
+    }
+
+    if (total_teams <= 0) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Total teams must be greater than zero."
+      );
+    }
 
     const existingEvent = await pool.query(
-      `
-      SELECT event_id
-      FROM tbl_events
-      WHERE
-        LOWER(event_name) = LOWER($1)
-        AND event_date = $2
-      LIMIT 1
-      `,
-      [event_name, event_date]
+      `SELECT 1
+       FROM tbl_events
+       WHERE LOWER(event_name) = LOWER($1)
+       AND event_date = $2`,
+      [event_name.trim(), event_date]
     );
 
     if (existingEvent.rowCount > 0) {
@@ -34,8 +47,7 @@ exports.createEvent = async (req, res) => {
     }
 
     const event = await pool.query(
-      `
-      INSERT INTO tbl_events
+      `INSERT INTO tbl_events
       (
         event_name,
         event_type,
@@ -51,10 +63,10 @@ exports.createEvent = async (req, res) => {
       RETURNING *
       `,
       [
-        event_name,
-        event_type,
+        event_name.trim(),
+        event_type.trim(),
         event_date,
-        venue,
+        venue.trim(),
         total_teams,
         description,
       ]
@@ -66,6 +78,7 @@ exports.createEvent = async (req, res) => {
       "Event created successfully.",
       event.rows[0]
     );
+
   } catch (error) {
     return sendErrorResponse(
       res,
@@ -74,7 +87,6 @@ exports.createEvent = async (req, res) => {
     );
   }
 };
-
 
 exports.getAllEvents = async (req, res) => {
   try {

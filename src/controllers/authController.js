@@ -30,7 +30,7 @@ exports.signUp = async (req, res) => {
     return sendErrorResponse(
       res,
       400,
-      "Invalid role."
+      "Invalid role"
     );
   }
 
