@@ -6,10 +6,11 @@ const { createStudentAdmission, getAllStudents, getStudentById, updateStudent, d
 
 const validateRequestBody = require("../middlewares/validateRequestBody");
 const verifyToken = require("../middlewares/verifyToken");
+const { checkRole } = require("../middlewares/checkRole");
 
 studentRouter.use(verifyToken);
 
-studentRouter.post("/", validateRequestBody, createStudentAdmission);
+studentRouter.post("/", validateRequestBody, checkRole("PRIMARY"), createStudentAdmission);
 
 studentRouter.get("/", getAllStudents);
 

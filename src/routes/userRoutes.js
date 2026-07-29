@@ -6,18 +6,20 @@ const { checkRole } = require("../middlewares/checkRole");
 const { registerPrimary, getUsers, getUserById, updateUser, deleteUser, getProfile, changePassword } = require("../controllers/userController");
 const validateRequestBody = require("../middlewares/validateRequestBody");
 
-userRouter.post("/primary", validateRequestBody, verifyToken, checkRole("ADMIN"), registerPrimary);
+userRouter.use(verifyToken);
 
-userRouter.get("/", verifyToken, checkRole("ADMIN"), getUsers);
+userRouter.post("/primary", validateRequestBody, checkRole("ADMIN"), registerPrimary);
 
-userRouter.get("/profile", verifyToken, getProfile);
+userRouter.get("/", checkRole("ADMIN"), getUsers);
 
-userRouter.get("/:user_id", verifyToken, checkRole("ADMIN"), getUserById);
+userRouter.get("/profile", getProfile);
 
-userRouter.patch("/:user_id", validateRequestBody, verifyToken, checkRole("ADMIN"), updateUser);
+userRouter.get("/:user_id", checkRole("ADMIN"), getUserById);
 
-userRouter.delete("/:user_id", verifyToken, checkRole("ADMIN"), deleteUser);
+userRouter.patch("/:user_id", validateRequestBody, checkRole("ADMIN"), updateUser);
 
-userRouter.patch("/changePassword", validateRequestBody, verifyToken, changePassword);
+userRouter.delete("/:user_id", checkRole("ADMIN"), deleteUser);
+
+userRouter.patch("/changePassword", validateRequestBody, changePassword);
 
 module.exports = userRouter;

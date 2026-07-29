@@ -3,6 +3,7 @@ const express = require("express");
 const validateRequestBody = require("../middlewares/validateRequestBody");
 const { createGroundBooking, getAllGroundBookings, getGroundBookingById, updateGroundBooking } = require("../controllers/groundbookingController");
 const verifyToken = require("../middlewares/verifyToken");
+const { checkRole } = require("../middlewares/checkRole");
 
 const groundBookingRouter = express.Router();
 
@@ -17,7 +18,7 @@ const groundBookingRouter = express.Router();
 
 groundBookingRouter.use(verifyToken);
 
-groundBookingRouter.post("/", validateRequestBody, createGroundBooking);
+groundBookingRouter.post("/", validateRequestBody, checkRole("PRIMARY"), createGroundBooking);
 
 groundBookingRouter.get("/", getAllGroundBookings);
 

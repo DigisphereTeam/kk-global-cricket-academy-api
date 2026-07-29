@@ -2,12 +2,13 @@ const express = require("express");
 const verifyToken = require("../middlewares/verifyToken");
 const validateRequestBody = require("../middlewares/validateRequestBody");
 const { getAllApplications, getApplicationById, updateApplication, deleteApplication, applyOneOnOne, renewOneOnOne, getStudentApplications } = require("../controllers/oneOnOneController");
+const { checkRole } = require("../middlewares/checkRole");
 
 const oneOnOneRouter = express.Router();
 
 oneOnOneRouter.use(verifyToken);
 
-oneOnOneRouter.post("/", validateRequestBody, applyOneOnOne);
+oneOnOneRouter.post("/", validateRequestBody, checkRole("PRIMARY"), applyOneOnOne);
 
 oneOnOneRouter.post("/renew", validateRequestBody, renewOneOnOne);
 

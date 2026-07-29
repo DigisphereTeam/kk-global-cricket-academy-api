@@ -2,12 +2,13 @@ const express = require("express");
 const validateRequestBody = require("../middlewares/validateRequestBody");
 const { addCoach, getAllCoaches, searchCoaches, getCoachById, updateCoach, deleteCoach } = require("../controllers/coachController");
 const verifyToken = require("../middlewares/verifyToken");
+const { checkRole } = require("../middlewares/checkRole");
 
 const coachRouter = express.Router();
 
 coachRouter.use(verifyToken);
 
-coachRouter.post("/", validateRequestBody, addCoach);
+coachRouter.post("/", validateRequestBody, checkRole("PRIMARY"), addCoach);
 
 coachRouter.get("/", getAllCoaches);
 
