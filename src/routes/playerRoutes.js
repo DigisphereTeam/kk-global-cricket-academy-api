@@ -5,7 +5,7 @@ const playerRouter = express.Router();
 const validateRequestBody = require("../middlewares/validateRequestBody");
 const verifyToken = require("../middlewares/verifyToken");
 const { checkRole } = require("../middlewares/checkRole");
-const { createPlayerAdmission, getAllPlayers, searchPlayers, getPlayerAnalytics, getPlayerById, updatePlayer, deletePlayer } = require("../controllers/playerController");
+const { createPlayerAdmission, getAllPlayers, searchPlayers, getPlayerById, updatePlayer, deletePlayer } = require("../controllers/playerController");
 
 playerRouter.use(verifyToken);
 
@@ -14,8 +14,6 @@ playerRouter.post("/", validateRequestBody, checkRole("PRIMARY"), createPlayerAd
 playerRouter.get("/", getAllPlayers);
 
 playerRouter.get("/search", searchPlayers);
-
-playerRouter.get("/analytics", getPlayerAnalytics);
 
 playerRouter.get("/:player_id", getPlayerById);
 

@@ -112,7 +112,7 @@ exports.createPlayerAdmission = async (req, res) => {
       return sendErrorResponse(
         res,
         409,
-        "Student already exists."
+        "Player already exists."
       );
     }
 
@@ -183,7 +183,7 @@ exports.createPlayerAdmission = async (req, res) => {
     return sendSuccessResponse(
       res,
       201,
-      "Student admission created successfully.",
+      "Player admission created successfully.",
       result.rows[0]
     );
 
@@ -212,7 +212,7 @@ exports.getAllPlayers = async (req, res) => {
     return sendSuccessResponse(
       res,
       200,
-      "Students fetched successfully.",
+      "Players fetched successfully.",
       {
         total_students: result.rowCount,
         students: result.rows,
@@ -241,14 +241,14 @@ exports.getPlayerById = async (req, res) => {
     return sendErrorResponse(
       res,
       400,
-      "Student ID is required"
+      "Player ID is required"
     );
   }
   if (!player_id || isNaN(player_id)) {
     return sendErrorResponse(
       res,
       400,
-      "Invalid student ID"
+      "Invalid player ID"
     );
   }
 
@@ -270,7 +270,7 @@ exports.getPlayerById = async (req, res) => {
       return sendErrorResponse(
         res,
         404,
-        "Student not found."
+        "Player not found."
       );
 
     }
@@ -279,7 +279,7 @@ exports.getPlayerById = async (req, res) => {
     return sendSuccessResponse(
       res,
       200,
-      "Student fetched successfully.",
+      "Player fetched successfully.",
       result.rows[0]
     );
 
@@ -301,11 +301,11 @@ exports.updatePlayer = async (req, res) => {
   const { player_id } = req.params;
 
   if (!player_id) {
-    return sendErrorResponse(res, 400, "Student ID is required");
+    return sendErrorResponse(res, 400, "Player ID is required");
   }
 
   if (isNaN(player_id)) {
-    return sendErrorResponse(res, 400, "Invalid student ID");
+    return sendErrorResponse(res, 400, "Invalid player ID");
   }
 
   try {
@@ -356,7 +356,7 @@ exports.updatePlayer = async (req, res) => {
 
     // Check duplicate phone number
     if (req.body.phone_number) {
-      const existingStudent = await pool.query(
+      const existingPlayer = await pool.query(
         `
         SELECT 1
         FROM tbl_players
@@ -367,7 +367,7 @@ exports.updatePlayer = async (req, res) => {
         [req.body.phone_number, player_id]
       );
 
-      if (existingStudent.rowCount > 0) {
+      if (existingPlayer.rowCount > 0) {
         return sendErrorResponse(
           res,
           409,
@@ -415,14 +415,14 @@ exports.updatePlayer = async (req, res) => {
       return sendErrorResponse(
         res,
         404,
-        "Student not found"
+        "Player not found"
       );
     }
 
     return sendSuccessResponse(
       res,
       200,
-      "Student updated successfully",
+      "Player updated successfully",
       result.rows[0]
     );
   } catch (error) {
@@ -443,14 +443,14 @@ exports.deletePlayer = async (req, res) => {
     return sendErrorResponse(
       res,
       400,
-      "Student ID is required"
+      "Player ID is required"
     );
   }
   if (!player_id || isNaN(player_id)) {
     return sendErrorResponse(
       res,
       400,
-      "Invalid student ID"
+      "Invalid player ID"
     );
   }
 
@@ -472,7 +472,7 @@ exports.deletePlayer = async (req, res) => {
       return sendErrorResponse(
         res,
         404,
-        "Student not found."
+        "Player not found."
       );
 
     }
@@ -481,7 +481,7 @@ exports.deletePlayer = async (req, res) => {
     return sendSuccessResponse(
       res,
       200,
-      "Student deleted successfully."
+      "Player deleted successfully."
     );
 
 
@@ -529,10 +529,10 @@ exports.searchPlayers = async (req, res) => {
     return sendSuccessResponse(
       res,
       200,
-      "Students retrieved successfully.",
+      "Players retrieved successfully.",
       {
-        totalStudents: result.rowCount,
-        students: result.rows,
+        total_players: result.rowCount,
+        players: result.rows,
       }
     );
   } catch (error) {
@@ -542,52 +542,4 @@ exports.searchPlayers = async (req, res) => {
       error.message || "Internal Server Error"
     );
   }
-};
-
-exports.getPlayerAnalytics = async (req, res) => {
-
-  try {
-
-    const analytics = await pool.query(
-      `
-      SELECT
-        COUNT(*) AS total_students,
-
-        COUNT(*) FILTER (
-          WHERE batch = 'Morning'
-        ) AS morning_students,
-
-        COUNT(*) FILTER (
-          WHERE batch = 'Evening'
-        ) AS evening_students,
-
-        COUNT(*) FILTER (
-          WHERE gender = 'Male'
-        ) AS male_students,
-
-        COUNT(*) FILTER (
-          WHERE gender = 'Female'
-        ) AS female_students
-
-      FROM tbl_players
-      `
-    );
-
-    return sendSuccessResponse(
-      res,
-      200,
-      "Student analytics fetched successfully.",
-      analytics.rows[0]
-    );
-
-  } catch (error) {
-
-    return sendErrorResponse(
-      res,
-      500,
-      error.message || "Internal Server Error"
-    );
-
-  }
-
 };
