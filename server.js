@@ -5,7 +5,7 @@ const { sendSuccessResponse } = require("./src/utils/apiResponse");
 const notFoundHandler = require("./src/middlewares/notFoundHandler");
 const globalErrorHandler = require("./src/middlewares/errorHandler");
 const pool = require("./src/config/dbConfig");
-const studentRouter = require("./src/routes/studentRoutes");
+const playerRouter = require("./src/routes/playerRoutes");
 const coachRouter = require("./src/routes/coachRoutes");
 const staffRouter = require("./src/routes/staffRoutes");
 const authRouter = require("./src/routes/authRoutes");
@@ -31,7 +31,7 @@ app.get("/", (_req, res) => {
 
 app.use("/auth", authRouter)
 app.use("/dashboard", dashboardRouter);
-app.use("/students", studentRouter);
+app.use("/players", playerRouter);
 app.use("/coaches", coachRouter);
 app.use("/staff", staffRouter);
 app.use("/one-on-one-applications", oneOnOneRouter);
