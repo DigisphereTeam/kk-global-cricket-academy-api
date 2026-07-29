@@ -3,7 +3,7 @@ const { sendErrorResponse, sendSuccessResponse, } = require("../utils/apiRespons
 
 exports.applyOneOnOne = async (req, res) => {
   const {
-    student_id,
+    player_id,
     coach_id,
     focus_area,
     payment_type,
@@ -14,7 +14,7 @@ exports.applyOneOnOne = async (req, res) => {
 
   try {
     if (
-      !student_id ||
+      !player_id ||
       !coach_id ||
       !focus_area ||
       !payment_type ||
@@ -37,8 +37,8 @@ exports.applyOneOnOne = async (req, res) => {
     }
 
     const [student, coach] = await Promise.all([
-      pool.query(`SELECT 1 FROM tbl_students WHERE student_id = $1`, [
-        student_id,
+      pool.query(`SELECT 1 FROM tbl_players WHERE player_id = $1`, [
+        player_id,
       ]),
       pool.query(`SELECT 1 FROM tbl_coach WHERE coach_id = $1`, [coach_id]),
     ]);
@@ -54,10 +54,10 @@ exports.applyOneOnOne = async (req, res) => {
     const existingApplication = await pool.query(
       `SELECT 1
        FROM tbl_one_on_one_applications
-       WHERE student_id = $1
+       WHERE player_id = $1
        AND coach_id = $2
        AND preferred_slot = $3`,
-      [student_id, coach_id, preferred_slot],
+      [player_id, coach_id, preferred_slot],
     );
 
     if (existingApplication.rowCount > 0) {
@@ -72,7 +72,7 @@ exports.applyOneOnOne = async (req, res) => {
       `
       INSERT INTO tbl_one_on_one_applications
       (
-        student_id,
+        player_id,
         coach_id,
         focus_area,
         payment_type,
@@ -85,7 +85,7 @@ exports.applyOneOnOne = async (req, res) => {
       RETURNING *
       `,
       [
-        student_id,
+        player_id,
         coach_id,
         focus_area.trim(),
         payment_type,
@@ -112,7 +112,7 @@ exports.applyOneOnOne = async (req, res) => {
 
 exports.renewOneOnOne = async (req, res) => {
   const {
-    student_id,
+    player_id,
     coach_id,
     focus_area,
     payment_type,
@@ -125,11 +125,11 @@ exports.renewOneOnOne = async (req, res) => {
     const [student, coach] = await Promise.all([
       pool.query(
         `
-        SELECT student_id
-        FROM tbl_students
-        WHERE student_id = $1
+        SELECT player_id
+        FROM tbl_players
+        WHERE player_id = $1
         `,
-        [student_id],
+        [player_id],
       ),
 
       pool.query(
@@ -155,10 +155,10 @@ exports.renewOneOnOne = async (req, res) => {
       `
       SELECT application_id
       FROM tbl_one_on_one_applications
-      WHERE student_id = $1
+      WHERE player_id = $1
       LIMIT 1
       `,
-      [student_id],
+      [player_id],
     );
 
     if (previousApplication.rowCount === 0) {
@@ -174,7 +174,7 @@ exports.renewOneOnOne = async (req, res) => {
       `
       INSERT INTO tbl_one_on_one_applications
       (
-        student_id,
+        player_id,
         coach_id,
         focus_area,
         payment_type,
@@ -188,7 +188,7 @@ exports.renewOneOnOne = async (req, res) => {
       RETURNING *
       `,
       [
-        student_id,
+        player_id,
         coach_id,
         focus_area,
         payment_type,
@@ -222,8 +222,8 @@ exports.getAllApplications = async (req, res) => {
       SELECT
         oa.application_id,
 
-        oa.student_id,
-        s.full_name AS student_name,
+        oa.player_id,
+        p.full_name AS student_name,
 
         oa.coach_id,
         c.full_name AS coach_name,
@@ -240,8 +240,8 @@ exports.getAllApplications = async (req, res) => {
 
       FROM tbl_one_on_one_applications oa
 
-      INNER JOIN tbl_students s
-      ON oa.student_id = s.student_id
+      INNER JOIN tbl_players p
+      ON oa.player_id = p.player_id
 
       INNER JOIN tbl_coach c
       ON oa.coach_id = c.coach_id
@@ -265,14 +265,14 @@ exports.getAllApplications = async (req, res) => {
   }
 };
 
-exports.getStudentApplications = async (req, res) => {
-  const { student_id } = req.params;
+exports.getPlayerApplications = async (req, res) => {
+  const { player_id } = req.params;
 
-  if (!student_id) {
+  if (!player_id) {
     return sendErrorResponse(res, 400, "Student ID is required.");
   }
 
-  if (isNaN(student_id) || Number(student_id) <= 0) {
+  if (isNaN(player_id) || Number(player_id) <= 0) {
     return sendErrorResponse(res, 400, "Invalid student ID.");
   }
 
@@ -280,11 +280,11 @@ exports.getStudentApplications = async (req, res) => {
     // Check Student
     const student = await pool.query(
       `
-      SELECT student_id
-      FROM tbl_students
-      WHERE student_id = $1
+      SELECT player_id
+      FROM tbl_players
+      WHERE player_id = $1
       `,
-      [student_id],
+      [player_id],
     );
 
     if (student.rowCount === 0) {
@@ -297,7 +297,7 @@ exports.getStudentApplications = async (req, res) => {
       SELECT
         oa.application_id,
 
-        oa.student_id,
+        oa.player_id,
         s.full_name AS student_name,
 
         oa.coach_id,
@@ -318,23 +318,23 @@ exports.getStudentApplications = async (req, res) => {
 
       FROM tbl_one_on_one_applications oa
 
-      INNER JOIN tbl_students s
-      ON oa.student_id = s.student_id
+      INNER JOIN tbl_players s
+      ON oa.player_id = s.player_id
 
       INNER JOIN tbl_coach c
       ON oa.coach_id = c.coach_id
 
-      WHERE oa.student_id = $1
+      WHERE oa.player_id = $1
 
       ORDER BY oa.application_id DESC
       `,
-      [student_id],
+      [player_id],
     );
 
     return sendSuccessResponse(
       res,
       200,
-      "Student one-on-one applications fetched successfully.",
+      "Player one-on-one applications fetched successfully.",
       {
         total_applications: applications.rowCount,
         applications: applications.rows,
@@ -374,8 +374,8 @@ exports.getApplicationById = async (req, res) => {
       SELECT
         oa.application_id,
 
-        oa.student_id,
-        s.full_name AS student_name,
+        oa.player_id,
+        p.full_name AS player_name,
 
         oa.coach_id,
         c.full_name AS coach_name,
@@ -392,8 +392,8 @@ exports.getApplicationById = async (req, res) => {
 
       FROM tbl_one_on_one_applications oa
 
-      INNER JOIN tbl_students s
-      ON oa.student_id = s.student_id
+      INNER JOIN tbl_players p
+      ON oa.player_id = p.player_id
 
       INNER JOIN tbl_coach c
       ON oa.coach_id = c.coach_id

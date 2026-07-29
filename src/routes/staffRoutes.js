@@ -19,6 +19,6 @@ staffRouter.get("/:id", getStaffById);
 
 staffRouter.patch("/:id", validateRequestBody, updateStaff);
 
-staffRouter.delete("/:id", deleteStaff);
+staffRouter.delete("/:id", checkRole("ADMIN"), deleteStaff);
 
 module.exports = staffRouter;

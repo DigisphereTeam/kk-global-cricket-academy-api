@@ -16,6 +16,6 @@ equipmentRouter.get('/:equipment_id', getEquipmentById);
 
 equipmentRouter.put('/:equipment_id', validateRequestBody, updateEquipment);
 
-equipmentRouter.delete('/:equipment_id', deleteEquipment);
+equipmentRouter.delete('/:equipment_id', checkRole("ADMIN"), deleteEquipment);
 
 module.exports = equipmentRouter;

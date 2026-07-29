@@ -1,7 +1,7 @@
 const express = require("express");
 const verifyToken = require("../middlewares/verifyToken");
 const validateRequestBody = require("../middlewares/validateRequestBody");
-const { getAllApplications, getApplicationById, updateApplication, deleteApplication, applyOneOnOne, renewOneOnOne, getStudentApplications } = require("../controllers/oneOnOneController");
+const { getAllApplications, getApplicationById, updateApplication, deleteApplication, applyOneOnOne, renewOneOnOne, getPlayerApplications } = require("../controllers/oneOnOneController");
 const { checkRole } = require("../middlewares/checkRole");
 
 const oneOnOneRouter = express.Router();
@@ -12,7 +12,7 @@ oneOnOneRouter.post("/", validateRequestBody, checkRole("PRIMARY"), applyOneOnOn
 
 oneOnOneRouter.post("/renew", validateRequestBody, renewOneOnOne);
 
-oneOnOneRouter.get("/students/:student_id/applications", getStudentApplications);
+oneOnOneRouter.get("/players/:player_id/applications", getPlayerApplications);
 
 oneOnOneRouter.get("/", getAllApplications);
 
@@ -20,7 +20,7 @@ oneOnOneRouter.get("/:application_id", getApplicationById);
 
 oneOnOneRouter.patch("/:application_id", validateRequestBody, updateApplication);
 
-oneOnOneRouter.delete("/:application_id", deleteApplication);
+oneOnOneRouter.delete("/:application_id", checkRole("ADMIN"), deleteApplication);
 
 
 module.exports = oneOnOneRouter;

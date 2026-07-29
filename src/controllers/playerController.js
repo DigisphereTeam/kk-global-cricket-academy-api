@@ -531,7 +531,7 @@ exports.searchPlayers = async (req, res) => {
       200,
       "Players retrieved successfully.",
       {
-        totalPlayers: result.rowCount,
+        total_players: result.rowCount,
         players: result.rows,
       }
     );
@@ -542,52 +542,4 @@ exports.searchPlayers = async (req, res) => {
       error.message || "Internal Server Error"
     );
   }
-};
-
-exports.getPlayerAnalytics = async (req, res) => {
-
-  try {
-
-    const analytics = await pool.query(
-      `
-      SELECT
-        COUNT(*) AS total_players,
-
-        COUNT(*) FILTER (
-          WHERE batch = 'Morning'
-        ) AS morning_players,
-
-        COUNT(*) FILTER (
-          WHERE batch = 'Evening'
-        ) AS evening_players,
-
-        COUNT(*) FILTER (
-          WHERE gender = 'Male'
-        ) AS male_players,
-
-        COUNT(*) FILTER (
-          WHERE gender = 'Female'
-        ) AS female_players
-
-      FROM tbl_players
-      `
-    );
-
-    return sendSuccessResponse(
-      res,
-      200,
-      "Player analytics fetched successfully.",
-      analytics.rows[0]
-    );
-
-  } catch (error) {
-
-    return sendErrorResponse(
-      res,
-      500,
-      error.message || "Internal Server Error"
-    );
-
-  }
-
 };

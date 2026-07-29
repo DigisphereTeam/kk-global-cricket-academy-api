@@ -5,7 +5,11 @@ const { sendSuccessResponse } = require("./src/utils/apiResponse");
 const notFoundHandler = require("./src/middlewares/notFoundHandler");
 const globalErrorHandler = require("./src/middlewares/errorHandler");
 const pool = require("./src/config/dbConfig");
+<<<<<<< HEAD
+const studentRouter = require("./src/routes/playerRoutes");
+=======
 const playerRouter = require("./src/routes/playerRoutes");
+>>>>>>> develop
 const coachRouter = require("./src/routes/coachRoutes");
 const staffRouter = require("./src/routes/staffRoutes");
 const authRouter = require("./src/routes/authRoutes");
@@ -16,12 +20,15 @@ const equipmentRouter = require("./src/routes/equipmentRoutes");
 const employeeSalaryRoutes = require("./src/routes/employeeSalaryRoutes");
 const userRouter = require("./src/routes/userRoutes");
 const dashboardRouter = require("./src/routes/dashboardRoutes");
+const apiLogger = require("./src/middlewares/apiLogger");
 
 
 const app = express();
 
 app.use(express.json());
 app.use(cors());
+
+app.use(apiLogger);
 
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
@@ -31,7 +38,11 @@ app.get("/", (_req, res) => {
 
 app.use("/auth", authRouter)
 app.use("/dashboard", dashboardRouter);
+<<<<<<< HEAD
+app.use("/players", studentRouter);
+=======
 app.use("/players", playerRouter);
+>>>>>>> develop
 app.use("/coaches", coachRouter);
 app.use("/staff", staffRouter);
 app.use("/one-on-one-applications", oneOnOneRouter);

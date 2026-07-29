@@ -177,25 +177,75 @@ exports.createEquipment = async (req, res) => {
 
 exports.getAllEquipment = async (req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT *
-      FROM tbl_equipment
-      ORDER BY equipment_id ASC
-    `);
+    const [equipmentResult, summaryResult] = await Promise.all([
+      pool.query(`
+        SELECT
+          *,
+          (
+            purchased_quantity
+            - broken_quantity
+            - lost_quantity
+            - issued_quantity
+          ) AS available_quantity
+        FROM tbl_equipment
+        ORDER BY equipment_id DESC
+      `),
 
-    if (result.rowCount === 0) {
-      return sendErrorResponse(
-        res,
-        404,
-        "No equipment found."
-      );
-    }
+      pool.query(`
+        SELECT
+          COUNT(*) AS total_items,
+
+          COUNT(
+            CASE
+              WHEN (
+                purchased_quantity
+                - broken_quantity
+                - lost_quantity
+                - issued_quantity
+              ) < 10
+              THEN 1
+            END
+          ) AS low_stock_items,
+
+          COALESCE(
+            SUM(
+              purchased_quantity
+              - broken_quantity
+              - lost_quantity
+              - issued_quantity
+            ),
+            0
+          ) AS units_in_inventory,
+
+          COALESCE(
+            SUM(
+              (
+                purchased_quantity
+                - broken_quantity
+                - lost_quantity
+                - issued_quantity
+              ) * unit_price
+            ),
+            0
+          ) AS inventory_value
+
+        FROM tbl_equipment
+      `)
+    ]);
 
     return sendSuccessResponse(
       res,
       200,
       "Equipment retrieved successfully.",
-      result.rows
+      {
+        statistics: {
+          total_items: Number(summaryResult.rows[0].total_items),
+          low_stock_items: Number(summaryResult.rows[0].low_stock_items),
+          units_in_inventory: Number(summaryResult.rows[0].units_in_inventory),
+          inventory_value: Number(summaryResult.rows[0].inventory_value),
+        },
+        equipment: equipmentResult.rows,
+      }
     );
 
   } catch (error) {
@@ -206,7 +256,6 @@ exports.getAllEquipment = async (req, res) => {
     );
   }
 };
-
 exports.getEquipmentById = async (req, res) => {
   const { equipment_id } = req.params;
 

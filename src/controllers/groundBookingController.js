@@ -1,6 +1,13 @@
 const pool = require("../config/dbConfig");
 const { sendErrorResponse, sendSuccessResponse } = require("../utils/apiResponse");
 
+const statusFlow = {
+    Pending: ["Confirmed", "Cancelled"],
+    Confirmed: ["Completed", "Cancelled"],
+    Completed: [],
+    Cancelled: [],
+};
+
 // exports.createGround = async (req, res) => {
 //     const {
 //         ground_name,
@@ -224,6 +231,7 @@ exports.getAllGroundBookings = async (req, res) => {
                     total_bookings: Number(statistics.rows[0].total_bookings),
                     confirmed_bookings: Number(statistics.rows[0].confirmed_bookings),
                     pending_bookings: Number(statistics.rows[0].pending_bookings),
+                    completed_bookings: Number(statistics.rows[0].completed_bookings),
                     upcoming_bookings: Number(statistics.rows[0].upcoming_bookings),
                 },
                 bookings: bookings.rows,
@@ -318,12 +326,7 @@ exports.updateGroundBooking = async (req, res) => {
         );
     }
 
-    const allowedStatuses = [
-        "Pending",
-        "Confirmed",
-        "Completed",
-        "Cancelled",
-    ];
+    const allowedStatuses = ["Pending", "Confirmed", "Completed", "Cancelled"];
 
     if (req.body.status !== undefined) {
         const isValidStatus = allowedStatuses.some(
@@ -340,20 +343,19 @@ exports.updateGroundBooking = async (req, res) => {
         }
     }
 
+    const userRole = req.user.role;
+
+    if (req.body.status === "Confirmed" && userRole !== "Admin") {
+        return sendErrorResponse(
+            res,
+            403,
+            "Only admins can approve ground bookings."
+        );
+    }
+
     try {
 
-        const allowedFields = [
-            "customer_name",
-            "customer_phone",
-            "ground_name",
-            "purpose",
-            "booking_date",
-            "time_slot",
-            "payment_type",
-            "total_amount",
-            "advance_paid",
-            "status"
-        ];
+        const allowedFields = ["customer_name", "customer_phone", "ground_name", "purpose", "booking_date", "time_slot", "payment_type", "total_amount", "advance_paid", "status"];
 
         const updates = [];
         const values = [];
@@ -378,7 +380,7 @@ exports.updateGroundBooking = async (req, res) => {
 
         const existingBooking = await pool.query(
             `
-            SELECT booking_id
+            SELECT booking_id , status
             FROM tbl_ground_booking
             WHERE booking_id = $1
             `,
@@ -392,6 +394,21 @@ exports.updateGroundBooking = async (req, res) => {
                 404,
                 "Ground booking not found."
             );
+        }
+
+        const currentStatus = existingBooking.rows[0].status;
+        const newStatus = req.body.status;
+
+        if (newStatus && newStatus !== currentStatus) {
+            const allowedTransitions = statusFlow[currentStatus] || [];
+
+            if (!allowedTransitions.includes(newStatus)) {
+                return sendErrorResponse(
+                    res,
+                    400,
+                    `Status cannot be changed from ${currentStatus} to ${newStatus}.`
+                );
+            }
         }
 
         updates.push("updated_at = CURRENT_TIMESTAMP");
