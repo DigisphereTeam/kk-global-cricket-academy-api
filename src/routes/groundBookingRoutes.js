@@ -1,7 +1,7 @@
 const express = require("express");
 
 const validateRequestBody = require("../middlewares/validateRequestBody");
-const { createGroundBooking, getAllGroundBookings, getGroundBookingById, updateGroundBooking } = require("../controllers/groundTookingController");
+const { createGroundBooking, getAllGroundBookings, getGroundBookingById, updateGroundBooking } = require("../controllers/groundBookingController");
 const verifyToken = require("../middlewares/verifyToken");
 const { checkRole } = require("../middlewares/checkRole");
 
