@@ -16,12 +16,15 @@ const equipmentRouter = require("./src/routes/equipmentRoutes");
 const employeeSalaryRoutes = require("./src/routes/employeeSalaryRoutes");
 const userRouter = require("./src/routes/userRoutes");
 const dashboardRouter = require("./src/routes/dashboardRoutes");
+const apiLogger = require("./src/middlewares/apiLogger");
 
 
 const app = express();
 
 app.use(express.json());
 app.use(cors());
+
+app.use(apiLogger);
 
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
