@@ -7,44 +7,19 @@ const oneOnOneRouter = express.Router();
 
 oneOnOneRouter.use(verifyToken);
 
+oneOnOneRouter.post("/", validateRequestBody, applyOneOnOne);
 
-oneOnOneRouter.post(
-  "/",
-  validateRequestBody,
-  applyOneOnOne
-);
+oneOnOneRouter.post("/renew", validateRequestBody, renewOneOnOne);
 
-oneOnOneRouter.post(
-  "/renew",
-  validateRequestBody,
-  renewOneOnOne
-);
+oneOnOneRouter.get("/students/:student_id/applications", getStudentApplications);
 
-oneOnOneRouter.get(
-  "/students/:student_id/applications",
-  getStudentApplications
-);
+oneOnOneRouter.get("/", getAllApplications);
 
-oneOnOneRouter.get(
-  "/",
-  getAllApplications
-);
+oneOnOneRouter.get("/:application_id", getApplicationById);
 
-oneOnOneRouter.get(
-  "/:application_id",
-  getApplicationById
-);
+oneOnOneRouter.patch("/:application_id", validateRequestBody, updateApplication);
 
-oneOnOneRouter.patch(
-  "/:application_id",
-  validateRequestBody,
-  updateApplication
-);
-
-oneOnOneRouter.delete(
-  "/:application_id",
-  deleteApplication
-);
+oneOnOneRouter.delete("/:application_id", deleteApplication);
 
 
 module.exports = oneOnOneRouter;

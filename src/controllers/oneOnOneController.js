@@ -1,8 +1,5 @@
 const pool = require("../config/dbConfig");
-const {
-  sendErrorResponse,
-  sendSuccessResponse,
-} = require("../utils/apiResponse");
+const { sendErrorResponse, sendSuccessResponse, } = require("../utils/apiResponse");
 
 exports.applyOneOnOne = async (req, res) => {
   const {

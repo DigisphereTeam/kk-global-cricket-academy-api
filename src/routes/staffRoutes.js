@@ -12,7 +12,6 @@ staffRouter.post("/", validateRequestBody, addStaff);
 
 staffRouter.get("/", getAllStaff);
 
-
 staffRouter.get("/search", searchStaff);
 
 staffRouter.get("/:id", getStaffById);

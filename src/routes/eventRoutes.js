@@ -7,31 +7,14 @@ const eventRouter = express.Router();
 
 eventRouter.use(verifyToken);
 
-eventRouter.post(
-  "/",
-  validateRequestBody,
-  createEvent
-);
+eventRouter.post("/", validateRequestBody, createEvent);
 
-eventRouter.get(
-  "/",
-  getAllEvents
-);
+eventRouter.get("/", getAllEvents);
 
-eventRouter.get(
-  "/:event_id",
-  getEventById
-);
+eventRouter.get("/:event_id", getEventById);
 
-eventRouter.patch(
-  "/:event_id",
-  validateRequestBody,
-  updateEvent
-);
+eventRouter.patch("/:event_id", validateRequestBody, updateEvent);
 
-eventRouter.delete(
-  "/:event_id",
-  deleteEvent
-);
+eventRouter.delete("/:event_id", deleteEvent);
 
 module.exports = eventRouter;

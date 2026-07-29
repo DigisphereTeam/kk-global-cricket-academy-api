@@ -15,7 +15,7 @@ const eventRouter = require("./src/routes/eventRoutes");
 const equipmentRouter = require("./src/routes/equipmentRoutes");
 const employeeSalaryRoutes = require("./src/routes/employeeSalaryRoutes");
 const userRouter = require("./src/routes/userRoutes");
-
+const dashboardRouter = require("./src/routes/dashboardRoutes");
 
 
 const app = express();
@@ -30,6 +30,7 @@ app.get("/", (_req, res) => {
 });
 
 app.use("/auth", authRouter)
+app.use("/dashboard", dashboardRouter);
 app.use("/students", studentRouter);
 app.use("/coaches", coachRouter);
 app.use("/staff", staffRouter);
