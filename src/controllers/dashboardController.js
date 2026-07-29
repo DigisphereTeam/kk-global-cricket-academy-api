@@ -6,8 +6,7 @@ exports.getDashboardStatistics = async (req, res) => {
     const [
       students,
       trainers,
-      groundBookings,
-      upcomingEvents
+      groundBookings
     ] = await Promise.all([
       pool.query(`
         SELECT COUNT(*) AS total_students
@@ -20,12 +19,30 @@ exports.getDashboardStatistics = async (req, res) => {
       pool.query(`
         SELECT COUNT(*) AS ground_bookings
         FROM tbl_ground_booking
-      `),
+      `)
+    ]);
+
+    const [
+      upcomingEventsCount,
+      upcomingEvents,
+    ] = await Promise.all([
       pool.query(`
         SELECT COUNT(*) AS upcoming_events
         FROM tbl_events
         WHERE LOWER(status) = 'upcoming'
-      `)
+      `),
+      pool.query(`
+        SELECT
+          event_id,
+          event_name,
+          event_type,
+          venue,
+          event_date
+        FROM tbl_events
+        WHERE LOWER(status) = 'upcoming'
+        ORDER BY event_date ASC
+        LIMIT 3
+      `),
     ]);
 
     return sendSuccessResponse(
@@ -38,9 +55,10 @@ exports.getDashboardStatistics = async (req, res) => {
         trainers: Number(trainers.rows[0].total_trainers),
         pending_fees: 0,
         ground_bookings: Number(groundBookings.rows[0].ground_bookings),
-        upcoming_events: Number(upcomingEvents.rows[0].upcoming_events),
         attendance: 0,
-        approvals: 0
+        approvals: 0,
+        upcoming_events: Number(upcomingEventsCount.rows[0].upcoming_events),
+        upcoming_events_list: upcomingEvents.rows,
       }
     );
   } catch (error) {

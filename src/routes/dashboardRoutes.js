@@ -7,6 +7,6 @@ const dashboardRouter = express.Router();
 
 dashboardRouter.use(verifyToken);
 
-dashboardRouter.get("/", getDashboardStatistics);
+dashboardRouter.get("/overview", getDashboardStatistics);
 
 module.exports = dashboardRouter;

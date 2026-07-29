@@ -46,6 +46,43 @@ exports.createEmployeeSalary = async (req, res) => {
       );
     }
 
+    // Prevent duplicate salary for the same month and year
+    let existingSalary;
+
+    if (staff_id) {
+      existingSalary = await pool.query(
+        `
+        SELECT salary_id
+        FROM tbl_employee_salary
+        WHERE staff_id = $1
+          AND salary_month = $2
+          AND salary_year = $3
+        LIMIT 1;
+        `,
+        [staff_id, salary_month, salary_year]
+      );
+    } else {
+      existingSalary = await pool.query(
+        `
+        SELECT salary_id
+        FROM tbl_employee_salary
+        WHERE coach_id = $1
+          AND salary_month = $2
+          AND salary_year = $3
+        LIMIT 1;
+        `,
+        [coach_id, salary_month, salary_year]
+      );
+    }
+
+    if (existingSalary.rowCount > 0) {
+      return sendErrorResponse(
+        res,
+        409,
+        "Salary has already been created for the selected employee for this month and year."
+      );
+    }
+
     const net_salary =
       Number(basic_salary) +
       Number(bonus || 0) -
@@ -106,7 +143,7 @@ exports.createEmployeeSalary = async (req, res) => {
 };
 
 exports.getEmployeeSalaries = async (req, res) => {
-  const { employee_type } = req.query;
+  const { employee_type, staff_id, coach_id } = req.query;
 
   try {
     let query = `
@@ -145,15 +182,55 @@ exports.getEmployeeSalaries = async (req, res) => {
         ON es.coach_id = c.coach_id
     `;
 
+    const conditions = [];
     const params = [];
 
-    if (employee_type === "Staff") {
-      query += ` WHERE es.staff_id IS NOT NULL`;
-    } else if (employee_type === "Coach") {
-      query += ` WHERE es.coach_id IS NOT NULL`;
+    // Filter by employee type
+    if (employee_type) {
+      if (employee_type === "Staff") {
+        conditions.push("es.staff_id IS NOT NULL");
+      } else if (employee_type === "Coach") {
+        conditions.push("es.coach_id IS NOT NULL");
+      } else {
+        return sendErrorResponse(
+          res,
+          400,
+          "Invalid employee_type. Allowed values are 'Staff' or 'Coach'."
+        );
+      }
     }
 
-    query += ` ORDER BY es.created_at DESC`;
+    // Filter by specific staff
+    if (staff_id) {
+      params.push(staff_id);
+      conditions.push(`es.staff_id = $${params.length}`);
+    }
+
+    // Filter by specific coach
+    if (coach_id) {
+      params.push(coach_id);
+      conditions.push(`es.coach_id = $${params.length}`);
+    }
+
+    // Prevent both IDs together
+    if (staff_id && coach_id) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Provide either staff_id or coach_id, not both."
+      );
+    }
+
+    if (conditions.length > 0) {
+      query += ` WHERE ${conditions.join(" AND ")}`;
+    }
+
+    query += `
+      ORDER BY
+        es.salary_year DESC,
+        es.salary_month DESC,
+        es.created_at DESC
+    `;
 
     const result = await pool.query(query, params);
 
