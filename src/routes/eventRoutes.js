@@ -16,6 +16,6 @@ eventRouter.get("/:event_id", getEventById);
 
 eventRouter.patch("/:event_id", validateRequestBody, updateEvent);
 
-eventRouter.delete("/:event_id", deleteEvent);
+eventRouter.delete("/:event_id", checkRole("ADMIN"), deleteEvent);
 
 module.exports = eventRouter;

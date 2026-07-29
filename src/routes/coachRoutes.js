@@ -18,6 +18,6 @@ coachRouter.get("/:id", getCoachById);
 
 coachRouter.patch("/:id", validateRequestBody, updateCoach);
 
-coachRouter.delete("/:id", deleteCoach);
+coachRouter.delete("/:id", checkRole("ADMIN"), deleteCoach);
 
 module.exports = coachRouter;

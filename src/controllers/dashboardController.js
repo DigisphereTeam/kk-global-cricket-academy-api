@@ -9,8 +9,8 @@ exports.getDashboardStatistics = async (req, res) => {
       groundBookings
     ] = await Promise.all([
       pool.query(`
-        SELECT COUNT(*) AS total_students
-        FROM tbl_students
+        SELECT COUNT(*) AS total_players
+        FROM tbl_players
       `),
       pool.query(`
         SELECT COUNT(*) AS total_trainers
@@ -50,8 +50,8 @@ exports.getDashboardStatistics = async (req, res) => {
       200,
       "Dashboard statistics fetched successfully.",
       {
-        total_students: Number(students.rows[0].total_students),
-        active_students: 0,
+        total_players: Number(students.rows[0].total_players),
+        active_players: 0,
         trainers: Number(trainers.rows[0].total_trainers),
         pending_fees: 0,
         ground_bookings: Number(groundBookings.rows[0].ground_bookings),

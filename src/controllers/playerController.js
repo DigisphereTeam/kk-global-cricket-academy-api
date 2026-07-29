@@ -2,7 +2,7 @@ const pool = require("../config/dbConfig");
 const { sendSuccessResponse, sendErrorResponse } = require("../utils/apiResponse");
 
 
-exports.createStudentAdmission = async (req, res) => {
+exports.createPlayerAdmission = async (req, res) => {
   const {
     admission_id,
     full_name,
@@ -100,7 +100,7 @@ exports.createStudentAdmission = async (req, res) => {
     const existingStudent = await pool.query(
       `
       SELECT 1
-      FROM tbl_students
+      FROM tbl_players
       WHERE phone_number = $1
          OR email = $2
       LIMIT 1
@@ -119,7 +119,7 @@ exports.createStudentAdmission = async (req, res) => {
     // Create Student
     const result = await pool.query(
       `
-      INSERT INTO tbl_students
+      INSERT INTO tbl_players
       (
         admission_id,
         full_name,
@@ -196,15 +196,15 @@ exports.createStudentAdmission = async (req, res) => {
   }
 };
 
-exports.getAllStudents = async (req, res) => {
+exports.getAllPlayers = async (req, res) => {
 
   try {
 
     const result = await pool.query(
       `
       SELECT *
-      FROM tbl_students
-      ORDER BY student_id DESC
+      FROM tbl_players
+      ORDER BY player_id DESC
       `
     );
 
@@ -233,18 +233,18 @@ exports.getAllStudents = async (req, res) => {
 };
 
 
-exports.getStudentById = async (req, res) => {
+exports.getPlayerById = async (req, res) => {
 
-  const { student_id } = req.params;
+  const { player_id } = req.params;
 
-  if (!student_id) {
+  if (!player_id) {
     return sendErrorResponse(
       res,
       400,
       "Student ID is required"
     );
   }
-  if (!student_id || isNaN(student_id)) {
+  if (!player_id || isNaN(player_id)) {
     return sendErrorResponse(
       res,
       400,
@@ -258,10 +258,10 @@ exports.getStudentById = async (req, res) => {
     const result = await pool.query(
       `
       SELECT *
-      FROM tbl_students
-      WHERE student_id=$1
+      FROM tbl_players
+      WHERE player_id=$1
       `,
-      [student_id]
+      [player_id]
     );
 
 
@@ -297,14 +297,14 @@ exports.getStudentById = async (req, res) => {
 };
 
 
-exports.updateStudent = async (req, res) => {
-  const { student_id } = req.params;
+exports.updatePlayer = async (req, res) => {
+  const { player_id } = req.params;
 
-  if (!student_id) {
+  if (!player_id) {
     return sendErrorResponse(res, 400, "Student ID is required");
   }
 
-  if (isNaN(student_id)) {
+  if (isNaN(player_id)) {
     return sendErrorResponse(res, 400, "Invalid student ID");
   }
 
@@ -359,12 +359,12 @@ exports.updateStudent = async (req, res) => {
       const existingStudent = await pool.query(
         `
         SELECT 1
-        FROM tbl_students
+        FROM tbl_players
         WHERE phone_number = $1
-          AND student_id <> $2
+          AND player_id <> $2
         LIMIT 1
         `,
-        [req.body.phone_number, student_id]
+        [req.body.phone_number, player_id]
       );
 
       if (existingStudent.rowCount > 0) {
@@ -381,12 +381,12 @@ exports.updateStudent = async (req, res) => {
       const existingEmail = await pool.query(
         `
         SELECT 1
-        FROM tbl_students
+        FROM tbl_players
         WHERE email = $1
-          AND student_id <> $2
+          AND player_id <> $2
         LIMIT 1
         `,
-        [req.body.email, student_id]
+        [req.body.email, player_id]
       );
 
       if (existingEmail.rowCount > 0) {
@@ -398,14 +398,14 @@ exports.updateStudent = async (req, res) => {
       }
     }
 
-    // Add student_id for WHERE clause
-    values.push(student_id);
+    // Add player_id for WHERE clause
+    values.push(player_id);
 
     const result = await pool.query(
       `
-      UPDATE tbl_students
+      UPDATE tbl_players
       SET ${updates.join(", ")}
-      WHERE student_id = $${index}
+      WHERE player_id = $${index}
       RETURNING *;
       `,
       values
@@ -435,18 +435,18 @@ exports.updateStudent = async (req, res) => {
 };
 
 
-exports.deleteStudent = async (req, res) => {
+exports.deletePlayer = async (req, res) => {
 
-  const { student_id } = req.params;
+  const { player_id } = req.params;
 
-  if (!student_id) {
+  if (!player_id) {
     return sendErrorResponse(
       res,
       400,
       "Student ID is required"
     );
   }
-  if (!student_id || isNaN(student_id)) {
+  if (!player_id || isNaN(player_id)) {
     return sendErrorResponse(
       res,
       400,
@@ -459,11 +459,11 @@ exports.deleteStudent = async (req, res) => {
 
     const result = await pool.query(
       `
-      DELETE FROM tbl_students
-      WHERE student_id=$1
+      DELETE FROM tbl_players
+      WHERE player_id=$1
       RETURNING *
       `,
-      [student_id]
+      [player_id]
     );
 
 
@@ -498,7 +498,7 @@ exports.deleteStudent = async (req, res) => {
 };
 
 
-exports.searchStudents = async (req, res) => {
+exports.searchPlayers = async (req, res) => {
   const { keyword } = req.query;
 
   if (!keyword || !keyword.trim()) {
@@ -515,13 +515,13 @@ exports.searchStudents = async (req, res) => {
     const result = await pool.query(
       `
       SELECT *
-      FROM tbl_students
+      FROM tbl_players
       WHERE
         full_name ILIKE $1
         OR admission_id ILIKE $1
         OR phone_number ILIKE $1
         OR school ILIKE $1
-      ORDER BY student_id DESC;
+      ORDER BY player_id DESC;
       `,
       [searchKeyword]
     );
@@ -544,7 +544,7 @@ exports.searchStudents = async (req, res) => {
   }
 };
 
-exports.getStudentAnalytics = async (req, res) => {
+exports.getPlayerAnalytics = async (req, res) => {
 
   try {
 
@@ -569,7 +569,7 @@ exports.getStudentAnalytics = async (req, res) => {
           WHERE gender = 'Female'
         ) AS female_students
 
-      FROM tbl_students
+      FROM tbl_players
       `
     );
 

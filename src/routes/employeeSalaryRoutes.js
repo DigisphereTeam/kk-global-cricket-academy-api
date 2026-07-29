@@ -17,6 +17,6 @@ employeeSalaryRoutes.get("/:salary_id", getEmployeeSalaryById);
 
 employeeSalaryRoutes.patch("/:salary_id", validateRequestBody, updateEmployeeSalary);
 
-employeeSalaryRoutes.delete("/:salary_id", deleteEmployeeSalary);
+employeeSalaryRoutes.delete("/:salary_id", checkRole("ADMIN"), deleteEmployeeSalary);
 
 module.exports = employeeSalaryRoutes;
