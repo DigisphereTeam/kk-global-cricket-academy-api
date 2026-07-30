@@ -8,88 +8,32 @@ const statusFlow = {
     Cancelled: [],
 };
 
-// exports.createGround = async (req, res) => {
-//     const {
-//         ground_name,
-//         ground_type,
-//         location,
-//         hourly_rate,
-//         status
-//     } = req.body;
-
-//     try {
-
-//         const groundExists = await pool.query(
-//             `SELECT * FROM tbl_ground
-//              WHERE LOWER(ground_name) = LOWER($1)`,
-//             [ground_name]
-//         );
-
-//         if (groundExists.rows.length > 0) {
-//             return res.status(409).json({
-//                 success: false,
-//                 statusCode: 409,
-//                 message: "Ground already exists."
-//             });
-//         }
-
-//         const result = await pool.query(
-//             `INSERT INTO tbl_ground
-//             (
-//                 ground_name,
-//                 ground_type,
-//                 location,
-//                 hourly_rate,
-//                 status
-//             )
-//             VALUES
-//             ($1,$2,$3,$4,$5)
-//             RETURNING *`,
-//             [
-//                 ground_name,
-//                 ground_type,
-//                 location,
-//                 hourly_rate,
-//                 status
-//             ]
-//         );
-
-//         return res.status(201).json({
-//             success: true,
-//             statusCode: 201,
-//             message: "Ground created successfully.",
-//             data: result.rows[0]
-//         });
-
-//     } catch (error) {
-//         return res.status(500).json({
-//             success: false,
-//             statusCode: 500,
-//             message: error.message
-//         });
-//     }
-// };
-
 exports.createGroundBooking = async (req, res) => {
-    const {
-        customer_name,
-        customer_phone,
-        ground_name,
-        purpose,
-        booking_date,
-        time_slot,
-        payment_type,
-        total_amount,
-        advance_paid,
-    } = req.body;
-
     try {
+        let {
+            customer_name,
+            customer_phone,
+            purpose,
+            booking_date,
+            time_slot,
+            payment_type,
+            total_amount,
+            advance_paid,
+            remarks,
+        } = req.body;
 
+        // Trim string values
+        customer_name = customer_name?.trim();
+        customer_phone = customer_phone?.trim();
+        purpose = purpose?.trim();
+        payment_type = payment_type?.trim();
+        time_slot = time_slot?.trim();
+        remarks = remarks?.trim() || null;
+
+        // Required field validation
         if (
             !customer_name ||
             !customer_phone ||
-            !ground_name ||
-            !purpose ||
             !booking_date ||
             !time_slot ||
             !payment_type ||
@@ -99,10 +43,11 @@ exports.createGroundBooking = async (req, res) => {
             return sendErrorResponse(
                 res,
                 400,
-                "All fields are required."
+                "Customer name, phone number, booking date, time slot, payment type, total amount, and advance paid are required."
             );
         }
 
+        // Phone validation
         if (!/^[6-9]\d{9}$/.test(customer_phone)) {
             return sendErrorResponse(
                 res,
@@ -111,11 +56,54 @@ exports.createGroundBooking = async (req, res) => {
             );
         }
 
-        if (total_amount <= 0 || advance_paid < 0) {
+        // Booking date validation
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const bookingDate = new Date(booking_date);
+        bookingDate.setHours(0, 0, 0, 0);
+
+        if (bookingDate < today) {
             return sendErrorResponse(
                 res,
                 400,
-                "Invalid payment amount."
+                "Booking date cannot be in the past."
+            );
+        }
+
+        // Payment type validation
+        const allowedPaymentTypes = [
+            "Cash",
+            "UPI",
+            "Card",
+            "Bank Transfer",
+        ];
+
+        if (!allowedPaymentTypes.includes(payment_type)) {
+            return sendErrorResponse(
+                res,
+                400,
+                "Invalid payment type."
+            );
+        }
+
+        // Amount validation
+        total_amount = Number(total_amount);
+        advance_paid = Number(advance_paid);
+
+        if (isNaN(total_amount) || total_amount <= 0) {
+            return sendErrorResponse(
+                res,
+                400,
+                "Total amount must be greater than 0."
+            );
+        }
+
+        if (isNaN(advance_paid) || advance_paid < 0) {
+            return sendErrorResponse(
+                res,
+                400,
+                "Advance paid cannot be negative."
             );
         }
 
@@ -123,61 +111,57 @@ exports.createGroundBooking = async (req, res) => {
             return sendErrorResponse(
                 res,
                 400,
-                "Advance amount cannot be greater than total amount."
+                "Advance paid cannot be greater than the total amount."
             );
         }
 
+        // Check duplicate booking for same date & slot
         const existingBooking = await pool.query(
             `
-            SELECT 1
+            SELECT booking_id
             FROM tbl_ground_booking
-            WHERE LOWER(ground_name) = LOWER($1)
-            AND booking_date = $2
-            AND time_slot = $3
+            WHERE booking_date = $1
+                AND time_slot = $2
+                AND status != 'Cancelled'
             `,
-            [
-                ground_name.trim(),
-                booking_date,
-                time_slot,
-            ]
+            [booking_date, time_slot]
         );
 
         if (existingBooking.rowCount > 0) {
             return sendErrorResponse(
                 res,
                 409,
-                "This ground is already booked for the selected date and time slot."
+                "The selected time slot is already booked."
             );
         }
 
+        // Insert booking
         const booking = await pool.query(
             `
-            INSERT INTO tbl_ground_booking
-            (
+      INSERT INTO tbl_ground_booking (
+        customer_name,
+        customer_phone,
+        purpose,
+        booking_date,
+        time_slot,
+        payment_type,
+        total_amount,
+        advance_paid,
+        remarks
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      RETURNING *
+      `,
+            [
                 customer_name,
                 customer_phone,
-                ground_name,
                 purpose,
                 booking_date,
                 time_slot,
                 payment_type,
                 total_amount,
-                advance_paid
-            )
-            VALUES
-            ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-            RETURNING *
-            `,
-            [
-                customer_name.trim(),
-                customer_phone,
-                ground_name.trim(),
-                purpose.trim(),
-                booking_date,
-                time_slot,
-                payment_type,
-                total_amount,
                 advance_paid,
+                remarks,
             ]
         );
 
@@ -187,7 +171,6 @@ exports.createGroundBooking = async (req, res) => {
             "Ground booking created successfully.",
             booking.rows[0]
         );
-
     } catch (error) {
         return sendErrorResponse(
             res,

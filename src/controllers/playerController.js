@@ -4,18 +4,18 @@ const { sendSuccessResponse, sendErrorResponse } = require("../utils/apiResponse
 
 exports.createPlayerAdmission = async (req, res) => {
   const {
-    admission_id,
     full_name,
     gender,
     age,
+    date_of_birth,
+    admission_date,
     phone_number,
     email,
     address,
     school,
-    playing_role,
-    batting_style,
-    batch,
     admission_fee,
+    payment_type,
+    remarks,
     father_name,
     father_phone,
     father_occupation,
@@ -26,25 +26,20 @@ exports.createPlayerAdmission = async (req, res) => {
     contact_phone,
     blood_group,
     allergies,
-    medical_conditions,
+    height,
+    weight,
   } = req.body;
 
   try {
-
+    // Required field validation
     if (
-      !admission_id ||
       !full_name ||
       !gender ||
       age == null ||
       !phone_number ||
-      !email ||
       !address ||
-      !school ||
-      !playing_role ||
-      !batting_style ||
       admission_fee == null ||
-      !father_name ||
-      !father_phone
+      !payment_type
     ) {
       return sendErrorResponse(
         res,
@@ -53,14 +48,20 @@ exports.createPlayerAdmission = async (req, res) => {
       );
     }
 
-    if (
-      !/^[6-9]\d{9}$/.test(phone_number) ||
-      !/^[6-9]\d{9}$/.test(father_phone)
-    ) {
+    // Phone number validations
+    if (!/^[6-9]\d{9}$/.test(phone_number)) {
       return sendErrorResponse(
         res,
         400,
-        "Invalid phone number."
+        "Invalid player phone number."
+      );
+    }
+
+    if (father_phone && !/^[6-9]\d{9}$/.test(father_phone)) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Invalid father phone number."
       );
     }
 
@@ -80,7 +81,8 @@ exports.createPlayerAdmission = async (req, res) => {
       );
     }
 
-    if (!/^\S+@\S+\.\S+$/.test(email)) {
+    // Email validation (optional)
+    if (email && !/^\S+@\S+\.\S+$/.test(email)) {
       return sendErrorResponse(
         res,
         400,
@@ -88,27 +90,66 @@ exports.createPlayerAdmission = async (req, res) => {
       );
     }
 
-    if (age <= 0 || admission_fee < 0) {
+    // Numeric validations
+    if (Number(age) <= 0) {
       return sendErrorResponse(
         res,
         400,
-        "Invalid age or admission fee."
+        "Age must be greater than 0."
+      );
+    }
+
+    if (Number(admission_fee) < 0) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Admission fee cannot be negative."
+      );
+    }
+
+    if (height != null && Number(height) <= 0) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Height must be greater than 0."
+      );
+    }
+
+    if (weight != null && Number(weight) <= 0) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Weight must be greater than 0."
       );
     }
 
     // Duplicate check
-    const existingStudent = await pool.query(
-      `
-      SELECT 1
-      FROM tbl_players
-      WHERE phone_number = $1
-         OR email = $2
-      LIMIT 1
-      `,
-      [phone_number, email]
-    );
+    let existingPlayer;
 
-    if (existingStudent.rowCount > 0) {
+    if (email) {
+      existingPlayer = await pool.query(
+        `
+        SELECT 1
+        FROM tbl_players
+        WHERE phone_number = $1
+           OR LOWER(email) = LOWER($2)
+        LIMIT 1
+        `,
+        [phone_number, email.trim()]
+      );
+    } else {
+      existingPlayer = await pool.query(
+        `
+        SELECT 1
+        FROM tbl_players
+        WHERE phone_number = $1
+        LIMIT 1
+        `,
+        [phone_number]
+      );
+    }
+
+    if (existingPlayer.rowCount > 0) {
       return sendErrorResponse(
         res,
         409,
@@ -116,23 +157,22 @@ exports.createPlayerAdmission = async (req, res) => {
       );
     }
 
-    // Create Student
+    // Insert player
     const result = await pool.query(
       `
-      INSERT INTO tbl_players
-      (
-        admission_id,
+      INSERT INTO tbl_players (
         full_name,
         gender,
         age,
+        date_of_birth,
+        admission_date,
         phone_number,
         email,
         address,
         school,
-        playing_role,
-        batting_style,
-        batch,
         admission_fee,
+        payment_type,
+        remarks,
         father_name,
         father_phone,
         father_occupation,
@@ -143,40 +183,41 @@ exports.createPlayerAdmission = async (req, res) => {
         contact_phone,
         blood_group,
         allergies,
-        medical_conditions
+        height,
+        weight
       )
-      VALUES
-      (
+      VALUES (
         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-        COALESCE($11,'Morning'),
-        $12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23
+        $11,$12,$13,$14,$15,$16,$17,$18,
+        $19,$20,$21,$22,$23,$24
       )
-      RETURNING *
+      RETURNING *;
       `,
       [
-        admission_id,
         full_name.trim(),
         gender,
-        age,
-        phone_number,
-        email.trim().toLowerCase(),
+        Number(age),
+        date_of_birth || null,
+        admission_date || null,
+        phone_number.trim(),
+        email ? email.trim().toLowerCase() : null,
         address.trim(),
-        school.trim(),
-        playing_role,
-        batting_style,
-        batch,
-        admission_fee,
-        father_name.trim(),
-        father_phone,
-        father_occupation,
-        mother_name,
-        mother_phone,
-        contact_name,
-        relation,
-        contact_phone,
-        blood_group,
-        allergies,
-        medical_conditions,
+        school?.trim() || null,
+        Number(admission_fee),
+        payment_type.trim(),
+        remarks?.trim() || null,
+        father_name?.trim() || null,
+        father_phone || null,
+        father_occupation?.trim() || null,
+        mother_name?.trim() || null,
+        mother_phone || null,
+        contact_name?.trim() || null,
+        relation?.trim() || null,
+        contact_phone || null,
+        blood_group || null,
+        allergies?.trim() || null,
+        height != null ? Number(height) : null,
+        weight != null ? Number(weight) : null,
       ]
     );
 
@@ -186,7 +227,6 @@ exports.createPlayerAdmission = async (req, res) => {
       "Player admission created successfully.",
       result.rows[0]
     );
-
   } catch (error) {
     return sendErrorResponse(
       res,
