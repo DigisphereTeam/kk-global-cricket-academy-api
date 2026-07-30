@@ -2,7 +2,7 @@ const pool = require("../config/dbConfig");
 const { sendErrorResponse, sendSuccessResponse } = require("../utils/apiResponse");
 
 exports.createExpenditure = async (req, res) => {
-  const {
+  let {
     title,
     amount,
     payment_method,
@@ -11,21 +11,23 @@ exports.createExpenditure = async (req, res) => {
   } = req.body;
 
   try {
-
+    // Required field validation
     if (
       !title ||
       amount == null ||
-      !payment_method ||
-      !expenditure_date
+      !payment_method
     ) {
       return sendErrorResponse(
         res,
         400,
-        "All required fields must be provided."
+        "Expense name, amount, and payment method are required."
       );
     }
 
-    if (amount <= 0) {
+    // Amount validation
+    amount = Number(amount);
+
+    if (isNaN(amount) || amount <= 0) {
       return sendErrorResponse(
         res,
         400,
@@ -33,6 +35,24 @@ exports.createExpenditure = async (req, res) => {
       );
     }
 
+    // Payment method validation
+    const allowedPaymentMethods = [
+      "Cash",
+      "UPI",
+      "Card",
+      "Bank Transfer",
+      "Cheque",
+    ];
+
+    if (!allowedPaymentMethods.includes(payment_method)) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Invalid payment method."
+      );
+    }
+
+    // Insert expenditure
     const result = await pool.query(
       `
       INSERT INTO tbl_expenditure
@@ -44,15 +64,21 @@ exports.createExpenditure = async (req, res) => {
         purpose
       )
       VALUES
-      ($1,$2,$3,$4,$5)
-      RETURNING *
+      (
+        $1,
+        $2,
+        $3,
+        COALESCE($4, CURRENT_DATE),
+        $5
+      )
+      RETURNING *;
       `,
       [
         title.trim(),
         amount,
         payment_method,
-        expenditure_date,
-        purpose,
+        expenditure_date || null,
+        purpose?.trim() || null,
       ]
     );
 
@@ -62,7 +88,6 @@ exports.createExpenditure = async (req, res) => {
       "Expenditure added successfully.",
       result.rows[0]
     );
-
   } catch (error) {
     return sendErrorResponse(
       res,

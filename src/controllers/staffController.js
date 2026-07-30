@@ -11,7 +11,10 @@ exports.addStaff = async (req, res) => {
     join_date,
   } = req.body;
 
+  let client;
+
   try {
+
     if (
       !full_name ||
       !phone_number ||
@@ -43,7 +46,14 @@ exports.addStaff = async (req, res) => {
       );
     }
 
-    const existingStaff = await pool.query(
+
+    client = await pool.connect();
+
+    await client.query("BEGIN");
+
+
+    // Check duplicate phone number
+    const existingStaff = await client.query(
       `
       SELECT 1
       FROM tbl_staff
@@ -53,7 +63,11 @@ exports.addStaff = async (req, res) => {
       [phone_number]
     );
 
+
     if (existingStaff.rowCount > 0) {
+
+      await client.query("ROLLBACK");
+
       return sendErrorResponse(
         res,
         409,
@@ -61,10 +75,50 @@ exports.addStaff = async (req, res) => {
       );
     }
 
-    const result = await pool.query(
+
+    const currentYear = new Date().getFullYear();
+
+    const yearCode = String(currentYear).slice(-2);
+
+    const prefix = `ST${yearCode}`;
+
+
+    // Prevent duplicate code generation
+    await client.query(
+      `SELECT pg_advisory_xact_lock($1)`,
+      [currentYear]
+    );
+
+
+    const staffNumberResult = await client.query(
+      `
+      SELECT COALESCE(
+        MAX(
+          CAST(SUBSTRING(staff_code FROM 5) AS INTEGER)
+        ),
+        0
+      ) AS last_number
+      FROM tbl_staff
+      WHERE staff_code LIKE $1
+      `,
+      [`${prefix}%`]
+    );
+
+
+    const nextNumber =
+      Number(staffNumberResult.rows[0].last_number) + 1;
+
+
+    const staff_code =
+      `${prefix}${String(nextNumber).padStart(4, "0")}`;
+
+
+    const result = await client.query(
       `
       INSERT INTO tbl_staff
       (
+        staff_code,
+        id_increment,
         full_name,
         phone_number,
         department,
@@ -73,10 +127,12 @@ exports.addStaff = async (req, res) => {
         join_date
       )
       VALUES
-      ($1,$2,$3,$4,$5,$6)
+      ($1,$2,$3,$4,$5,$6,$7,$8)
       RETURNING *
       `,
       [
+        staff_code,
+        nextNumber,
         full_name.trim(),
         phone_number,
         department.trim(),
@@ -86,6 +142,10 @@ exports.addStaff = async (req, res) => {
       ]
     );
 
+
+    await client.query("COMMIT");
+
+
     return sendSuccessResponse(
       res,
       201,
@@ -93,12 +153,25 @@ exports.addStaff = async (req, res) => {
       result.rows[0]
     );
 
+
   } catch (error) {
+
+    if (client) {
+      await client.query("ROLLBACK");
+    }
+
     return sendErrorResponse(
       res,
       500,
       error.message || "Internal Server Error"
     );
+
+  } finally {
+
+    if (client) {
+      client.release();
+    }
+
   }
 };
 

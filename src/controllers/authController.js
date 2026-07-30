@@ -125,17 +125,20 @@ exports.signUp = async (req, res) => {
 };
 
 exports.signIn = async (req, res) => {
-  const { email, password } = req.body;
+  let { email, password } = req.body;
 
   if (!email) {
-    return sendErrorResponse(res, 400, "Email is required");
+    return sendErrorResponse(res, 400, "Email is required.");
   }
 
   if (!password) {
-    return sendErrorResponse(res, 400, "Password is required");
+    return sendErrorResponse(res, 400, "Password is required.");
   }
 
   try {
+    // Normalize email
+    email = email.trim().toLowerCase();
+
     const result = await pool.query(
       `
       SELECT *
@@ -150,7 +153,7 @@ exports.signIn = async (req, res) => {
       return sendErrorResponse(
         res,
         401,
-        "Invalid email or password"
+        "Invalid email or password."
       );
     }
 
@@ -165,7 +168,7 @@ exports.signIn = async (req, res) => {
       return sendErrorResponse(
         res,
         401,
-        "Invalid email or password"
+        "Invalid email or password."
       );
     }
 
@@ -185,7 +188,7 @@ exports.signIn = async (req, res) => {
     return sendSuccessResponse(
       res,
       200,
-      "Sign in successful",
+      "Sign in successful.",
       {
         token,
         user,
