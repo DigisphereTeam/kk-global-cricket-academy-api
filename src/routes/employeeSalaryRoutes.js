@@ -1,24 +1,26 @@
 const express = require("express");
-const { createEmployeeSalary, getEmployeeSalaries, getEmployeeSalaryById, updateEmployeeSalary, deleteEmployeeSalary, getEmployeeSalaryHistory } = require("../controllers/employeeSalaryController");
+const { createEmployeeSalary, getEmployeeSalaries, getEmployeeSalaryById, updateEmployeeSalary, deleteEmployeeSalary, getEmployeeSalaryHistory, getEligibleEmployees } = require("../controllers/employeeSalaryController");
 const validateRequestBody = require("../middlewares/validateRequestBody");
 const verifyToken = require("../middlewares/verifyToken");
 const { checkRole } = require("../middlewares/checkRole");
 
-const employeeSalaryRoutes = express.Router();
+const employeeSalaryRouter = express.Router();
 
 
-employeeSalaryRoutes.use(verifyToken);
+employeeSalaryRouter.use(verifyToken);
 
-employeeSalaryRoutes.post("/", validateRequestBody, checkRole("PRIMARY"), createEmployeeSalary);
+employeeSalaryRouter.post("/", validateRequestBody, checkRole("PRIMARY"), createEmployeeSalary);
 
-employeeSalaryRoutes.get("/", getEmployeeSalaries);
+employeeSalaryRouter.get("/", getEmployeeSalaries);
 
-employeeSalaryRoutes.get("/history", getEmployeeSalaryHistory);
+employeeSalaryRouter.get("/history", getEmployeeSalaryHistory);
 
-employeeSalaryRoutes.get("/:salary_id", getEmployeeSalaryById);
+employeeSalaryRouter.get("/eligible-employees", getEligibleEmployees);
 
-employeeSalaryRoutes.patch("/:salary_id", validateRequestBody, updateEmployeeSalary);
+employeeSalaryRouter.get("/:salary_id", getEmployeeSalaryById);
 
-employeeSalaryRoutes.delete("/:salary_id", checkRole("ADMIN"), deleteEmployeeSalary);
+employeeSalaryRouter.patch("/:salary_id", validateRequestBody, updateEmployeeSalary);
 
-module.exports = employeeSalaryRoutes;
+employeeSalaryRouter.delete("/:salary_id", checkRole("ADMIN"), deleteEmployeeSalary);
+
+module.exports = employeeSalaryRouter;
