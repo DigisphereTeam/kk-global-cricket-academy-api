@@ -6,10 +6,11 @@ const validateRequestBody = require("../middlewares/validateRequestBody");
 const verifyToken = require("../middlewares/verifyToken");
 const { checkRole } = require("../middlewares/checkRole");
 const { createPlayerAdmission, getAllPlayers, searchPlayers, getPlayerById, updatePlayer, deletePlayer } = require("../controllers/playerController");
+const fileUpload = require("../middlewares/uploadMiddleware");
 
 playerRouter.use(verifyToken);
 
-playerRouter.post("/", validateRequestBody, checkRole("PRIMARY"), createPlayerAdmission);
+playerRouter.post("/", fileUpload.single("file"), validateRequestBody, checkRole("PRIMARY"), createPlayerAdmission);
 
 playerRouter.get("/", getAllPlayers);
 

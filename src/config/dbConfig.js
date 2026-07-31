@@ -1,6 +1,9 @@
 require("dotenv").config();
 
-const { Pool } = require("pg");
+const { Pool, types } = require("pg");
+
+// Return PostgreSQL DATE columns as strings instead of JavaScript Date objects
+types.setTypeParser(1082, (value) => value);
 
 const pool = new Pool({
   user: process.env.DB_USER,

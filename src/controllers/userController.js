@@ -4,7 +4,7 @@ const { sendErrorResponse, sendSuccessResponse } = require("../utils/apiResponse
 const pool = require("../config/dbConfig");
 
 exports.registerPrimary = async (req, res) => {
-  const {
+  let {
     full_name,
     email,
     phone_number,
@@ -25,6 +25,10 @@ exports.registerPrimary = async (req, res) => {
       );
     }
 
+    full_name = full_name.trim();
+    email = email.trim().toLowerCase();
+    phone_number = phone_number.trim();
+
     const existingUser = await pool.query(
       `
       SELECT user_id
@@ -35,7 +39,7 @@ exports.registerPrimary = async (req, res) => {
       [email, phone_number]
     );
 
-    if (existingUser.rows.length > 0) {
+    if (existingUser.rowCount > 0) {
       return sendErrorResponse(
         res,
         409,
@@ -60,12 +64,12 @@ exports.registerPrimary = async (req, res) => {
         $1,$2,$3,$4,'PRIMARY'
       )
       RETURNING
-      user_id,
-      full_name,
-      email,
-      phone_number,
-      role,
-      created_at;
+        user_id,
+        full_name,
+        email,
+        phone_number,
+        role,
+        created_at;
       `,
       [
         full_name,

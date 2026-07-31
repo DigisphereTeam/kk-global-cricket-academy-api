@@ -6,12 +6,9 @@ exports.createEmployeeSalary = async (req, res) => {
   const {
     staff_id,
     coach_id,
-    salary_month,
-    salary_year,
     basic_salary,
     bonus,
     deduction,
-    payment_status,
     payment_date,
     remarks,
   } = req.body;
@@ -34,19 +31,57 @@ exports.createEmployeeSalary = async (req, res) => {
       );
     }
 
-    if (
-      salary_month === undefined ||
-      salary_year === undefined ||
-      basic_salary === undefined
-    ) {
+    // Required fields
+    if (basic_salary === undefined || !payment_date) {
       return sendErrorResponse(
         res,
         400,
-        "salary month, salary year and basic salary are required."
+        "Basic salary and payment date are required."
       );
     }
 
-    // Prevent duplicate salary for the same month and year
+    // Validate payment date
+    const paymentDateObj = new Date(payment_date);
+
+    if (isNaN(paymentDateObj.getTime())) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Invalid payment date."
+      );
+    }
+
+    const salary_month = paymentDateObj.getMonth() + 1; // 1-12
+    const salary_year = paymentDateObj.getFullYear();
+
+    // Basic salary validation
+    if (Number(basic_salary) <= 0) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Basic salary must be greater than zero."
+      );
+    }
+
+    // Bonus validation
+    if (bonus != null && Number(bonus) < 0) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Bonus cannot be negative."
+      );
+    }
+
+    // Deduction validation
+    if (deduction != null && Number(deduction) < 0) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Deduction cannot be negative."
+      );
+    }
+
+    // Prevent duplicate salary
     let existingSalary;
 
     if (staff_id) {
@@ -59,7 +94,11 @@ exports.createEmployeeSalary = async (req, res) => {
           AND salary_year = $3
         LIMIT 1;
         `,
-        [staff_id, salary_month, salary_year]
+        [
+          staff_id,
+          salary_month,
+          salary_year,
+        ]
       );
     } else {
       existingSalary = await pool.query(
@@ -71,7 +110,11 @@ exports.createEmployeeSalary = async (req, res) => {
           AND salary_year = $3
         LIMIT 1;
         `,
-        [coach_id, salary_month, salary_year]
+        [
+          coach_id,
+          salary_month,
+          salary_year,
+        ]
       );
     }
 
@@ -115,13 +158,13 @@ exports.createEmployeeSalary = async (req, res) => {
         coach_id || null,
         salary_month,
         salary_year,
-        basic_salary,
-        bonus || 0,
-        deduction || 0,
+        Number(basic_salary),
+        Number(bonus || 0),
+        Number(deduction || 0),
         net_salary,
-        payment_status || "Paid",
-        payment_date || null,
-        remarks || null,
+        "Paid",
+        payment_date,
+        remarks?.trim() || null,
       ]
     );
 
@@ -137,110 +180,259 @@ exports.createEmployeeSalary = async (req, res) => {
     return sendErrorResponse(
       res,
       500,
-      error.message || "Failed to create employee salary.",
+      error.message || "Failed to create employee salary."
     );
   }
 };
 
 exports.getEmployeeSalaries = async (req, res) => {
-  const { employee_type, staff_id, coach_id } = req.query;
+  const {
+    salary_month,
+    salary_year,
+    employee_type,
+  } = req.query;
 
   try {
-    let query = `
-      SELECT
-        es.salary_id,
-        es.staff_id,
-        es.coach_id,
+    if (!salary_month || !salary_year) {
+      return sendErrorResponse(
+        res,
+        400,
+        "salary_month and salary_year are required."
+      );
+    }
 
-        CASE
-          WHEN es.staff_id IS NOT NULL THEN s.full_name
-          ELSE c.full_name
-        END AS employee_name,
+    if (
+      !Number.isInteger(Number(salary_month)) ||
+      Number(salary_month) < 1 ||
+      Number(salary_month) > 12
+    ) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Invalid salary month."
+      );
+    }
 
-        CASE
-          WHEN es.staff_id IS NOT NULL THEN 'Staff'
-          ELSE 'Coach'
-        END AS employee_type,
 
-        es.salary_month,
-        es.salary_year,
-        es.basic_salary,
-        es.bonus,
-        es.deduction,
-        es.net_salary,
-        es.payment_status,
-        es.payment_date,
-        es.remarks,
-        es.created_at
+    let employeeCondition = "";
 
-      FROM tbl_employee_salary es
-
-      LEFT JOIN tbl_staff s
-        ON es.staff_id = s.staff_id
-
-      LEFT JOIN tbl_coach c
-        ON es.coach_id = c.coach_id
-    `;
-
-    const conditions = [];
-    const params = [];
-
-    // Filter by employee type
     if (employee_type) {
-      if (employee_type === "Staff") {
-        conditions.push("es.staff_id IS NOT NULL");
-      } else if (employee_type === "Coach") {
-        conditions.push("es.coach_id IS NOT NULL");
-      } else {
+      if (employee_type === "Coach") {
+        employeeCondition = `
+          AND es.coach_id IS NOT NULL
+        `;
+      }
+      else if (employee_type === "Staff") {
+        employeeCondition = `
+          AND es.staff_id IS NOT NULL
+        `;
+      }
+      else {
         return sendErrorResponse(
           res,
           400,
-          "Invalid employee_type. Allowed values are 'Staff' or 'Coach'."
+          "Invalid employee_type. Use Coach or Staff."
         );
       }
     }
 
-    // Filter by specific staff
-    if (staff_id) {
-      params.push(staff_id);
-      conditions.push(`es.staff_id = $${params.length}`);
+    let query = `
+(
+  SELECT
+    es.salary_id,
+    c.coach_id AS employee_id,
+    c.full_name AS employee_name,
+    'Coach' AS employee_type,
+
+    $1::INTEGER AS salary_month,
+    $2::INTEGER AS salary_year,
+
+    es.salary_month AS actual_salary_month,
+    es.salary_year AS actual_salary_year,
+
+    es.basic_salary,
+    es.bonus,
+    es.deduction,
+    es.net_salary,
+
+    es.payment_status,
+    es.payment_date,
+    es.remarks
+
+  FROM tbl_coach c
+
+  JOIN LATERAL (
+    SELECT *
+    FROM tbl_employee_salary
+    WHERE coach_id = c.coach_id
+      AND (
+        salary_year < $2
+        OR (
+          salary_year = $2
+          AND salary_month <= $1
+        )
+      )
+    ORDER BY
+      salary_year DESC,
+      salary_month DESC,
+      created_at DESC
+    LIMIT 1
+  ) es ON TRUE
+)
+
+UNION ALL
+
+(
+  SELECT
+    es.salary_id,
+    s.staff_id AS employee_id,
+    s.full_name AS employee_name,
+    'Staff' AS employee_type,
+
+    $1::INTEGER AS salary_month,
+    $2::INTEGER AS salary_year,
+
+    es.salary_month AS actual_salary_month,
+    es.salary_year AS actual_salary_year,
+
+    es.basic_salary,
+    es.bonus,
+    es.deduction,
+    es.net_salary,
+
+    es.payment_status,
+    es.payment_date,
+    es.remarks
+
+  FROM tbl_staff s
+
+  JOIN LATERAL (
+    SELECT *
+    FROM tbl_employee_salary
+    WHERE staff_id = s.staff_id
+      AND (
+        salary_year < $2
+        OR (
+          salary_year = $2
+          AND salary_month <= $1
+        )
+      )
+    ORDER BY
+      salary_year DESC,
+      salary_month DESC,
+      created_at DESC
+    LIMIT 1
+  ) es ON TRUE
+)
+`;
+
+    if (employee_type === "Coach") {
+      query = `
+    SELECT *
+    FROM (${query}) employees
+    WHERE employee_type = 'Coach'
+    ORDER BY employee_name;
+  `;
+    } else if (employee_type === "Staff") {
+      query = `
+    SELECT *
+    FROM (${query}) employees
+    WHERE employee_type = 'Staff'
+    ORDER BY employee_name;
+  `;
+    } else {
+      query = `
+    SELECT *
+    FROM (${query}) employees
+    ORDER BY employee_type, employee_name;
+  `;
     }
 
-    // Filter by specific coach
-    if (coach_id) {
-      params.push(coach_id);
-      conditions.push(`es.coach_id = $${params.length}`);
-    }
+    const result = await pool.query(query, [
+      Number(salary_month),
+      Number(salary_year),
+    ]);
 
-    // Prevent both IDs together
-    if (staff_id && coach_id) {
-      return sendErrorResponse(
-        res,
-        400,
-        "Provide either staff_id or coach_id, not both."
-      );
-    }
+    const requestedMonth = Number(salary_month);
+    const requestedYear = Number(salary_year);
 
-    if (conditions.length > 0) {
-      query += ` WHERE ${conditions.join(" AND ")}`;
-    }
+    const today = new Date();
+    const currentDay = today.getDate();
 
-    query += `
-      ORDER BY
-        es.salary_year DESC,
-        es.salary_month DESC,
-        es.created_at DESC
-    `;
+    const data = result.rows.map((row) => {
+      const actualMonth = Number(row.actual_salary_month);
+      const actualYear = Number(row.actual_salary_year);
 
-    const result = await pool.query(query, params);
+      // Salary already exists for requested month/year
+      if (
+        actualMonth === requestedMonth &&
+        actualYear === requestedYear
+      ) {
+        return {
+          ...row,
+          salary_month: requestedMonth,
+          salary_year: requestedYear,
+          payment_status: row.payment_status,
+          payment_date: row.payment_date,
+        };
+      }
+
+      // Find the month immediately after the latest salary
+      let nextMonth = actualMonth + 1;
+      let nextYear = actualYear;
+
+      if (nextMonth > 12) {
+        nextMonth = 1;
+        nextYear++;
+      }
+
+      let paymentStatus = "Pending";
+      let paymentDate = null;
+
+      // Requested month is the immediate next month
+      if (
+        requestedMonth === nextMonth &&
+        requestedYear === nextYear
+      ) {
+        // Before or on the 5th -> treat as Paid
+        if (currentDay <= 5) {
+          paymentStatus = "Paid";
+          paymentDate = row.payment_date;
+        }
+        // After the 5th -> Pending
+        else {
+          paymentStatus = "Pending";
+          paymentDate = null;
+        }
+      }
+      // Any later month -> Pending
+      else {
+        paymentStatus = "Pending";
+        paymentDate = null;
+      }
+
+      return {
+        ...row,
+
+        // Override with requested month/year
+        salary_month: requestedMonth,
+        salary_year: requestedYear,
+
+        payment_status: paymentStatus,
+        payment_date: paymentDate,
+      };
+    });
 
     return sendSuccessResponse(
       res,
       200,
       "Employee salaries fetched successfully.",
-      result.rows
+      data
     );
+
+
   } catch (error) {
+
     console.error(error);
 
     return sendErrorResponse(
@@ -250,7 +442,6 @@ exports.getEmployeeSalaries = async (req, res) => {
     );
   }
 };
-
 
 exports.getEmployeeSalaryById = async (req, res) => {
   const { salary_id } = req.params;
@@ -289,6 +480,11 @@ exports.getEmployeeSalaryById = async (req, res) => {
           ELSE 'Coach'
         END AS employee_type,
 
+        CASE
+          WHEN es.staff_id IS NOT NULL THEN s.salary
+          ELSE c.salary
+        END AS employee_salary,
+
         es.salary_month,
         es.salary_year,
         es.basic_salary,
@@ -296,7 +492,7 @@ exports.getEmployeeSalaryById = async (req, res) => {
         es.deduction,
         es.net_salary,
         es.payment_status,
-        es.payment_date,
+        es.payment_date::DATE AS payment_date,
         es.remarks,
         es.created_at
 
@@ -308,12 +504,12 @@ exports.getEmployeeSalaryById = async (req, res) => {
       LEFT JOIN tbl_coach c
         ON es.coach_id = c.coach_id
 
-      WHERE es.salary_id = $1
+      WHERE es.salary_id = $1;
       `,
-      [salary_id]
+      [Number(salary_id)]
     );
 
-    if (result.rows.length === 0) {
+    if (result.rowCount === 0) {
       return sendErrorResponse(
         res,
         404,
@@ -327,6 +523,7 @@ exports.getEmployeeSalaryById = async (req, res) => {
       "Employee salary fetched successfully.",
       result.rows[0]
     );
+
   } catch (error) {
     console.error(error);
 
@@ -338,40 +535,14 @@ exports.getEmployeeSalaryById = async (req, res) => {
   }
 };
 
-
-exports.updateEmployeeSalary = async (req, res) => {
-  const { salary_id } = req.params;
-
-  if (!salary_id) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Salary ID is required."
-    );
-  }
-
-  if (isNaN(salary_id) || Number(salary_id) <= 0) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Invalid Salary ID."
-    );
-  }
-
+exports.getEmployeeSalaryHistory = async (req, res) => {
   const {
     staff_id,
     coach_id,
-    salary_month,
-    salary_year,
-    basic_salary,
-    bonus,
-    deduction,
-    payment_status,
-    payment_date,
-    remarks,
-  } = req.body;
+  } = req.query;
 
   try {
+    // Validate employee
     if (!staff_id && !coach_id) {
       return sendErrorResponse(
         res,
@@ -388,12 +559,154 @@ exports.updateEmployeeSalary = async (req, res) => {
       );
     }
 
-    const checkSalary = await pool.query(
-      `SELECT salary_id FROM tbl_employee_salary WHERE salary_id = $1`,
+    if (
+      (staff_id && (isNaN(staff_id) || Number(staff_id) <= 0)) ||
+      (coach_id && (isNaN(coach_id) || Number(coach_id) <= 0))
+    ) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Invalid employee ID."
+      );
+    }
+
+
+    let query;
+    let params;
+
+
+    // Staff salary history
+    if (staff_id) {
+      query = `
+        SELECT
+          es.salary_id,
+
+          s.staff_id AS employee_id,
+          s.full_name AS employee_name,
+          'Staff' AS employee_type,
+
+          es.salary_month,
+          es.salary_year,
+
+          es.basic_salary,
+          es.bonus,
+          es.deduction,
+          es.net_salary,
+
+          es.payment_status,
+          es.payment_date,
+          es.remarks,
+
+          es.created_at
+
+        FROM tbl_employee_salary es
+
+        INNER JOIN tbl_staff s
+          ON es.staff_id = s.staff_id
+
+        WHERE es.staff_id = $1
+
+        ORDER BY
+          es.salary_year DESC,
+          es.salary_month DESC,
+          es.created_at DESC;
+      `;
+
+      params = [Number(staff_id)];
+    }
+
+
+    // Coach salary history
+    else {
+      query = `
+        SELECT
+          es.salary_id,
+
+          c.coach_id AS employee_id,
+          c.full_name AS employee_name,
+          'Coach' AS employee_type,
+
+          es.salary_month,
+          es.salary_year,
+
+          es.basic_salary,
+          es.bonus,
+          es.deduction,
+          es.net_salary,
+
+          es.payment_status,
+          es.payment_date,
+          es.remarks,
+
+          es.created_at
+
+        FROM tbl_employee_salary es
+
+        INNER JOIN tbl_coach c
+          ON es.coach_id = c.coach_id
+
+        WHERE es.coach_id = $1
+
+        ORDER BY
+          es.salary_year DESC,
+          es.salary_month DESC,
+          es.created_at DESC;
+      `;
+
+      params = [Number(coach_id)];
+    }
+
+
+    const result = await pool.query(
+      query,
+      params
+    );
+
+
+    return sendSuccessResponse(
+      res,
+      200,
+      "Salary history fetched successfully.",
+      result.rows
+    );
+
+
+  } catch (error) {
+
+    console.error(error);
+
+    return sendErrorResponse(
+      res,
+      500,
+      error.message || "Failed to fetch salary history."
+    );
+  }
+};
+
+exports.updateEmployeeSalary = async (req, res) => {
+  const { salary_id } = req.params;
+
+  if (!salary_id || isNaN(salary_id) || Number(salary_id) <= 0) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Invalid Salary ID."
+    );
+  }
+
+  try {
+    // Check salary exists
+    const existingSalaryResult = await pool.query(
+      `
+      SELECT *
+      FROM tbl_employee_salary
+      WHERE salary_id = $1
+      LIMIT 1;
+      `,
       [salary_id]
     );
 
-    if (checkSalary.rows.length === 0) {
+    if (existingSalaryResult.rowCount === 0) {
       return sendErrorResponse(
         res,
         404,
@@ -401,11 +714,174 @@ exports.updateEmployeeSalary = async (req, res) => {
       );
     }
 
-    const net_salary =
-      Number(basic_salary) +
-      Number(bonus || 0) -
-      Number(deduction || 0);
+    const existingSalary = existingSalaryResult.rows[0];
 
+    // Merge existing values with request body
+    const updatedData = {
+      staff_id:
+        req.body.staff_id !== undefined
+          ? req.body.staff_id
+          : existingSalary.staff_id,
+
+      coach_id:
+        req.body.coach_id !== undefined
+          ? req.body.coach_id
+          : existingSalary.coach_id,
+
+      basic_salary:
+        req.body.basic_salary !== undefined
+          ? Number(req.body.basic_salary)
+          : Number(existingSalary.basic_salary),
+
+      bonus:
+        req.body.bonus !== undefined
+          ? Number(req.body.bonus)
+          : Number(existingSalary.bonus),
+
+      deduction:
+        req.body.deduction !== undefined
+          ? Number(req.body.deduction)
+          : Number(existingSalary.deduction),
+
+      payment_date:
+        req.body.payment_date !== undefined
+          ? req.body.payment_date
+          : existingSalary.payment_date,
+
+      remarks:
+        req.body.remarks !== undefined
+          ? req.body.remarks
+          : existingSalary.remarks,
+    };
+
+    // Employee validation
+    if (!updatedData.staff_id && !updatedData.coach_id) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Either staff_id or coach_id is required."
+      );
+    }
+
+    if (updatedData.staff_id && updatedData.coach_id) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Only one of staff_id or coach_id can be provided."
+      );
+    }
+
+    // Payment date validation
+    const paymentDateObj = new Date(updatedData.payment_date);
+
+    if (isNaN(paymentDateObj.getTime())) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Invalid payment date."
+      );
+    }
+
+    // Salary month/year from payment date
+    let salary_month = existingSalary.salary_month;
+    let salary_year = existingSalary.salary_year;
+
+    if (req.body.payment_date !== undefined) {
+      const paymentDateObj = new Date(updatedData.payment_date);
+
+      if (isNaN(paymentDateObj.getTime())) {
+        return sendErrorResponse(
+          res,
+          400,
+          "Invalid payment date."
+        );
+      }
+
+      salary_month = paymentDateObj.getMonth() + 1;
+      salary_year = paymentDateObj.getFullYear();
+    }
+
+    // Salary validations
+    if (updatedData.basic_salary <= 0) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Basic salary must be greater than zero."
+      );
+    }
+
+    if (updatedData.bonus < 0) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Bonus cannot be negative."
+      );
+    }
+
+    if (updatedData.deduction < 0) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Deduction cannot be negative."
+      );
+    }
+
+    // Prevent duplicate salary
+    let duplicateSalary;
+
+    if (updatedData.staff_id) {
+      duplicateSalary = await pool.query(
+        `
+        SELECT salary_id
+        FROM tbl_employee_salary
+        WHERE staff_id = $1
+          AND salary_month = $2
+          AND salary_year = $3
+          AND salary_id <> $4
+        LIMIT 1;
+        `,
+        [
+          updatedData.staff_id,
+          salary_month,
+          salary_year,
+          salary_id,
+        ]
+      );
+    } else {
+      duplicateSalary = await pool.query(
+        `
+        SELECT salary_id
+        FROM tbl_employee_salary
+        WHERE coach_id = $1
+          AND salary_month = $2
+          AND salary_year = $3
+          AND salary_id <> $4
+        LIMIT 1;
+        `,
+        [
+          updatedData.coach_id,
+          salary_month,
+          salary_year,
+          salary_id,
+        ]
+      );
+    }
+
+    if (duplicateSalary.rowCount > 0) {
+      return sendErrorResponse(
+        res,
+        409,
+        "Salary has already been created for the selected employee for this month and year."
+      );
+    }
+
+    // Calculate net salary
+    const net_salary =
+      updatedData.basic_salary +
+      updatedData.bonus -
+      updatedData.deduction;
+
+    // Update record
     const result = await pool.query(
       `
       UPDATE tbl_employee_salary
@@ -418,24 +894,23 @@ exports.updateEmployeeSalary = async (req, res) => {
         bonus = $6,
         deduction = $7,
         net_salary = $8,
-        payment_status = $9,
-        payment_date = $10,
-        remarks = $11
-      WHERE salary_id = $12
+        payment_status = 'Paid',
+        payment_date = $9,
+        remarks = $10
+      WHERE salary_id = $11
       RETURNING *;
       `,
       [
-        staff_id || null,
-        coach_id || null,
+        updatedData.staff_id || null,
+        updatedData.coach_id || null,
         salary_month,
         salary_year,
-        basic_salary,
-        bonus || 0,
-        deduction || 0,
+        updatedData.basic_salary,
+        updatedData.bonus,
+        updatedData.deduction,
         net_salary,
-        payment_status,
-        payment_date || null,
-        remarks || null,
+        updatedData.payment_date,
+        updatedData.remarks?.trim() || null,
         salary_id,
       ]
     );
