@@ -15,7 +15,6 @@ exports.addCoach = async (req, res) => {
   let client;
 
   try {
-
     if (
       !full_name ||
       !phone_number ||
@@ -24,28 +23,73 @@ exports.addCoach = async (req, res) => {
       salary == null ||
       !join_date
     ) {
-      return sendErrorResponse(res, 400, "All fields are required.");
-    }
-
-    if (!/^[6-9]\d{9}$/.test(phone_number)) {
-      return sendErrorResponse(res, 400, "Invalid phone number.");
-    }
-
-    if (experience < 0 || salary <= 0) {
       return sendErrorResponse(
         res,
         400,
-        "Experience or salary is invalid."
+        "All fields are required."
       );
     }
 
+    if (!/^[6-9]\d{9}$/.test(phone_number)) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Invalid phone number."
+      );
+    }
+
+    if (Number(experience) < 0) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Experience cannot be negative."
+      );
+    }
+
+    if (Number(salary) <= 0) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Salary must be greater than zero."
+      );
+    }
 
     client = await pool.connect();
 
     await client.query("BEGIN");
 
+    const currentYear = new Date().getFullYear();
+    const yearCode = String(currentYear).slice(-2);
+    const prefix = `C${yearCode}`;
 
-    // Duplicate phone check
+    await client.query(
+      `SELECT pg_advisory_xact_lock($1)`,
+      [currentYear]
+    );
+
+    const coachCodeResult = await client.query(
+      `
+      SELECT
+        COALESCE(
+          MAX(
+            CAST(SUBSTRING(coach_code FROM 4) AS INTEGER)
+          ),
+          0
+        ) AS last_number
+      FROM tbl_coach
+      WHERE coach_code LIKE $1
+      `,
+      [`${prefix}%`]
+    );
+
+    const nextNumber =
+      Number(coachCodeResult.rows[0].last_number) + 1;
+
+    const coach_code = `${prefix}${String(nextNumber).padStart(
+      4,
+      "0"
+    )}`;
+
     const existingCoach = await client.query(
       `
       SELECT 1
@@ -53,12 +97,10 @@ exports.addCoach = async (req, res) => {
       WHERE phone_number = $1
       LIMIT 1
       `,
-      [phone_number]
+      [phone_number.trim()]
     );
 
-
     if (existingCoach.rowCount > 0) {
-
       await client.query("ROLLBACK");
 
       return sendErrorResponse(
@@ -67,44 +109,6 @@ exports.addCoach = async (req, res) => {
         "Phone number already exists."
       );
     }
-
-
-    const currentYear = new Date().getFullYear();
-
-    const yearCode = String(currentYear).slice(-2);
-
-    const prefix = `TR${yearCode}`;
-
-
-    // Prevent duplicate coach codes
-    await client.query(
-      `SELECT pg_advisory_xact_lock($1)`,
-      [currentYear]
-    );
-
-
-    const coachNumberResult = await client.query(
-      `
-      SELECT COALESCE(
-        MAX(
-          CAST(SUBSTRING(coach_code FROM 5) AS INTEGER)
-        ),
-        0
-      ) AS last_number
-      FROM tbl_coach
-      WHERE coach_code LIKE $1
-      `,
-      [`${prefix}%`]
-    );
-
-
-    const nextNumber =
-      Number(coachNumberResult.rows[0].last_number) + 1;
-
-
-    const coach_code =
-      `${prefix}${String(nextNumber).padStart(4, "0")}`;
-
 
     const result = await client.query(
       `
@@ -120,24 +124,56 @@ exports.addCoach = async (req, res) => {
         id_increment
       )
       VALUES
-      ($1,$2,$3,$4,$5,$6,$7,$8)
-      RETURNING *
+      (
+        $1,$2,$3,$4,$5,$6,$7,$8
+      )
+      RETURNING *;
       `,
       [
         coach_code,
         full_name.trim(),
-        phone_number,
+        phone_number.trim(),
         specialization.trim(),
-        experience,
-        salary,
+        Number(experience),
+        Number(salary),
         join_date,
         nextNumber,
       ]
     );
 
+    const userResult = await client.query(
+      `
+      SELECT full_name
+      FROM tbl_users
+      WHERE user_id = $1
+      `,
+      [req.user.user_id]
+    );
+
+    const performedBy =
+      userResult.rows[0]?.full_name || "System";
+
+    await client.query(
+      `
+      INSERT INTO tbl_notification_logs
+      (
+        module_name,
+        action,
+        description,
+        performed_by
+      )
+      VALUES
+      ($1,$2,$3,$4)
+      `,
+      [
+        "Coach",
+        "Created",
+        `Coach ${result.rows[0].full_name} was added.`,
+        performedBy,
+      ]
+    );
 
     await client.query("COMMIT");
-
 
     return sendSuccessResponse(
       res,
@@ -146,21 +182,19 @@ exports.addCoach = async (req, res) => {
       result.rows[0]
     );
 
-
   } catch (error) {
-
     if (client) {
       await client.query("ROLLBACK");
     }
+
+    console.error(error);
 
     return sendErrorResponse(
       res,
       500,
       error.message || "Internal Server Error"
     );
-
   } finally {
-
     if (client) {
       client.release();
     }

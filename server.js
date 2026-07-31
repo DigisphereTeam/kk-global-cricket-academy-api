@@ -15,10 +15,11 @@ const eventRouter = require("./src/routes/eventRoutes");
 const equipmentRouter = require("./src/routes/equipmentRoutes");
 const expenditureRouter = require("./src/routes/expenditureRoutes");
 const notificationLogRouter = require("./src/routes/notificationLogRoutes");
-const employeeSalaryRoutes = require("./src/routes/employeeSalaryRoutes");
 const userRouter = require("./src/routes/userRoutes");
 const dashboardRouter = require("./src/routes/dashboardRoutes");
 const apiLogger = require("./src/middlewares/apiLogger");
+const employeeSalaryRouter = require("./src/routes/employeeSalaryRoutes");
+const playerFeeRouter = require("./src/routes/playerFeeRoutes");
 
 
 const app = express();
@@ -40,13 +41,16 @@ app.use("/players", playerRouter);
 app.use("/coaches", coachRouter);
 app.use("/staff", staffRouter);
 app.use("/one-on-one-applications", oneOnOneRouter);
+app.use("/player-fees", playerFeeRouter);
 app.use("/ground-bookings", groundBookingRouter);
 app.use("/events", eventRouter)
 app.use("/equipments", equipmentRouter);
-app.use("/employee-salaries", employeeSalaryRoutes);
+app.use("/employee-salaries", employeeSalaryRouter);
 app.use("/users", userRouter);
 app.use("/expenditures", expenditureRouter);
 app.use("/notifications", notificationLogRouter);
+
+
 app.use(notFoundHandler);
 app.use(globalErrorHandler)
 

@@ -200,42 +200,43 @@ exports.createPlayerAdmission = async (req, res) => {
 
     const result = await client.query(
       `
-      INSERT INTO tbl_players (
-        admission_id,
-        full_name,
-        gender,
-        age,
-        date_of_birth,
-        admission_date,
-        phone_number,
-        email,
-        address,
-        school,
-        admission_fee,
-        payment_type,
-        remarks,
-        father_name,
-        father_phone,
-        father_occupation,
-        mother_name,
-        mother_phone,
-        contact_name,
-        relation,
-        contact_phone,
-        blood_group,
-        allergies,
-        height,
-        weight,
-        document_url,
-        id_increment
-      )
-      VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-        $11,$12,$13,$14,$15,$16,$17,$18,
-        $19,$20,$21,$22,$23,$24,$25,$26,$27
-      )
-      RETURNING *;
-      `,
+  INSERT INTO tbl_players (
+    admission_id,
+    full_name,
+    gender,
+    age,
+    date_of_birth,
+    admission_date,
+    phone_number,
+    email,
+    address,
+    school,
+    admission_fee,
+    payment_type,
+    remarks,
+    father_name,
+    father_phone,
+    father_occupation,
+    mother_name,
+    mother_phone,
+    contact_name,
+    relation,
+    contact_phone,
+    blood_group,
+    allergies,
+    height,
+    weight,
+    document_url,
+    id_increment
+  )
+  VALUES (
+    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+    $11,$12,$13,$14,$15,$16,$17,$18,
+    $19,$20,$21,$22,$23,$24,$25,$26,
+    $27
+  )
+  RETURNING *;
+  `,
       [
         admission_id,
         full_name.trim(),
@@ -266,7 +267,32 @@ exports.createPlayerAdmission = async (req, res) => {
         nextNumber,
       ]
     );
+    const reqUserDetails = await client.query(
+      `
+      SELECT full_name
+      FROM tbl_users
+      WHERE user_id = $1
+      `,
+      [req.user.user_id]
+    );
 
+    const reqUser = reqUserDetails.rows[0];
+    await client.query(
+      `INSERT INTO tbl_notification_logs
+        (
+          module_name,
+          action,
+          description,
+          performed_by
+        )
+        VALUES
+        ($1,$2,$3,$4)`,
+      [
+        "Player",
+        "Created",
+        `Player ${result.rows[0].full_name} was added .`,
+        reqUser.full_name,
+      ])
     await client.query("COMMIT");
 
     return sendSuccessResponse(
@@ -414,116 +440,9 @@ exports.updatePlayer = async (req, res) => {
     }
 
     if (updates.length === 0) {
-      return sendErrorResponse(
-        res,
-        400,
-        "No fields provided to update."
-      );
+      return sendErrorResponse(res, 400, "No fields provided to update");
     }
 
-    // Phone validations
-    if (
-      req.body.phone_number &&
-      !/^[6-9]\d{9}$/.test(req.body.phone_number)
-    ) {
-      return sendErrorResponse(
-        res,
-        400,
-        "Invalid player phone number."
-      );
-    }
-
-    if (
-      req.body.father_phone &&
-      !/^[6-9]\d{9}$/.test(req.body.father_phone)
-    ) {
-      return sendErrorResponse(
-        res,
-        400,
-        "Invalid father phone number."
-      );
-    }
-
-    if (
-      req.body.mother_phone &&
-      !/^[6-9]\d{9}$/.test(req.body.mother_phone)
-    ) {
-      return sendErrorResponse(
-        res,
-        400,
-        "Invalid mother phone number."
-      );
-    }
-
-    if (
-      req.body.contact_phone &&
-      !/^[6-9]\d{9}$/.test(req.body.contact_phone)
-    ) {
-      return sendErrorResponse(
-        res,
-        400,
-        "Invalid emergency contact phone number."
-      );
-    }
-
-    // Email validation
-    if (
-      req.body.email &&
-      !/^\S+@\S+\.\S+$/.test(req.body.email)
-    ) {
-      return sendErrorResponse(
-        res,
-        400,
-        "Invalid email address."
-      );
-    }
-
-    // Numeric validations
-    if (
-      req.body.age !== undefined &&
-      Number(req.body.age) <= 0
-    ) {
-      return sendErrorResponse(
-        res,
-        400,
-        "Age must be greater than 0."
-      );
-    }
-
-    if (
-      req.body.admission_fee !== undefined &&
-      Number(req.body.admission_fee) < 0
-    ) {
-      return sendErrorResponse(
-        res,
-        400,
-        "Admission fee cannot be negative."
-      );
-    }
-
-    if (
-      req.body.height !== undefined &&
-      Number(req.body.height) <= 0
-    ) {
-      return sendErrorResponse(
-        res,
-        400,
-        "Height must be greater than 0."
-      );
-    }
-
-    if (
-      req.body.weight !== undefined &&
-      Number(req.body.weight) <= 0
-    ) {
-      return sendErrorResponse(
-        res,
-        400,
-        "Weight must be greater than 0."
-      );
-    }
-
-    // Duplicate phone number
     if (req.body.phone_number) {
       const existingPlayer = await pool.query(
         `
@@ -537,15 +456,10 @@ exports.updatePlayer = async (req, res) => {
       );
 
       if (existingPlayer.rowCount > 0) {
-        return sendErrorResponse(
-          res,
-          409,
-          "Phone number already exists."
-        );
+        return sendErrorResponse(res, 409, "Phone number already exists");
       }
     }
 
-    // Duplicate email
     if (req.body.email) {
       const existingEmail = await pool.query(
         `
@@ -555,15 +469,11 @@ exports.updatePlayer = async (req, res) => {
           AND player_id <> $2
         LIMIT 1
         `,
-        [req.body.email.trim(), player_id]
+        [req.body.email, player_id],
       );
 
       if (existingEmail.rowCount > 0) {
-        return sendErrorResponse(
-          res,
-          409,
-          "Email already exists."
-        );
+        return sendErrorResponse(res, 409, "Email already exists");
       }
     }
 
@@ -580,18 +490,14 @@ exports.updatePlayer = async (req, res) => {
     );
 
     if (result.rowCount === 0) {
-      return sendErrorResponse(
-        res,
-        404,
-        "Player not found."
-      );
+      return sendErrorResponse(res, 404, "Player not found");
     }
 
     return sendSuccessResponse(
       res,
       200,
-      "Player updated successfully.",
-      result.rows[0]
+      "Player updated successfully",
+      result.rows[0],
     );
   } catch (error) {
     return sendErrorResponse(

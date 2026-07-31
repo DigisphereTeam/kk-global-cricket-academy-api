@@ -443,6 +443,100 @@ UNION ALL
   }
 };
 
+exports.getEligibleEmployees = async (req, res) => {
+  const {
+    employee_type,
+    payment_date,
+  } = req.query;
+
+  try {
+    if (!employee_type || !payment_date) {
+      return sendErrorResponse(
+        res,
+        400,
+        "employee_type and payment_date are required."
+      );
+    }
+
+    if (!["Coach", "Staff"].includes(employee_type)) {
+      return sendErrorResponse(
+        res,
+        400,
+        "employee_type must be Coach or Staff."
+      );
+    }
+
+    const paymentDateObj = new Date(payment_date);
+
+    if (isNaN(paymentDateObj.getTime())) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Invalid payment date."
+      );
+    }
+
+    const salary_month = paymentDateObj.getMonth() + 1;
+    const salary_year = paymentDateObj.getFullYear();
+
+    let query = "";
+
+    if (employee_type === "Coach") {
+      query = `
+        SELECT
+          coach_id AS employee_id,
+          full_name AS employee_name
+        FROM tbl_coach c
+        WHERE NOT EXISTS (
+          SELECT 1
+          FROM tbl_employee_salary es
+          WHERE es.coach_id = c.coach_id
+            AND es.salary_month = $1
+            AND es.salary_year = $2
+            AND es.payment_status = 'Paid'
+        )
+        ORDER BY full_name;
+      `;
+    } else {
+      query = `
+        SELECT
+          staff_id AS employee_id,
+          full_name AS employee_name
+        FROM tbl_staff s
+        WHERE NOT EXISTS (
+          SELECT 1
+          FROM tbl_employee_salary es
+          WHERE es.staff_id = s.staff_id
+            AND es.salary_month = $1
+            AND es.salary_year = $2
+            AND es.payment_status = 'Paid'
+        )
+        ORDER BY full_name;
+      `;
+    }
+
+    const result = await pool.query(query, [
+      salary_month,
+      salary_year,
+    ]);
+
+    return sendSuccessResponse(
+      res,
+      200,
+      "Employees fetched successfully.",
+      result.rows
+    );
+  } catch (error) {
+    console.error(error);
+
+    return sendErrorResponse(
+      res,
+      500,
+      error.message || "Failed to fetch employees."
+    );
+  }
+};
+
 exports.getEmployeeSalaryById = async (req, res) => {
   const { salary_id } = req.params;
 
