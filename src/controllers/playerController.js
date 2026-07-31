@@ -192,9 +192,9 @@ exports.createPlayerAdmission = async (req, res) => {
       );
     }
 
-    // ============================
-    // Insert Player
-    // ============================
+    const document_url = req.file
+      ? req.file.path
+      : null;
 
     const result = await client.query(
       `
@@ -224,12 +224,13 @@ exports.createPlayerAdmission = async (req, res) => {
         allergies,
         height,
         weight,
+        document_url,
         id_increment
       )
       VALUES (
         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
         $11,$12,$13,$14,$15,$16,$17,$18,
-        $19,$20,$21,$22,$23,$24,$25,$26
+        $19,$20,$21,$22,$23,$24,$25,$26,$27
       )
       RETURNING *;
       `,
@@ -259,6 +260,7 @@ exports.createPlayerAdmission = async (req, res) => {
         allergies?.trim() || null,
         height != null ? Number(height) : null,
         weight != null ? Number(weight) : null,
+        document_url,
         nextNumber,
       ]
     );

@@ -1,5 +1,5 @@
 const express = require("express");
-const { createEmployeeSalary, getEmployeeSalaries, getEmployeeSalaryById, updateEmployeeSalary, deleteEmployeeSalary } = require("../controllers/employeeSalaryController");
+const { createEmployeeSalary, getEmployeeSalaries, getEmployeeSalaryById, updateEmployeeSalary, deleteEmployeeSalary, getEmployeeSalaryHistory } = require("../controllers/employeeSalaryController");
 const validateRequestBody = require("../middlewares/validateRequestBody");
 const verifyToken = require("../middlewares/verifyToken");
 const { checkRole } = require("../middlewares/checkRole");
@@ -12,6 +12,8 @@ employeeSalaryRoutes.use(verifyToken);
 employeeSalaryRoutes.post("/", validateRequestBody, checkRole("PRIMARY"), createEmployeeSalary);
 
 employeeSalaryRoutes.get("/", getEmployeeSalaries);
+
+employeeSalaryRoutes.get("/history", getEmployeeSalaryHistory);
 
 employeeSalaryRoutes.get("/:salary_id", getEmployeeSalaryById);
 
