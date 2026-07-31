@@ -11,10 +11,7 @@ exports.createExpenditure = async (req, res) => {
   } = req.body;
 
   try {
-<<<<<<< HEAD
-=======
     // Required field validation
->>>>>>> f4513323fbb5ca282932021c59fe5a014c952da7
     if (
       !title ||
       amount == null ||

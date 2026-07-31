@@ -124,71 +124,6 @@ exports.createPlayerAdmission = async (req, res) => {
   let client;
 
   try {
-<<<<<<< HEAD
-    if (
-      !admission_id ||
-      !full_name ||
-      !gender ||
-      age == null ||
-      !phone_number ||
-      !email ||
-      !address ||
-      !school ||
-      !playing_role ||
-      !batting_style ||
-      admission_fee == null ||
-      !father_name ||
-      !father_phone
-    ) {
-      return sendErrorResponse(
-        res,
-        400,
-        "All required fields must be provided.",
-      );
-    }
-
-    if (
-      !/^[6-9]\d{9}$/.test(phone_number) ||
-      !/^[6-9]\d{9}$/.test(father_phone)
-    ) {
-      return sendErrorResponse(res, 400, "Invalid phone number.");
-    }
-
-    if (mother_phone && !/^[6-9]\d{9}$/.test(mother_phone)) {
-      return sendErrorResponse(res, 400, "Invalid mother phone number.");
-    }
-
-    if (contact_phone && !/^[6-9]\d{9}$/.test(contact_phone)) {
-      return sendErrorResponse(
-        res,
-        400,
-        "Invalid emergency contact phone number.",
-      );
-    }
-
-    if (!/^\S+@\S+\.\S+$/.test(email)) {
-      return sendErrorResponse(res, 400, "Invalid email address.");
-    }
-
-    if (age <= 0 || admission_fee < 0) {
-      return sendErrorResponse(res, 400, "Invalid age or admission fee.");
-    }
-
-    // Duplicate check
-    const existingStudent = await pool.query(
-      `
-      SELECT 1
-      FROM tbl_players
-      WHERE phone_number = $1
-         OR email = $2
-      LIMIT 1
-      `,
-      [phone_number, email],
-    );
-
-    if (existingStudent.rowCount > 0) {
-      return sendErrorResponse(res, 409, "Player already exists.");
-=======
     client = await pool.connect();
 
     await client.query("BEGIN");
@@ -257,7 +192,6 @@ exports.createPlayerAdmission = async (req, res) => {
         409,
         "Player already exists."
       );
->>>>>>> f4513323fbb5ca282932021c59fe5a014c952da7
     }
 
     const document_url = req.file
@@ -312,51 +246,6 @@ exports.createPlayerAdmission = async (req, res) => {
         phone_number.trim(),
         email ? email.trim().toLowerCase() : null,
         address.trim(),
-<<<<<<< HEAD
-        school.trim(),
-        playing_role,
-        batting_style,
-        batch,
-        admission_fee,
-        father_name.trim(),
-        father_phone,
-        father_occupation,
-        mother_name,
-        mother_phone,
-        contact_name,
-        relation,
-        contact_phone,
-        blood_group,
-        allergies,
-        medical_conditions,
-      ],
-    );
-    const reqUserDetails = await pool.query(
-      `
-      SELECT *
-      FROM tbl_users
-      WHERE user_id=$1
-      `,
-      [req.user.user_id],
-    );
-    const reqUser = reqUserDetails.rows[0];
-    await pool.query(
-      `INSERT INTO tbl_notification_logs
-  (
-    module_name,
-    action,
-    description,
-    performed_by
-  )
-  VALUES
-  ($1,$2,$3,$4)`,
-      [
-        "Player",
-        "Created",
-        `Player ${result.rows[0].full_name} was added .`,
-        reqUser.full_name,
-      ],
-=======
         school?.trim() || null,
         Number(admission_fee),
         payment_type.trim(),
@@ -376,7 +265,6 @@ exports.createPlayerAdmission = async (req, res) => {
         document_url,
         nextNumber,
       ]
->>>>>>> f4513323fbb5ca282932021c59fe5a014c952da7
     );
 
     await client.query("COMMIT");
@@ -526,11 +414,6 @@ exports.updatePlayer = async (req, res) => {
     }
 
     if (updates.length === 0) {
-<<<<<<< HEAD
-      return sendErrorResponse(res, 400, "No fields provided to update");
-    }
-
-=======
       return sendErrorResponse(
         res,
         400,
@@ -641,7 +524,6 @@ exports.updatePlayer = async (req, res) => {
     }
 
     // Duplicate phone number
->>>>>>> f4513323fbb5ca282932021c59fe5a014c952da7
     if (req.body.phone_number) {
       const existingPlayer = await pool.query(
         `
@@ -655,12 +537,6 @@ exports.updatePlayer = async (req, res) => {
       );
 
       if (existingPlayer.rowCount > 0) {
-<<<<<<< HEAD
-        return sendErrorResponse(res, 409, "Phone number already exists");
-      }
-    }
-
-=======
         return sendErrorResponse(
           res,
           409,
@@ -670,7 +546,6 @@ exports.updatePlayer = async (req, res) => {
     }
 
     // Duplicate email
->>>>>>> f4513323fbb5ca282932021c59fe5a014c952da7
     if (req.body.email) {
       const existingEmail = await pool.query(
         `
@@ -680,13 +555,6 @@ exports.updatePlayer = async (req, res) => {
           AND player_id <> $2
         LIMIT 1
         `,
-<<<<<<< HEAD
-        [req.body.email, player_id],
-      );
-
-      if (existingEmail.rowCount > 0) {
-        return sendErrorResponse(res, 409, "Email already exists");
-=======
         [req.body.email.trim(), player_id]
       );
 
@@ -696,7 +564,6 @@ exports.updatePlayer = async (req, res) => {
           409,
           "Email already exists."
         );
->>>>>>> f4513323fbb5ca282932021c59fe5a014c952da7
       }
     }
 
@@ -713,27 +580,18 @@ exports.updatePlayer = async (req, res) => {
     );
 
     if (result.rowCount === 0) {
-<<<<<<< HEAD
-      return sendErrorResponse(res, 404, "Player not found");
-=======
       return sendErrorResponse(
         res,
         404,
         "Player not found."
       );
->>>>>>> f4513323fbb5ca282932021c59fe5a014c952da7
     }
 
     return sendSuccessResponse(
       res,
       200,
-<<<<<<< HEAD
-      "Player updated successfully",
-      result.rows[0],
-=======
       "Player updated successfully.",
       result.rows[0]
->>>>>>> f4513323fbb5ca282932021c59fe5a014c952da7
     );
   } catch (error) {
     return sendErrorResponse(

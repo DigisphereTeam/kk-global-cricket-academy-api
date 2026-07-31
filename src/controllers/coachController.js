@@ -39,9 +39,6 @@ exports.addCoach = async (req, res) => {
       );
     }
 
-<<<<<<< HEAD
-    const existingCoach = await pool.query(
-=======
 
     client = await pool.connect();
 
@@ -50,27 +47,20 @@ exports.addCoach = async (req, res) => {
 
     // Duplicate phone check
     const existingCoach = await client.query(
->>>>>>> f4513323fbb5ca282932021c59fe5a014c952da7
       `
       SELECT 1
       FROM tbl_coach
       WHERE phone_number = $1
-<<<<<<< HEAD
-=======
       LIMIT 1
->>>>>>> f4513323fbb5ca282932021c59fe5a014c952da7
       `,
       [phone_number]
     );
 
 
     if (existingCoach.rowCount > 0) {
-<<<<<<< HEAD
-=======
 
       await client.query("ROLLBACK");
 
->>>>>>> f4513323fbb5ca282932021c59fe5a014c952da7
       return sendErrorResponse(
         res,
         409,
@@ -78,12 +68,6 @@ exports.addCoach = async (req, res) => {
       );
     }
 
-<<<<<<< HEAD
-    const result = await pool.query(
-      `
-      INSERT INTO tbl_coach
-      (
-=======
 
     const currentYear = new Date().getFullYear();
 
@@ -127,26 +111,16 @@ exports.addCoach = async (req, res) => {
       INSERT INTO tbl_coach
       (
         coach_code,
->>>>>>> f4513323fbb5ca282932021c59fe5a014c952da7
         full_name,
         phone_number,
         specialization,
         experience,
         salary,
-<<<<<<< HEAD
-        join_date
-      )
-      VALUES
-      (
-        $1,$2,$3,$4,$5,$6
-      )
-=======
         join_date,
         id_increment
       )
       VALUES
       ($1,$2,$3,$4,$5,$6,$7,$8)
->>>>>>> f4513323fbb5ca282932021c59fe5a014c952da7
       RETURNING *
       `,
       [
@@ -161,42 +135,9 @@ exports.addCoach = async (req, res) => {
       ]
     );
 
-<<<<<<< HEAD
-    const userResult = await pool.query(
-      `
-      SELECT full_name
-      FROM tbl_users
-      WHERE user_id = $1
-      `,
-      [req.user.user_id]
-    );
-
-    const performedBy = userResult.rows[0].full_name;
-
-    await pool.query(
-      `
-      INSERT INTO tbl_notification_logs
-      (
-        module_name,
-        action,
-        description,
-        performed_by
-      )
-      VALUES
-      ($1,$2,$3,$4)
-      `,
-      [
-        "Coach",
-        "Created",
-        `Coach ${result.rows[0].full_name} was added.`,
-        performedBy,
-      ]
-    );
-=======
 
     await client.query("COMMIT");
 
->>>>>>> f4513323fbb5ca282932021c59fe5a014c952da7
 
     return sendSuccessResponse(
       res,
