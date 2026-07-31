@@ -49,6 +49,8 @@ app.use("/employee-salaries", employeeSalaryRouter);
 app.use("/users", userRouter);
 app.use("/expenditures", expenditureRouter);
 app.use("/notifications", notificationLogRouter);
+
+
 app.use(notFoundHandler);
 app.use(globalErrorHandler)
 

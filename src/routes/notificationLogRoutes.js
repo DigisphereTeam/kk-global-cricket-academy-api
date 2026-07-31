@@ -1,5 +1,5 @@
 const express = require('express');
-const { getNotifications,deleteNotification } = require('../controllers/notificationLogController');
+const { getNotifications, deleteNotification } = require('../controllers/notificationLogController');
 const validateRequestBody = require('../middlewares/validateRequestBody');
 const verifyToken = require('../middlewares/verifyToken');
 const { checkRole } = require('../middlewares/checkRole');
@@ -10,6 +10,6 @@ notificationLogRouter.use(verifyToken);
 
 notificationLogRouter.get('/', getNotifications);
 
-notificationLogRouter.delete('/:log_id', deleteNotification);
+notificationLogRouter.delete('/:log_id', checkRole("ADMIN"), deleteNotification);
 
 module.exports = notificationLogRouter;
