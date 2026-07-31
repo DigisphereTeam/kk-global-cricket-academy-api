@@ -320,23 +320,45 @@ exports.createPlayerAdmission = async (req, res) => {
 
 exports.getAllPlayers = async (req, res) => {
   try {
-    const result = await pool.query(
-      `
-      SELECT *
-      FROM tbl_players
-      ORDER BY player_id DESC
-      `,
+    const [players, statistics] = await Promise.all([
+      // Player List
+      pool.query(`
+        SELECT *
+        FROM tbl_players
+        ORDER BY player_id DESC
+      `),
+
+      // Player Statistics
+      pool.query(`
+        SELECT
+          COUNT(*) AS total_players
+        FROM tbl_players
+      `),
+    ]);
+
+    return sendSuccessResponse(
+      res,
+      200,
+      "Players fetched successfully.",
+      {
+        statistics: {
+          total_players: Number(
+            statistics.rows[0].total_players
+          ),
+          active_players: 0,
+          inactive_players: 0,
+          pending_fees: 0,
+        },
+
+        players: players.rows,
+      }
     );
 
-    return sendSuccessResponse(res, 200, "Players fetched successfully.", {
-      total_students: result.rowCount,
-      students: result.rows,
-    });
   } catch (error) {
     return sendErrorResponse(
       res,
       500,
-      error.message || "Internal Server Error",
+      error.message || "Internal Server Error"
     );
   }
 };
