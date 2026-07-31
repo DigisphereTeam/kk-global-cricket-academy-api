@@ -181,6 +181,39 @@ exports.createGroundBooking = async (req, res) => {
             ]
         );
 
+
+const userResult = await pool.query(
+  `
+  SELECT full_name
+  FROM tbl_users
+  WHERE user_id = $1
+  `,
+  [req.user.user_id]
+);
+
+const performedBy = userResult.rows[0].full_name;
+
+
+await pool.query(
+  `
+  INSERT INTO tbl_notification_logs
+  (
+    module_name,
+    action,
+    description,
+    performed_by
+  )
+  VALUES
+  ($1,$2,$3,$4)
+  `,
+  [
+    "Ground Booking",
+    "Created",
+    `Ground was booked by ${booking.rows[0].customer_name} for ${booking.rows[0].booking_date} for time slot (${booking.rows[0].time_slot}).`,
+    performedBy,
+  ]
+);
+
         return sendSuccessResponse(
             res,
             201,

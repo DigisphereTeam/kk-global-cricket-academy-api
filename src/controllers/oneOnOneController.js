@@ -95,6 +95,51 @@ exports.applyOneOnOne = async (req, res) => {
       ],
     );
 
+    // Get logged-in user
+const userResult = await pool.query(
+  `
+  SELECT full_name
+  FROM tbl_users
+  WHERE user_id = $1
+  `,
+  [req.user.user_id]
+);
+
+const performedBy = userResult.rows[0].full_name;
+
+const details = await pool.query(
+  `
+  SELECT
+    p.full_name AS player_name,
+    c.full_name AS coach_name
+  FROM tbl_players p
+  JOIN tbl_coach c
+    ON c.coach_id = $2
+  WHERE p.player_id = $1
+  `,
+  [player_id, coach_id]
+);
+
+await pool.query(
+  `
+  INSERT INTO tbl_notification_logs
+  (
+    module_name,
+    action,
+    description,
+    performed_by
+  )
+  VALUES
+  ($1,$2,$3,$4)
+  `,
+  [
+    "One-on-One Training",
+    "Created",
+    `${details.rows[0].player_name} registered for one-on-one training with Coach ${details.rows[0].coach_name}.`,
+    performedBy,
+  ]
+);
+
     return sendSuccessResponse(
       res,
       201,

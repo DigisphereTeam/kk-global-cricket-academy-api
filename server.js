@@ -14,6 +14,7 @@ const groundBookingRouter = require("./src/routes/groundBookingRoutes");
 const eventRouter = require("./src/routes/eventRoutes");
 const equipmentRouter = require("./src/routes/equipmentRoutes");
 const expenditureRouter = require("./src/routes/expenditureRoutes");
+const notificationLogRouter = require("./src/routes/notificationLogRoutes");
 const employeeSalaryRoutes = require("./src/routes/employeeSalaryRoutes");
 const userRouter = require("./src/routes/userRoutes");
 const dashboardRouter = require("./src/routes/dashboardRoutes");
@@ -45,6 +46,7 @@ app.use("/equipments", equipmentRouter);
 app.use("/employee-salaries", employeeSalaryRoutes);
 app.use("/users", userRouter);
 app.use("/expenditures", expenditureRouter);
+app.use("/notifications", notificationLogRouter);
 app.use(notFoundHandler);
 app.use(globalErrorHandler)
 

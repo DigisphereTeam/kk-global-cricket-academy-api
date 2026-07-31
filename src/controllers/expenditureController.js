@@ -11,7 +11,6 @@ exports.createExpenditure = async (req, res) => {
   } = req.body;
 
   try {
-
     if (
       !title ||
       amount == null ||
@@ -53,6 +52,37 @@ exports.createExpenditure = async (req, res) => {
         payment_method,
         expenditure_date,
         purpose,
+      ]
+    );
+
+    const userResult = await pool.query(
+      `
+      SELECT full_name
+      FROM tbl_users
+      WHERE user_id = $1
+      `,
+      [req.user.user_id]
+    );
+
+    const performedBy = userResult.rows[0].full_name;
+
+    await pool.query(
+      `
+      INSERT INTO tbl_notification_logs
+      (
+        module_name,
+        action,
+        description,
+        performed_by
+      )
+      VALUES
+      ($1,$2,$3,$4)
+      `,
+      [
+        "Expenditure",
+        "Created",
+        `Total amount of ₹${result.rows[0].amount} was spent on '${result.rows[0].title}'.`,
+        performedBy,
       ]
     );
 

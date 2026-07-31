@@ -1,6 +1,8 @@
 const pool = require("../config/dbConfig");
-const { sendSuccessResponse, sendErrorResponse } = require("../utils/apiResponse");
-
+const {
+  sendSuccessResponse,
+  sendErrorResponse,
+} = require("../utils/apiResponse");
 
 exports.createPlayerAdmission = async (req, res) => {
   const {
@@ -30,7 +32,6 @@ exports.createPlayerAdmission = async (req, res) => {
   } = req.body;
 
   try {
-
     if (
       !admission_id ||
       !full_name ||
@@ -49,7 +50,7 @@ exports.createPlayerAdmission = async (req, res) => {
       return sendErrorResponse(
         res,
         400,
-        "All required fields must be provided."
+        "All required fields must be provided.",
       );
     }
 
@@ -57,43 +58,27 @@ exports.createPlayerAdmission = async (req, res) => {
       !/^[6-9]\d{9}$/.test(phone_number) ||
       !/^[6-9]\d{9}$/.test(father_phone)
     ) {
-      return sendErrorResponse(
-        res,
-        400,
-        "Invalid phone number."
-      );
+      return sendErrorResponse(res, 400, "Invalid phone number.");
     }
 
     if (mother_phone && !/^[6-9]\d{9}$/.test(mother_phone)) {
-      return sendErrorResponse(
-        res,
-        400,
-        "Invalid mother phone number."
-      );
+      return sendErrorResponse(res, 400, "Invalid mother phone number.");
     }
 
     if (contact_phone && !/^[6-9]\d{9}$/.test(contact_phone)) {
       return sendErrorResponse(
         res,
         400,
-        "Invalid emergency contact phone number."
+        "Invalid emergency contact phone number.",
       );
     }
 
     if (!/^\S+@\S+\.\S+$/.test(email)) {
-      return sendErrorResponse(
-        res,
-        400,
-        "Invalid email address."
-      );
+      return sendErrorResponse(res, 400, "Invalid email address.");
     }
 
     if (age <= 0 || admission_fee < 0) {
-      return sendErrorResponse(
-        res,
-        400,
-        "Invalid age or admission fee."
-      );
+      return sendErrorResponse(res, 400, "Invalid age or admission fee.");
     }
 
     // Duplicate check
@@ -105,15 +90,11 @@ exports.createPlayerAdmission = async (req, res) => {
          OR email = $2
       LIMIT 1
       `,
-      [phone_number, email]
+      [phone_number, email],
     );
 
     if (existingStudent.rowCount > 0) {
-      return sendErrorResponse(
-        res,
-        409,
-        "Player already exists."
-      );
+      return sendErrorResponse(res, 409, "Player already exists.");
     }
 
     // Create Student
@@ -177,125 +158,111 @@ exports.createPlayerAdmission = async (req, res) => {
         blood_group,
         allergies,
         medical_conditions,
-      ]
+      ],
+    );
+    const reqUserDetails = await pool.query(
+      `
+      SELECT *
+      FROM tbl_users
+      WHERE user_id=$1
+      `,
+      [req.user.user_id],
+    );
+    const reqUser = reqUserDetails.rows[0];
+    await pool.query(
+      `INSERT INTO tbl_notification_logs
+  (
+    module_name,
+    action,
+    description,
+    performed_by
+  )
+  VALUES
+  ($1,$2,$3,$4)`,
+      [
+        "Player",
+        "Created",
+        `Player ${result.rows[0].full_name} was added .`,
+        reqUser.full_name,
+      ],
     );
 
     return sendSuccessResponse(
       res,
       201,
       "Player admission created successfully.",
-      result.rows[0]
+      result.rows[0],
     );
-
   } catch (error) {
     return sendErrorResponse(
       res,
       500,
-      error.message || "Internal Server Error"
+      error.message || "Internal Server Error",
     );
   }
 };
 
 exports.getAllPlayers = async (req, res) => {
-
   try {
-
     const result = await pool.query(
       `
       SELECT *
       FROM tbl_players
       ORDER BY player_id DESC
-      `
+      `,
     );
 
-
-    return sendSuccessResponse(
-      res,
-      200,
-      "Players fetched successfully.",
-      {
-        total_students: result.rowCount,
-        students: result.rows,
-      }
-    );
-
-
+    return sendSuccessResponse(res, 200, "Players fetched successfully.", {
+      total_students: result.rowCount,
+      students: result.rows,
+    });
   } catch (error) {
-
     return sendErrorResponse(
       res,
       500,
-      error.message || "Internal Server Error"
+      error.message || "Internal Server Error",
     );
-
   }
-
 };
 
-
 exports.getPlayerById = async (req, res) => {
-
   const { player_id } = req.params;
 
   if (!player_id) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Player ID is required"
-    );
+    return sendErrorResponse(res, 400, "Player ID is required");
   }
   if (!player_id || isNaN(player_id)) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Invalid player ID"
-    );
+    return sendErrorResponse(res, 400, "Invalid player ID");
   }
 
-
   try {
-
     const result = await pool.query(
       `
       SELECT *
       FROM tbl_players
       WHERE player_id=$1
       `,
-      [player_id]
+      [player_id],
     );
 
-
     if (result.rowCount === 0) {
-
-      return sendErrorResponse(
-        res,
-        404,
-        "Player not found."
-      );
-
+      return sendErrorResponse(res, 404, "Player not found.");
     }
-
 
     return sendSuccessResponse(
       res,
       200,
       "Player fetched successfully.",
-      result.rows[0]
+      result.rows[0],
     );
-
-
   } catch (error) {
-
     return sendErrorResponse(
       res,
       500,
-      error.message || "Internal Server Error"
+      error.message || "Internal Server Error",
     );
-
   }
-
 };
-
 
 exports.updatePlayer = async (req, res) => {
   const { player_id } = req.params;
@@ -347,14 +314,9 @@ exports.updatePlayer = async (req, res) => {
     }
 
     if (updates.length === 0) {
-      return sendErrorResponse(
-        res,
-        400,
-        "No fields provided to update"
-      );
+      return sendErrorResponse(res, 400, "No fields provided to update");
     }
 
-    // Check duplicate phone number
     if (req.body.phone_number) {
       const existingPlayer = await pool.query(
         `
@@ -364,19 +326,14 @@ exports.updatePlayer = async (req, res) => {
           AND player_id <> $2
         LIMIT 1
         `,
-        [req.body.phone_number, player_id]
+        [req.body.phone_number, player_id],
       );
 
       if (existingPlayer.rowCount > 0) {
-        return sendErrorResponse(
-          res,
-          409,
-          "Phone number already exists"
-        );
+        return sendErrorResponse(res, 409, "Phone number already exists");
       }
     }
 
-    // Check duplicate email
     if (req.body.email) {
       const existingEmail = await pool.query(
         `
@@ -386,19 +343,14 @@ exports.updatePlayer = async (req, res) => {
           AND player_id <> $2
         LIMIT 1
         `,
-        [req.body.email, player_id]
+        [req.body.email, player_id],
       );
 
       if (existingEmail.rowCount > 0) {
-        return sendErrorResponse(
-          res,
-          409,
-          "Email already exists"
-        );
+        return sendErrorResponse(res, 409, "Email already exists");
       }
     }
 
-    // Add player_id for WHERE clause
     values.push(player_id);
 
     const result = await pool.query(
@@ -408,105 +360,67 @@ exports.updatePlayer = async (req, res) => {
       WHERE player_id = $${index}
       RETURNING *;
       `,
-      values
+      values,
     );
 
     if (result.rowCount === 0) {
-      return sendErrorResponse(
-        res,
-        404,
-        "Player not found"
-      );
+      return sendErrorResponse(res, 404, "Player not found");
     }
 
     return sendSuccessResponse(
       res,
       200,
       "Player updated successfully",
-      result.rows[0]
+      result.rows[0],
     );
   } catch (error) {
     return sendErrorResponse(
       res,
       500,
-      error.message || "Internal Server Error"
+      error.message || "Internal Server Error",
     );
   }
 };
 
-
 exports.deletePlayer = async (req, res) => {
-
   const { player_id } = req.params;
 
   if (!player_id) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Player ID is required"
-    );
+    return sendErrorResponse(res, 400, "Player ID is required");
   }
   if (!player_id || isNaN(player_id)) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Invalid player ID"
-    );
+    return sendErrorResponse(res, 400, "Invalid player ID");
   }
 
-
   try {
-
     const result = await pool.query(
       `
       DELETE FROM tbl_players
       WHERE player_id=$1
       RETURNING *
       `,
-      [player_id]
+      [player_id],
     );
-
 
     if (result.rowCount === 0) {
-
-      return sendErrorResponse(
-        res,
-        404,
-        "Player not found."
-      );
-
+      return sendErrorResponse(res, 404, "Player not found.");
     }
 
-
-    return sendSuccessResponse(
-      res,
-      200,
-      "Player deleted successfully."
-    );
-
-
+    return sendSuccessResponse(res, 200, "Player deleted successfully.");
   } catch (error) {
-
     return sendErrorResponse(
       res,
       500,
-      error.message || "Internal Server Error"
+      error.message || "Internal Server Error",
     );
-
   }
-
 };
-
 
 exports.searchPlayers = async (req, res) => {
   const { keyword } = req.query;
 
   if (!keyword || !keyword.trim()) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Search keyword is required"
-    );
+    return sendErrorResponse(res, 400, "Search keyword is required");
   }
 
   try {
@@ -523,23 +437,18 @@ exports.searchPlayers = async (req, res) => {
         OR school ILIKE $1
       ORDER BY player_id DESC;
       `,
-      [searchKeyword]
+      [searchKeyword],
     );
 
-    return sendSuccessResponse(
-      res,
-      200,
-      "Players retrieved successfully.",
-      {
-        total_players: result.rowCount,
-        players: result.rows,
-      }
-    );
+    return sendSuccessResponse(res, 200, "Players retrieved successfully.", {
+      total_players: result.rowCount,
+      players: result.rows,
+    });
   } catch (error) {
     return sendErrorResponse(
       res,
       500,
-      error.message || "Internal Server Error"
+      error.message || "Internal Server Error",
     );
   }
 };

@@ -37,19 +37,39 @@ exports.addCoach = async (req, res) => {
     }
 
     const existingCoach = await pool.query(
-      `SELECT 1 FROM tbl_coach WHERE phone_number = $1`,
+      `
+      SELECT 1
+      FROM tbl_coach
+      WHERE phone_number = $1
+      `,
       [phone_number]
     );
 
     if (existingCoach.rowCount > 0) {
-      return sendErrorResponse(res, 409, "Phone number already exists.");
+      return sendErrorResponse(
+        res,
+        409,
+        "Phone number already exists."
+      );
     }
 
     const result = await pool.query(
-      `INSERT INTO tbl_coach
-      (full_name, phone_number, specialization, experience, salary, join_date)
-      VALUES ($1, $2, $3, $4, $5, $6)
-      RETURNING *`,
+      `
+      INSERT INTO tbl_coach
+      (
+        full_name,
+        phone_number,
+        specialization,
+        experience,
+        salary,
+        join_date
+      )
+      VALUES
+      (
+        $1,$2,$3,$4,$5,$6
+      )
+      RETURNING *
+      `,
       [
         full_name.trim(),
         phone_number,
@@ -57,6 +77,37 @@ exports.addCoach = async (req, res) => {
         experience,
         salary,
         join_date,
+      ]
+    );
+
+    const userResult = await pool.query(
+      `
+      SELECT full_name
+      FROM tbl_users
+      WHERE user_id = $1
+      `,
+      [req.user.user_id]
+    );
+
+    const performedBy = userResult.rows[0].full_name;
+
+    await pool.query(
+      `
+      INSERT INTO tbl_notification_logs
+      (
+        module_name,
+        action,
+        description,
+        performed_by
+      )
+      VALUES
+      ($1,$2,$3,$4)
+      `,
+      [
+        "Coach",
+        "Created",
+        `Coach ${result.rows[0].full_name} was added.`,
+        performedBy,
       ]
     );
 
