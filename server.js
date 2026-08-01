@@ -29,7 +29,7 @@ app.use(cors());
 
 app.use(apiLogger);
 
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+app.use("/uploads", express.static(path.join(__dirname, "src/uploads")));
 
 app.get("/", (_req, res) => {
   sendSuccessResponse(res, 200, "Server is up and running!");

@@ -205,7 +205,7 @@ exports.createPlayerAdmission = async (req, res) => {
     }
 
     const document_url = req.file
-      ? req.file.path
+      ? `/uploads/${req.file.filename}`
       : null;
 
     const result = await client.query(
@@ -680,7 +680,7 @@ exports.updatePlayer = async (req, res) => {
     // Update document if a new file is uploaded
     if (req.file) {
       updates.push(`document_url = $${index}`);
-      values.push(req.file.path);
+      values.push(`/uploads/${req.file.filename}`);
       index++;
     }
 
@@ -720,7 +720,7 @@ exports.updatePlayer = async (req, res) => {
       SELECT full_name
       FROM tbl_users
       WHERE user_id = $1
-      `,
+        `,
       [req.user.user_id]
     );
 
@@ -739,14 +739,14 @@ exports.updatePlayer = async (req, res) => {
     await client.query(
       `
       INSERT INTO tbl_notification_logs
-      (
-        module_name,
-        action,
-        description,
-        performed_by
-      )
+        (
+          module_name,
+          action,
+          description,
+          performed_by
+        )
       VALUES
-      ($1,$2,$3,$4)
+        ($1, $2, $3, $4)
       `,
       [
         "Player",
@@ -795,9 +795,9 @@ exports.deletePlayer = async (req, res) => {
     const result = await pool.query(
       `
       DELETE FROM tbl_players
-      WHERE player_id=$1
+      WHERE player_id = $1
       RETURNING *
-      `,
+        `,
       [player_id],
     );
 
@@ -823,12 +823,12 @@ exports.searchPlayers = async (req, res) => {
   }
 
   try {
-    const searchKeyword = `%${keyword.trim()}%`;
+    const searchKeyword = `% ${keyword.trim()}% `;
 
     const result = await pool.query(
       `
       SELECT *
-      FROM tbl_players
+        FROM tbl_players
       WHERE
         full_name ILIKE $1
         OR admission_id ILIKE $1
