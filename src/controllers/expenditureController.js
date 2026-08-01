@@ -136,14 +136,6 @@ exports.getAllExpenditures = async (req, res) => {
        ORDER BY expenditure_id DESC`
     );
 
-    if (result.rowCount === 0) {
-      return sendErrorResponse(
-        res,
-        404,
-        "No expenditure records found."
-      );
-    }
-
     return sendSuccessResponse(
       res,
       200,
