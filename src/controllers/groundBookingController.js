@@ -638,27 +638,37 @@ exports.updateGroundBooking = async (req, res) => {
 
         const performedBy = userResult.rows[0].full_name;
 
-        // Notification log
+        let action = "Updated";
+        let description = `Ground booking ${updatedBooking.rows[0].booking_code} was updated.`;
+
+        // Special notifications
+        if (status === "Confirmed") {
+            action = "Confirmed";
+            description = `Ground booking ${updatedBooking.rows[0].booking_code} for ${updatedBooking.rows[0].customer_name} has been approved.`;
+        } else if (status === "Cancelled") {
+            action = "Cancelled";
+            description = `Ground booking ${updatedBooking.rows[0].booking_code} for ${updatedBooking.rows[0].customer_name} has been cancelled.`;
+        }
+
         await client.query(
             `
-      INSERT INTO tbl_notification_logs
-      (
-        module_name,
-        action,
-        description,
-        performed_by
-      )
-      VALUES
-      ($1,$2,$3,$4)
-      `,
+            INSERT INTO tbl_notification_logs
+            (
+                module_name,
+                action,
+                description,
+                performed_by
+            )
+            VALUES
+            ($1,$2,$3,$4)
+            `,
             [
                 "Ground Booking",
-                "Updated",
-                `Ground booking ${updatedBooking.rows[0].booking_code} was updated.`,
+                action,
+                description,
                 performedBy,
             ]
         );
-
         await client.query("COMMIT");
 
         return sendSuccessResponse(

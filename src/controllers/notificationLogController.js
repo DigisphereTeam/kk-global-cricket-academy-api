@@ -34,7 +34,7 @@ exports.getNotifications = async (req, res) => {
         WHERE
           (
             module_name = 'Ground Booking'
-            AND action IN ('Approved', 'Rejected')
+            AND action IN ('Confirmed', 'Cancelled')
           )
           OR
           (
