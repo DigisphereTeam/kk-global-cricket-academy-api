@@ -105,19 +105,29 @@ exports.createPlayerAdmission = async (req, res) => {
     );
   }
 
-  if (height != null && Number(height) <= 0) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Height must be greater than 0."
-    );
-  }
-
-  if (weight != null && Number(weight) <= 0) {
+  if (
+    weight !== undefined &&
+    weight !== null &&
+    weight.toString().trim() !== "" &&
+    Number(weight) <= 0
+  ) {
     return sendErrorResponse(
       res,
       400,
       "Weight must be greater than 0."
+    );
+  }
+
+  if (
+    height !== undefined &&
+    height !== null &&
+    height.toString().trim() !== "" &&
+    Number(height) <= 0
+  ) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Height must be greater than 0."
     );
   }
 
@@ -509,24 +519,28 @@ exports.updatePlayer = async (req, res) => {
   }
 
   if (
-    req.body.height != null &&
-    Number(req.body.height) <= 0
-  ) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Height must be greater than 0."
-    );
-  }
-
-  if (
-    req.body.weight != null &&
-    Number(req.body.weight) <= 0
+    weight !== undefined &&
+    weight !== null &&
+    weight.toString().trim() !== "" &&
+    Number(weight) <= 0
   ) {
     return sendErrorResponse(
       res,
       400,
       "Weight must be greater than 0."
+    );
+  }
+
+  if (
+    height !== undefined &&
+    height !== null &&
+    height.toString().trim() !== "" &&
+    Number(height) <= 0
+  ) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Height must be greater than 0."
     );
   }
 
