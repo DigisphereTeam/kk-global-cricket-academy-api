@@ -212,7 +212,7 @@ exports.updateUser = async (req, res) => {
       "full_name",
       "email",
       "phone_number",
-      "password"
+      "password",
     ];
 
     const updates = [];
@@ -222,11 +222,14 @@ exports.updateUser = async (req, res) => {
     for (const field of allowedFields) {
       if (req.body[field] !== undefined) {
         let value = req.body[field];
+
         if (typeof value === "string") {
           value = value.trim();
         }
+
         if (field === "email" && value) {
           value = value.toLowerCase();
+
           if (!/^\S+@\S+\.\S+$/.test(value)) {
             return sendErrorResponse(
               res,
@@ -244,6 +247,27 @@ exports.updateUser = async (req, res) => {
               "Invalid phone number."
             );
           }
+        }
+
+        if (field === "password") {
+          if (!value) {
+            return sendErrorResponse(
+              res,
+              400,
+              "Password cannot be empty."
+            );
+          }
+
+          if (value.length < 8) {
+            return sendErrorResponse(
+              res,
+              400,
+              "Password must be at least 8 characters long."
+            );
+          }
+
+          // Hash the password before storing it
+          value = await bcrypt.hash(value, 10);
         }
 
         updates.push(`${field} = $${index}`);
