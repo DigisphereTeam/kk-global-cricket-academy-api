@@ -10,7 +10,7 @@ const fileUpload = require("../middlewares/uploadMiddleware");
 
 playerRouter.use(verifyToken);
 
-playerRouter.post("/", fileUpload.single("file"), validateRequestBody, checkRole("PRIMARY"), createPlayerAdmission);
+playerRouter.post("/", fileUpload.single("document_url"), validateRequestBody, checkRole("PRIMARY"), createPlayerAdmission);
 
 playerRouter.get("/", getAllPlayers);
 
@@ -18,7 +18,7 @@ playerRouter.get("/search", searchPlayers);
 
 playerRouter.get("/:player_id", getPlayerById);
 
-playerRouter.patch("/:player_id", validateRequestBody, updatePlayer);
+playerRouter.patch("/:player_id", fileUpload.single("document_url"), validateRequestBody, updatePlayer);
 
 playerRouter.delete("/:player_id", checkRole("ADMIN"), deletePlayer);
 

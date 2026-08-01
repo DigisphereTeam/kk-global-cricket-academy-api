@@ -5,10 +5,12 @@ exports.applyOneOnOne = async (req, res) => {
   const {
     player_id,
     coach_id,
+    application_date,
     focus_area,
     payment_type,
     fee_amount,
     preferred_slot,
+    monthly_performance_review,
     remarks,
   } = req.body;
 
@@ -74,41 +76,45 @@ exports.applyOneOnOne = async (req, res) => {
       (
         player_id,
         coach_id,
+        application_date,
         focus_area,
         payment_type,
         fee_amount,
         preferred_slot,
-        remarks
+        remarks,
+        monthly_performance_review
       )
       VALUES
-      ($1,$2,$3,$4,$5,$6,$7)
-      RETURNING *
+      ($1,$2,COALESCE($3::date, CURRENT_DATE),$4,$5,$6,$7,$8,$9)
+      RETURNING *;
       `,
       [
         player_id,
         coach_id,
+        application_date || null,
         focus_area.trim(),
         payment_type,
         fee_amount,
         preferred_slot,
         remarks,
+        monthly_performance_review || null,
       ],
     );
 
     // Get logged-in user
-const userResult = await pool.query(
-  `
-  SELECT full_name
-  FROM tbl_users
-  WHERE user_id = $1
-  `,
-  [req.user.user_id]
-);
+    const userResult = await pool.query(
+      `
+    SELECT full_name
+    FROM tbl_users
+    WHERE user_id = $1
+    `,
+      [req.user.user_id]
+    );
 
-const performedBy = userResult.rows[0].full_name;
+    const performedBy = userResult.rows[0].full_name;
 
-const details = await pool.query(
-  `
+    const details = await pool.query(
+      `
   SELECT
     p.full_name AS player_name,
     c.full_name AS coach_name
@@ -117,11 +123,11 @@ const details = await pool.query(
     ON c.coach_id = $2
   WHERE p.player_id = $1
   `,
-  [player_id, coach_id]
-);
+      [player_id, coach_id]
+    );
 
-await pool.query(
-  `
+    await pool.query(
+      `
   INSERT INTO tbl_notification_logs
   (
     module_name,
@@ -132,13 +138,13 @@ await pool.query(
   VALUES
   ($1,$2,$3,$4)
   `,
-  [
-    "One-on-One Training",
-    "Created",
-    `${details.rows[0].player_name} registered for one-on-one training with Coach ${details.rows[0].coach_name}.`,
-    performedBy,
-  ]
-);
+      [
+        "One-on-One Training",
+        "Created",
+        `${details.rows[0].player_name} registered for one-on-one training with Coach ${details.rows[0].coach_name}.`,
+        performedBy,
+      ]
+    );
 
     return sendSuccessResponse(
       res,

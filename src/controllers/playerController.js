@@ -105,19 +105,29 @@ exports.createPlayerAdmission = async (req, res) => {
     );
   }
 
-  if (height != null && Number(height) <= 0) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Height must be greater than 0."
-    );
-  }
-
-  if (weight != null && Number(weight) <= 0) {
+  if (
+    weight !== undefined &&
+    weight !== null &&
+    weight.toString().trim() !== "" &&
+    Number(weight) <= 0
+  ) {
     return sendErrorResponse(
       res,
       400,
       "Weight must be greater than 0."
+    );
+  }
+
+  if (
+    height !== undefined &&
+    height !== null &&
+    height.toString().trim() !== "" &&
+    Number(height) <= 0
+  ) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Height must be greater than 0."
     );
   }
 
@@ -230,7 +240,7 @@ exports.createPlayerAdmission = async (req, res) => {
     id_increment
   )
   VALUES (
-    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+    $1,$2,$3,$4,$5,COALESCE($6::date, CURRENT_DATE),$7,$8,$9,$10,
     $11,$12,$13,$14,$15,$16,$17,$18,
     $19,$20,$21,$22,$23,$24,$25,$26,
     $27
@@ -252,13 +262,13 @@ exports.createPlayerAdmission = async (req, res) => {
         payment_type.trim(),
         remarks?.trim() || null,
         father_name?.trim() || null,
-        father_phone || null,
+        father_phone?.trim() || null,
         father_occupation?.trim() || null,
         mother_name?.trim() || null,
-        mother_phone || null,
+        mother_phone?.trim() || null,
         contact_name?.trim() || null,
         relation?.trim() || null,
-        contact_phone || null,
+        contact_phone?.trim() || null,
         blood_group || null,
         allergies?.trim() || null,
         height != null ? Number(height) : null,
@@ -277,6 +287,16 @@ exports.createPlayerAdmission = async (req, res) => {
     );
 
     const reqUser = reqUserDetails.rows[0];
+
+    if (!reqUser) {
+      await client.query("ROLLBACK");
+
+      return sendErrorResponse(
+        res,
+        404,
+        "Logged-in user not found."
+      );
+    }
     await client.query(
       `INSERT INTO tbl_notification_logs
         (
@@ -320,23 +340,45 @@ exports.createPlayerAdmission = async (req, res) => {
 
 exports.getAllPlayers = async (req, res) => {
   try {
-    const result = await pool.query(
-      `
-      SELECT *
-      FROM tbl_players
-      ORDER BY player_id DESC
-      `,
+    const [players, statistics] = await Promise.all([
+      // Player List
+      pool.query(`
+        SELECT *
+        FROM tbl_players
+        ORDER BY player_id DESC
+      `),
+
+      // Player Statistics
+      pool.query(`
+        SELECT
+          COUNT(*) AS total_players
+        FROM tbl_players
+      `),
+    ]);
+
+    return sendSuccessResponse(
+      res,
+      200,
+      "Players fetched successfully.",
+      {
+        statistics: {
+          total_players: Number(
+            statistics.rows[0].total_players
+          ),
+          active_players: 0,
+          inactive_players: 0,
+          pending_fees: 0,
+        },
+
+        players: players.rows,
+      }
     );
 
-    return sendSuccessResponse(res, 200, "Players fetched successfully.", {
-      total_students: result.rowCount,
-      students: result.rows,
-    });
   } catch (error) {
     return sendErrorResponse(
       res,
       500,
-      error.message || "Internal Server Error",
+      error.message || "Internal Server Error"
     );
   }
 };
@@ -384,15 +426,201 @@ exports.updatePlayer = async (req, res) => {
   const { player_id } = req.params;
 
   if (!player_id) {
-    return sendErrorResponse(res, 400, "Player ID is required.");
+    return sendErrorResponse(
+      res,
+      400,
+      "Player ID is required."
+    );
   }
 
   if (isNaN(player_id)) {
-    return sendErrorResponse(res, 400, "Invalid player ID.");
+    return sendErrorResponse(
+      res,
+      400,
+      "Invalid player ID."
+    );
   }
 
+  if (
+    req.body.phone_number &&
+    !/^[6-9]\d{9}$/.test(req.body.phone_number)
+  ) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Invalid player phone number."
+    );
+  }
+
+  if (
+    req.body.father_phone &&
+    !/^[6-9]\d{9}$/.test(req.body.father_phone)
+  ) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Invalid father phone number."
+    );
+  }
+
+  if (
+    req.body.mother_phone &&
+    !/^[6-9]\d{9}$/.test(req.body.mother_phone)
+  ) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Invalid mother phone number."
+    );
+  }
+
+  if (
+    req.body.contact_phone &&
+    !/^[6-9]\d{9}$/.test(req.body.contact_phone)
+  ) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Invalid emergency contact phone number."
+    );
+  }
+
+  if (
+    req.body.email &&
+    !/^\S+@\S+\.\S+$/.test(req.body.email)
+  ) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Invalid email address."
+    );
+  }
+
+  if (
+    req.body.age != null &&
+    Number(req.body.age) <= 0
+  ) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Age must be greater than 0."
+    );
+  }
+
+  if (
+    req.body.admission_fee != null &&
+    Number(req.body.admission_fee) < 0
+  ) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Admission fee cannot be negative."
+    );
+  }
+
+  if (
+    weight !== undefined &&
+    weight !== null &&
+    weight.toString().trim() !== "" &&
+    Number(weight) <= 0
+  ) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Weight must be greater than 0."
+    );
+  }
+
+  if (
+    height !== undefined &&
+    height !== null &&
+    height.toString().trim() !== "" &&
+    Number(height) <= 0
+  ) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Height must be greater than 0."
+    );
+  }
+
+  let client;
+
   try {
-    const allowedFields = [
+    client = await pool.connect();
+
+    await client.query("BEGIN");
+
+    const existingPlayer = await client.query(
+      `
+      SELECT *
+      FROM tbl_players
+      WHERE player_id = $1
+      `,
+      [player_id]
+    );
+
+    if (existingPlayer.rowCount === 0) {
+      await client.query("ROLLBACK");
+
+      return sendErrorResponse(
+        res,
+        404,
+        "Player not found."
+      );
+    }
+
+    if (req.body.phone_number) {
+      const phoneExists = await client.query(
+        `
+        SELECT 1
+        FROM tbl_players
+        WHERE phone_number = $1
+          AND player_id <> $2
+        LIMIT 1
+        `,
+        [
+          req.body.phone_number.trim(),
+          player_id,
+        ]
+      );
+
+      if (phoneExists.rowCount > 0) {
+        await client.query("ROLLBACK");
+
+        return sendErrorResponse(
+          res,
+          409,
+          "Phone number already exists."
+        );
+      }
+    }
+
+    if (req.body.email) {
+      const emailExists = await client.query(
+        `
+        SELECT 1
+        FROM tbl_players
+        WHERE LOWER(email) = LOWER($1)
+          AND player_id <> $2
+        LIMIT 1
+        `,
+        [
+          req.body.email.trim(),
+          player_id,
+        ]
+      );
+
+      if (emailExists.rowCount > 0) {
+        await client.query("ROLLBACK");
+
+        return sendErrorResponse(
+          res,
+          409,
+          "Email already exists."
+        );
+      }
+    } const allowedFields = [
       "full_name",
       "gender",
       "age",
@@ -426,11 +654,21 @@ exports.updatePlayer = async (req, res) => {
     for (const field of allowedFields) {
       if (req.body[field] !== undefined) {
         let value = req.body[field];
+
         if (typeof value === "string") {
           value = value.trim();
         }
+
         if (field === "email" && value) {
           value = value.toLowerCase();
+        }
+
+        if (
+          ["age", "admission_fee", "height", "weight"].includes(field) &&
+          value !== null &&
+          value !== ""
+        ) {
+          value = Number(value);
         }
 
         updates.push(`${field} = $${index}`);
@@ -439,72 +677,107 @@ exports.updatePlayer = async (req, res) => {
       }
     }
 
+    // Update document if a new file is uploaded
+    if (req.file) {
+      updates.push(`document_url = $${index}`);
+      values.push(req.file.path);
+      index++;
+    }
+
     if (updates.length === 0) {
-      return sendErrorResponse(res, 400, "No fields provided to update");
-    }
+      await client.query("ROLLBACK");
 
-    if (req.body.phone_number) {
-      const existingPlayer = await pool.query(
-        `
-        SELECT 1
-        FROM tbl_players
-        WHERE phone_number = $1
-          AND player_id <> $2
-        LIMIT 1
-        `,
-        [req.body.phone_number, player_id],
+      return sendErrorResponse(
+        res,
+        400,
+        "No fields provided to update."
       );
-
-      if (existingPlayer.rowCount > 0) {
-        return sendErrorResponse(res, 409, "Phone number already exists");
-      }
-    }
-
-    if (req.body.email) {
-      const existingEmail = await pool.query(
-        `
-        SELECT 1
-        FROM tbl_players
-        WHERE LOWER(email) = LOWER($1)
-          AND player_id <> $2
-        LIMIT 1
-        `,
-        [req.body.email, player_id],
-      );
-
-      if (existingEmail.rowCount > 0) {
-        return sendErrorResponse(res, 409, "Email already exists");
-      }
     }
 
     values.push(player_id);
 
-    const result = await pool.query(
+    const result = await client.query(
       `
       UPDATE tbl_players
-      SET ${updates.join(", ")}
+      SET
+        ${updates.join(", ")}
       WHERE player_id = $${index}
       RETURNING *;
       `,
-      values,
+      values
     );
 
     if (result.rowCount === 0) {
-      return sendErrorResponse(res, 404, "Player not found");
+      await client.query("ROLLBACK");
+
+      return sendErrorResponse(
+        res,
+        404,
+        "Player not found."
+      );
+    } const reqUserDetails = await client.query(
+      `
+      SELECT full_name
+      FROM tbl_users
+      WHERE user_id = $1
+      `,
+      [req.user.user_id]
+    );
+
+    const reqUser = reqUserDetails.rows[0];
+
+    if (!reqUser) {
+      await client.query("ROLLBACK");
+
+      return sendErrorResponse(
+        res,
+        404,
+        "Logged-in user not found."
+      );
     }
+
+    await client.query(
+      `
+      INSERT INTO tbl_notification_logs
+      (
+        module_name,
+        action,
+        description,
+        performed_by
+      )
+      VALUES
+      ($1,$2,$3,$4)
+      `,
+      [
+        "Player",
+        "Updated",
+        `Player ${result.rows[0].full_name} was updated.`,
+        reqUser.full_name,
+      ]
+    );
+
+    await client.query("COMMIT");
 
     return sendSuccessResponse(
       res,
       200,
-      "Player updated successfully",
-      result.rows[0],
+      "Player updated successfully.",
+      result.rows[0]
     );
   } catch (error) {
+    if (client) {
+      await client.query("ROLLBACK");
+    }
+
     return sendErrorResponse(
       res,
       500,
-      error.message || "Internal Server Error",
+      error.message || "Internal Server Error"
     );
+  } finally {
+    if (client) {
+      client.release();
+    }
   }
 };
 
