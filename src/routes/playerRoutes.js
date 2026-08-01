@@ -10,7 +10,7 @@ const fileUpload = require("../middlewares/uploadMiddleware");
 
 playerRouter.use(verifyToken);
 
-playerRouter.post("/", fileUpload.single("file"), validateRequestBody, checkRole("PRIMARY"), createPlayerAdmission);
+playerRouter.post("/", fileUpload.single("document_url"), validateRequestBody, checkRole("PRIMARY"), createPlayerAdmission);
 
 playerRouter.get("/", getAllPlayers);
 

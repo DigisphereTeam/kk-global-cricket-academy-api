@@ -230,7 +230,7 @@ exports.createPlayerAdmission = async (req, res) => {
     id_increment
   )
   VALUES (
-    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+    $1,$2,$3,$4,$5,COALESCE($6::date, CURRENT_DATE),$7,$8,$9,$10,
     $11,$12,$13,$14,$15,$16,$17,$18,
     $19,$20,$21,$22,$23,$24,$25,$26,
     $27
@@ -252,13 +252,13 @@ exports.createPlayerAdmission = async (req, res) => {
         payment_type.trim(),
         remarks?.trim() || null,
         father_name?.trim() || null,
-        father_phone || null,
+        father_phone?.trim() || null,
         father_occupation?.trim() || null,
         mother_name?.trim() || null,
-        mother_phone || null,
+        mother_phone?.trim() || null,
         contact_name?.trim() || null,
         relation?.trim() || null,
-        contact_phone || null,
+        contact_phone?.trim() || null,
         blood_group || null,
         allergies?.trim() || null,
         height != null ? Number(height) : null,
@@ -277,6 +277,16 @@ exports.createPlayerAdmission = async (req, res) => {
     );
 
     const reqUser = reqUserDetails.rows[0];
+
+    if (!reqUser) {
+      await client.query("ROLLBACK");
+
+      return sendErrorResponse(
+        res,
+        404,
+        "Logged-in user not found."
+      );
+    }
     await client.query(
       `INSERT INTO tbl_notification_logs
         (
