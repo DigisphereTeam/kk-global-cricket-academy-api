@@ -518,32 +518,6 @@ exports.updatePlayer = async (req, res) => {
     );
   }
 
-  if (
-    weight !== undefined &&
-    weight !== null &&
-    weight.toString().trim() !== "" &&
-    Number(weight) <= 0
-  ) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Weight must be greater than 0."
-    );
-  }
-
-  if (
-    height !== undefined &&
-    height !== null &&
-    height.toString().trim() !== "" &&
-    Number(height) <= 0
-  ) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Height must be greater than 0."
-    );
-  }
-
   let client;
 
   try {
