@@ -9,6 +9,8 @@ const statusFlow = {
 };
 
 exports.createGroundBooking = async (req, res) => {
+    let client;
+
     try {
         let {
             customer_name,
@@ -56,20 +58,18 @@ exports.createGroundBooking = async (req, res) => {
             );
         }
 
-        // Booking date validation
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-
-        const bookingDate = new Date(booking_date);
-        bookingDate.setHours(0, 0, 0, 0);
-
-        if (bookingDate < today) {
-            return sendErrorResponse(
-                res,
-                400,
-                "Booking date cannot be in the past."
-            );
-        }
+        // Time slot validation (HH:MM - HH:MM)
+        // if (
+        //     !/^([01]\d|2[0-3]):([0-5]\d)\s*-\s*([01]\d|2[0-3]):([0-5]\d)$/.test(
+        //         time_slot
+        //     )
+        // ) {
+        //     return sendErrorResponse(
+        //         res,
+        //         400,
+        //         "Invalid time slot format. Use HH:MM - HH:MM."
+        //     );
+        // }
 
         // Payment type validation
         const allowedPaymentTypes = [
@@ -115,19 +115,54 @@ exports.createGroundBooking = async (req, res) => {
             );
         }
 
-        // Check duplicate booking for same date & slot
-        const existingBooking = await pool.query(
+        const remaining_amount = total_amount - advance_paid;
+
+        client = await pool.connect();
+
+        await client.query("BEGIN");
+
+        // Generate Booking Code (GB260001)
+        const currentYear = new Date().getFullYear();
+        const yearCode = String(currentYear).slice(-2);
+        const prefix = `GB${yearCode}`;
+
+        await client.query(
+            `SELECT pg_advisory_xact_lock($1)`,
+            [currentYear]
+        );
+
+        const bookingResult = await client.query(
             `
-            SELECT booking_id
+            SELECT COALESCE(
+                MAX(
+                CAST(SUBSTRING(booking_code FROM 5) AS INTEGER)
+                ),
+                0
+            ) AS last_number
             FROM tbl_ground_booking
-            WHERE booking_date = $1
-                AND time_slot = $2
-                AND status != 'Cancelled'
+            WHERE booking_code LIKE $1
             `,
+            [`${prefix}%`]
+        );
+
+        const nextNumber = Number(bookingResult.rows[0].last_number) + 1;
+
+        const booking_code = `${prefix}${String(nextNumber).padStart(4, "0")}`;
+        // Check duplicate booking
+        const existingBooking = await client.query(
+            `
+      SELECT booking_id
+      FROM tbl_ground_booking
+      WHERE booking_date = $1
+        AND time_slot = $2
+        AND status != 'Cancelled'
+      `,
             [booking_date, time_slot]
         );
 
         if (existingBooking.rowCount > 0) {
+            await client.query("ROLLBACK");
+
             return sendErrorResponse(
                 res,
                 409,
@@ -135,10 +170,11 @@ exports.createGroundBooking = async (req, res) => {
             );
         }
 
-        // Insert booking
-        const booking = await pool.query(
+        // Create booking
+        const booking = await client.query(
             `
       INSERT INTO tbl_ground_booking (
+        booking_code,
         customer_name,
         customer_phone,
         purpose,
@@ -147,12 +183,16 @@ exports.createGroundBooking = async (req, res) => {
         payment_type,
         total_amount,
         advance_paid,
-        remarks
+        remaining_amount,
+        remarks,
+        id_increment
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-      RETURNING *
+      VALUES
+      ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+      RETURNING *;
       `,
             [
+                booking_code,
                 customer_name,
                 customer_phone,
                 purpose,
@@ -161,42 +201,56 @@ exports.createGroundBooking = async (req, res) => {
                 payment_type,
                 total_amount,
                 advance_paid,
+                remaining_amount,
                 remarks,
+                nextNumber,
             ]
         );
 
+        // Get logged-in user
+        const userResult = await client.query(
+            `
+      SELECT full_name
+      FROM tbl_users
+      WHERE user_id = $1
+      `,
+            [req.user.user_id]
+        );
 
-const userResult = await pool.query(
-  `
-  SELECT full_name
-  FROM tbl_users
-  WHERE user_id = $1
-  `,
-  [req.user.user_id]
-);
+        const performedBy = userResult.rows[0];
 
-const performedBy = userResult.rows[0].full_name;
+        if (!performedBy) {
+            await client.query("ROLLBACK");
 
+            return sendErrorResponse(
+                res,
+                404,
+                "Logged-in user not found."
+            );
+        }
 
-await pool.query(
-  `
-  INSERT INTO tbl_notification_logs
-  (
-    module_name,
-    action,
-    description,
-    performed_by
-  )
-  VALUES
-  ($1,$2,$3,$4)
-  `,
-  [
-    "Ground Booking",
-    "Created",
-    `Ground was booked by ${booking.rows[0].customer_name} for ${booking.rows[0].booking_date} for time slot (${booking.rows[0].time_slot}).`,
-    performedBy,
-  ]
-);
+        // Notification
+        await client.query(
+            `
+      INSERT INTO tbl_notification_logs
+      (
+        module_name,
+        action,
+        description,
+        performed_by
+      )
+      VALUES
+      ($1,$2,$3,$4)
+      `,
+            [
+                "Ground Booking",
+                "Created",
+                `Ground booking ${booking.rows[0].booking_code} was created by ${booking.rows[0].customer_name} for ${booking.rows[0].booking_date} (${booking.rows[0].time_slot}).`,
+                performedBy.full_name,
+            ]
+        );
+
+        await client.query("COMMIT");
 
         return sendSuccessResponse(
             res,
@@ -205,15 +259,21 @@ await pool.query(
             booking.rows[0]
         );
     } catch (error) {
+        if (client) {
+            await client.query("ROLLBACK");
+        }
+
         return sendErrorResponse(
             res,
             500,
             error.message || "Internal Server Error"
         );
+    } finally {
+        if (client) {
+            client.release();
+        }
     }
 };
-
-
 exports.getAllGroundBookings = async (req, res) => {
     try {
         const [bookings, statistics] = await Promise.all([
