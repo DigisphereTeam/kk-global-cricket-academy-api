@@ -647,7 +647,7 @@ exports.updateGroundBooking = async (req, res) => {
             description = `Ground booking ${updatedBooking.rows[0].booking_code} for ${updatedBooking.rows[0].customer_name} has been approved.`;
         } else if (status === "Cancelled") {
             action = "Cancelled";
-            description = `Ground booking ${updatedBooking.rows[0].booking_code} for ${updatedBooking.rows[0].customer_name} has been cancelled.`;
+            description = `Reason: ${updatedBooking.rows[0].remarks || "Not provided"}`;
         }
 
         await client.query(

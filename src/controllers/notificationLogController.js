@@ -3,7 +3,6 @@ const { sendErrorResponse, sendSuccessResponse } = require("../utils/apiResponse
 
 exports.getNotifications = async (req, res) => {
   try {
-
     const userResult = await pool.query(
       `
       SELECT role
@@ -16,18 +15,18 @@ exports.getNotifications = async (req, res) => {
     const role = userResult.rows[0].role;
 
     let query = "";
-    let values = [];
 
     if (role === "ADMIN") {
-
       query = `
         SELECT *
         FROM tbl_notification_logs
+        WHERE NOT (
+          module_name = 'Ground Booking'
+          AND action IN ('Confirmed', 'Cancelled')
+        )
         ORDER BY created_at DESC
       `;
-
     } else if (role === "PRIMARY") {
-
       query = `
         SELECT *
         FROM tbl_notification_logs
@@ -42,18 +41,15 @@ exports.getNotifications = async (req, res) => {
           )
         ORDER BY created_at DESC
       `;
-
     } else {
-
       return sendErrorResponse(
         res,
         403,
         "Unauthorized access."
       );
-
     }
 
-    const result = await pool.query(query, values);
+    const result = await pool.query(query);
 
     return sendSuccessResponse(
       res,
@@ -61,15 +57,12 @@ exports.getNotifications = async (req, res) => {
       "Notifications fetched successfully.",
       result.rows
     );
-
   } catch (error) {
-
     return sendErrorResponse(
       res,
       500,
       error.message || "Internal Server Error"
     );
-
   }
 };
 
