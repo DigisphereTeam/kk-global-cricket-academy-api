@@ -292,7 +292,7 @@ exports.getAllGroundBookings = async (req, res) => {
                 COUNT(*) FILTER ( WHERE LOWER(status) = 'confirmed') AS confirmed_bookings,
                 COUNT(*) FILTER ( WHERE LOWER(status) = 'pending' ) AS pending_bookings,
                 COUNT(*) FILTER ( WHERE LOWER(status) = 'completed' ) AS completed_bookings,
-                COUNT(*) FILTER ( WHERE booking_date >= CURRENT_DATE ) AS upcoming_bookings
+                COUNT(*) FILTER ( WHERE booking_date >= CURRENT_DATE AND status != 'Cancelled') AS upcoming_bookings
             FROM tbl_ground_booking
             `
             ),
