@@ -107,6 +107,7 @@ exports.getUsers = async (req, res) => {
         role,
         created_at
       FROM tbl_users
+      WHERE role <> 'ADMIN'
       ORDER BY created_at DESC
     `);
 
@@ -181,7 +182,6 @@ exports.getUserById = async (req, res) => {
 
 exports.updateUser = async (req, res) => {
   const { user_id } = req.params;
-  const { full_name, email, phone_number } = req.body;
 
   if (!user_id || isNaN(user_id) || Number(user_id) <= 0) {
     return sendErrorResponse(
@@ -209,16 +209,104 @@ exports.updateUser = async (req, res) => {
       );
     }
 
+    const allowedFields = [
+      "full_name",
+      "email",
+      "phone_number",
+      "password",
+    ];
+
+    const updates = [];
+    const values = [];
+    let index = 1;
+
+    for (const field of allowedFields) {
+      if (req.body[field] !== undefined) {
+        let value = req.body[field];
+
+        if (typeof value === "string") {
+          value = value.trim();
+        }
+
+        if (field === "email" && value) {
+          value = value.toLowerCase();
+
+          if (!/^\S+@\S+\.\S+$/.test(value)) {
+            return sendErrorResponse(
+              res,
+              400,
+              "Invalid email address."
+            );
+          }
+        }
+
+        if (field === "phone_number" && value) {
+          if (!/^[6-9]\d{9}$/.test(value)) {
+            return sendErrorResponse(
+              res,
+              400,
+              "Invalid phone number."
+            );
+          }
+        }
+
+        if (field === "password") {
+          if (!value) {
+            return sendErrorResponse(
+              res,
+              400,
+              "Password cannot be empty."
+            );
+          }
+
+          if (value.length < 8) {
+            return sendErrorResponse(
+              res,
+              400,
+              "Password must be at least 8 characters long."
+            );
+          }
+
+          // Hash the password before storing it
+          value = await bcrypt.hash(value, 10);
+        }
+
+        updates.push(`${field} = $${index}`);
+        values.push(value === "" ? null : value);
+        index++;
+      }
+    }
+
+    if (updates.length === 0) {
+      return sendErrorResponse(
+        res,
+        400,
+        "No fields provided to update."
+      );
+    }
+
+    const email =
+      req.body.email?.trim().toLowerCase() ||
+      user.rows[0].email;
+
+    const phone_number =
+      req.body.phone_number?.trim() ||
+      user.rows[0].phone_number;
+
     const existingUser = await pool.query(
       `
       SELECT user_id
       FROM tbl_users
-      WHERE (email = $1 OR phone_number = $2)
-      AND user_id <> $3
+      WHERE
+        (
+          LOWER(email) = LOWER($1)
+          OR phone_number = $2
+        )
+        AND user_id <> $3
       `,
       [
-        email || user.rows[0].email,
-        phone_number || user.rows[0].phone_number,
+        email,
+        phone_number,
         user_id,
       ]
     );
@@ -231,15 +319,15 @@ exports.updateUser = async (req, res) => {
       );
     }
 
+    updates.push("updated_at = CURRENT_TIMESTAMP");
+
+    values.push(user_id);
+
     const result = await pool.query(
       `
       UPDATE tbl_users
-      SET
-        full_name = COALESCE($1, full_name),
-        email = COALESCE($2, email),
-        phone_number = COALESCE($3, phone_number),
-        updated_at = CURRENT_TIMESTAMP
-      WHERE user_id = $4
+      SET ${updates.join(", ")}
+      WHERE user_id = $${index}
       RETURNING
         user_id,
         full_name,
@@ -247,14 +335,9 @@ exports.updateUser = async (req, res) => {
         phone_number,
         role,
         created_at,
-        updated_at
+        updated_at;
       `,
-      [
-        full_name,
-        email,
-        phone_number,
-        user_id,
-      ]
+      values
     );
 
     return sendSuccessResponse(

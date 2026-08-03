@@ -186,25 +186,23 @@ exports.createEmployeeSalary = async (req, res) => {
 };
 
 exports.getEmployeeSalaries = async (req, res) => {
-  const {
-    salary_month,
-    salary_year,
-    employee_type,
-  } = req.query;
+  const now = new Date();
+
+  const salary_month = req.query.salary_month
+    ? Number(req.query.salary_month)
+    : now.getMonth() + 1;
+
+  const salary_year = req.query.salary_year
+    ? Number(req.query.salary_year)
+    : now.getFullYear();
+
+  const { employee_type } = req.query;
 
   try {
-    if (!salary_month || !salary_year) {
-      return sendErrorResponse(
-        res,
-        400,
-        "salary_month and salary_year are required."
-      );
-    }
-
     if (
-      !Number.isInteger(Number(salary_month)) ||
-      Number(salary_month) < 1 ||
-      Number(salary_month) > 12
+      !Number.isInteger(salary_month) ||
+      salary_month < 1 ||
+      salary_month > 12
     ) {
       return sendErrorResponse(
         res,
@@ -213,6 +211,16 @@ exports.getEmployeeSalaries = async (req, res) => {
       );
     }
 
+    if (
+      !Number.isInteger(salary_year) ||
+      salary_year < 2000
+    ) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Invalid salary year."
+      );
+    }
 
     let employeeCondition = "";
 
@@ -221,13 +229,11 @@ exports.getEmployeeSalaries = async (req, res) => {
         employeeCondition = `
           AND es.coach_id IS NOT NULL
         `;
-      }
-      else if (employee_type === "Staff") {
+      } else if (employee_type === "Staff") {
         employeeCondition = `
           AND es.staff_id IS NOT NULL
         `;
-      }
-      else {
+      } else {
         return sendErrorResponse(
           res,
           400,
@@ -324,37 +330,35 @@ UNION ALL
     LIMIT 1
   ) es ON TRUE
 )
-`;
-
-    if (employee_type === "Coach") {
+`; if (employee_type === "Coach") {
       query = `
-    SELECT *
-    FROM (${query}) employees
-    WHERE employee_type = 'Coach'
-    ORDER BY employee_name;
-  `;
+        SELECT *
+        FROM (${query}) employees
+        WHERE employee_type = 'Coach'
+        ORDER BY employee_name;
+      `;
     } else if (employee_type === "Staff") {
       query = `
-    SELECT *
-    FROM (${query}) employees
-    WHERE employee_type = 'Staff'
-    ORDER BY employee_name;
-  `;
+        SELECT *
+        FROM (${query}) employees
+        WHERE employee_type = 'Staff'
+        ORDER BY employee_name;
+      `;
     } else {
       query = `
-    SELECT *
-    FROM (${query}) employees
-    ORDER BY employee_type, employee_name;
-  `;
+        SELECT *
+        FROM (${query}) employees
+        ORDER BY employee_type, employee_name;
+      `;
     }
 
     const result = await pool.query(query, [
-      Number(salary_month),
-      Number(salary_year),
+      salary_month,
+      salary_year,
     ]);
 
-    const requestedMonth = Number(salary_month);
-    const requestedYear = Number(salary_year);
+    const requestedMonth = salary_month;
+    const requestedYear = salary_year;
 
     const today = new Date();
     const currentDay = today.getDate();
@@ -377,7 +381,7 @@ UNION ALL
         };
       }
 
-      // Find the month immediately after the latest salary
+      // Next eligible salary month
       let nextMonth = actualMonth + 1;
       let nextYear = actualYear;
 
@@ -389,50 +393,37 @@ UNION ALL
       let paymentStatus = "Pending";
       let paymentDate = null;
 
-      // Requested month is the immediate next month
       if (
         requestedMonth === nextMonth &&
         requestedYear === nextYear
       ) {
-        // Before or on the 5th -> treat as Paid
         if (currentDay <= 5) {
           paymentStatus = "Paid";
           paymentDate = row.payment_date;
-        }
-        // After the 5th -> Pending
-        else {
+        } else {
           paymentStatus = "Pending";
           paymentDate = null;
         }
-      }
-      // Any later month -> Pending
-      else {
+      } else {
         paymentStatus = "Pending";
         paymentDate = null;
       }
 
       return {
         ...row,
-
-        // Override with requested month/year
         salary_month: requestedMonth,
         salary_year: requestedYear,
-
         payment_status: paymentStatus,
         payment_date: paymentDate,
       };
-    });
-
-    return sendSuccessResponse(
+    }); return sendSuccessResponse(
       res,
       200,
       "Employee salaries fetched successfully.",
       data
     );
 
-
   } catch (error) {
-
     console.error(error);
 
     return sendErrorResponse(

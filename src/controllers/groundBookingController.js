@@ -9,6 +9,8 @@ const statusFlow = {
 };
 
 exports.createGroundBooking = async (req, res) => {
+    let client;
+
     try {
         let {
             customer_name,
@@ -56,20 +58,18 @@ exports.createGroundBooking = async (req, res) => {
             );
         }
 
-        // Booking date validation
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-
-        const bookingDate = new Date(booking_date);
-        bookingDate.setHours(0, 0, 0, 0);
-
-        if (bookingDate < today) {
-            return sendErrorResponse(
-                res,
-                400,
-                "Booking date cannot be in the past."
-            );
-        }
+        // Time slot validation (HH:MM - HH:MM)
+        // if (
+        //     !/^([01]\d|2[0-3]):([0-5]\d)\s*-\s*([01]\d|2[0-3]):([0-5]\d)$/.test(
+        //         time_slot
+        //     )
+        // ) {
+        //     return sendErrorResponse(
+        //         res,
+        //         400,
+        //         "Invalid time slot format. Use HH:MM - HH:MM."
+        //     );
+        // }
 
         // Payment type validation
         const allowedPaymentTypes = [
@@ -115,19 +115,54 @@ exports.createGroundBooking = async (req, res) => {
             );
         }
 
-        // Check duplicate booking for same date & slot
-        const existingBooking = await pool.query(
+        const remaining_amount = total_amount - advance_paid;
+
+        client = await pool.connect();
+
+        await client.query("BEGIN");
+
+        // Generate Booking Code (GB260001)
+        const currentYear = new Date().getFullYear();
+        const yearCode = String(currentYear).slice(-2);
+        const prefix = `GB${yearCode}`;
+
+        await client.query(
+            `SELECT pg_advisory_xact_lock($1)`,
+            [currentYear]
+        );
+
+        const bookingResult = await client.query(
             `
-            SELECT booking_id
+            SELECT COALESCE(
+                MAX(
+                CAST(SUBSTRING(booking_code FROM 5) AS INTEGER)
+                ),
+                0
+            ) AS last_number
             FROM tbl_ground_booking
-            WHERE booking_date = $1
-                AND time_slot = $2
-                AND status != 'Cancelled'
+            WHERE booking_code LIKE $1
             `,
+            [`${prefix}%`]
+        );
+
+        const nextNumber = Number(bookingResult.rows[0].last_number) + 1;
+
+        const booking_code = `${prefix}${String(nextNumber).padStart(4, "0")}`;
+        // Check duplicate booking
+        const existingBooking = await client.query(
+            `
+      SELECT booking_id
+      FROM tbl_ground_booking
+      WHERE booking_date = $1
+        AND time_slot = $2
+        AND status != 'Cancelled'
+      `,
             [booking_date, time_slot]
         );
 
         if (existingBooking.rowCount > 0) {
+            await client.query("ROLLBACK");
+
             return sendErrorResponse(
                 res,
                 409,
@@ -135,10 +170,11 @@ exports.createGroundBooking = async (req, res) => {
             );
         }
 
-        // Insert booking
-        const booking = await pool.query(
+        // Create booking
+        const booking = await client.query(
             `
       INSERT INTO tbl_ground_booking (
+        booking_code,
         customer_name,
         customer_phone,
         purpose,
@@ -147,12 +183,16 @@ exports.createGroundBooking = async (req, res) => {
         payment_type,
         total_amount,
         advance_paid,
-        remarks
+        remaining_amount,
+        remarks,
+        id_increment
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-      RETURNING *
+      VALUES
+      ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+      RETURNING *;
       `,
             [
+                booking_code,
                 customer_name,
                 customer_phone,
                 purpose,
@@ -161,42 +201,56 @@ exports.createGroundBooking = async (req, res) => {
                 payment_type,
                 total_amount,
                 advance_paid,
+                remaining_amount,
                 remarks,
+                nextNumber,
             ]
         );
 
+        // Get logged-in user
+        const userResult = await client.query(
+            `
+      SELECT full_name
+      FROM tbl_users
+      WHERE user_id = $1
+      `,
+            [req.user.user_id]
+        );
 
-const userResult = await pool.query(
-  `
-  SELECT full_name
-  FROM tbl_users
-  WHERE user_id = $1
-  `,
-  [req.user.user_id]
-);
+        const performedBy = userResult.rows[0];
 
-const performedBy = userResult.rows[0].full_name;
+        if (!performedBy) {
+            await client.query("ROLLBACK");
 
+            return sendErrorResponse(
+                res,
+                404,
+                "Logged-in user not found."
+            );
+        }
 
-await pool.query(
-  `
-  INSERT INTO tbl_notification_logs
-  (
-    module_name,
-    action,
-    description,
-    performed_by
-  )
-  VALUES
-  ($1,$2,$3,$4)
-  `,
-  [
-    "Ground Booking",
-    "Created",
-    `Ground was booked by ${booking.rows[0].customer_name} for ${booking.rows[0].booking_date} for time slot (${booking.rows[0].time_slot}).`,
-    performedBy,
-  ]
-);
+        // Notification
+        await client.query(
+            `
+      INSERT INTO tbl_notification_logs
+      (
+        module_name,
+        action,
+        description,
+        performed_by
+      )
+      VALUES
+      ($1,$2,$3,$4)
+      `,
+            [
+                "Ground Booking",
+                "Created",
+                `Ground booking ${booking.rows[0].booking_code} was created by ${booking.rows[0].customer_name} for ${booking.rows[0].booking_date} (${booking.rows[0].time_slot}).`,
+                performedBy.full_name,
+            ]
+        );
+
+        await client.query("COMMIT");
 
         return sendSuccessResponse(
             res,
@@ -205,15 +259,21 @@ await pool.query(
             booking.rows[0]
         );
     } catch (error) {
+        if (client) {
+            await client.query("ROLLBACK");
+        }
+
         return sendErrorResponse(
             res,
             500,
             error.message || "Internal Server Error"
         );
+    } finally {
+        if (client) {
+            client.release();
+        }
     }
 };
-
-
 exports.getAllGroundBookings = async (req, res) => {
     try {
         const [bookings, statistics] = await Promise.all([
@@ -232,7 +292,7 @@ exports.getAllGroundBookings = async (req, res) => {
                 COUNT(*) FILTER ( WHERE LOWER(status) = 'confirmed') AS confirmed_bookings,
                 COUNT(*) FILTER ( WHERE LOWER(status) = 'pending' ) AS pending_bookings,
                 COUNT(*) FILTER ( WHERE LOWER(status) = 'completed' ) AS completed_bookings,
-                COUNT(*) FILTER ( WHERE booking_date >= CURRENT_DATE ) AS upcoming_bookings
+                COUNT(*) FILTER ( WHERE booking_date >= CURRENT_DATE AND status != 'Cancelled') AS upcoming_bookings
             FROM tbl_ground_booking
             `
             ),
@@ -323,6 +383,7 @@ exports.getGroundBookingById = async (req, res) => {
 
 
 exports.updateGroundBooking = async (req, res) => {
+    let client;
 
     const { booking_id } = req.params;
 
@@ -342,69 +403,51 @@ exports.updateGroundBooking = async (req, res) => {
         );
     }
 
-    const allowedStatuses = ["Pending", "Confirmed", "Completed", "Cancelled"];
+    const allowedStatuses = [
+        "Pending",
+        "Confirmed",
+        "Completed",
+        "Cancelled",
+    ];
 
-    if (req.body.status !== undefined) {
-        const isValidStatus = allowedStatuses.some(
-            (status) =>
-                status === req.body.status
+    if (
+        req.body.status &&
+        !allowedStatuses.includes(req.body.status)
+    ) {
+        return sendErrorResponse(
+            res,
+            400,
+            `Invalid status. Allowed values are: ${allowedStatuses.join(", ")}.`
         );
-
-        if (!isValidStatus) {
-            return sendErrorResponse(
-                res,
-                400,
-                `Invalid status. Allowed values are: ${allowedStatuses.join(", ")}.`
-            );
-        }
     }
 
-    const userRole = req.user.role;
-
-    if (req.body.status === "Confirmed" && userRole !== "Admin") {
+    if (
+        req.body.status === "Confirmed" &&
+        req.user.role !== "ADMIN"
+    ) {
         return sendErrorResponse(
             res,
             403,
-            "Only admins can approve ground bookings."
+            "Only admin can confirm ground bookings."
         );
     }
 
     try {
+        client = await pool.connect();
 
-        const allowedFields = ["customer_name", "customer_phone", "ground_name", "purpose", "booking_date", "time_slot", "payment_type", "total_amount", "advance_paid", "status"];
+        await client.query("BEGIN");
 
-        const updates = [];
-        const values = [];
-
-        let index = 1;
-
-        for (const field of allowedFields) {
-            if (req.body[field] !== undefined) {
-                updates.push(`${field} = $${index}`);
-                values.push(req.body[field]);
-                index++;
-            }
-        }
-
-        if (updates.length === 0) {
-            return sendErrorResponse(
-                res,
-                400,
-                "No fields provided to update."
-            );
-        }
-
-        const existingBooking = await pool.query(
+        const bookingResult = await client.query(
             `
-            SELECT booking_id , status
+            SELECT *
             FROM tbl_ground_booking
             WHERE booking_id = $1
             `,
             [booking_id]
         );
 
-
-        if (existingBooking.rowCount === 0) {
+        if (bookingResult.rowCount === 0) {
+            await client.query("ROLLBACK");
             return sendErrorResponse(
                 res,
                 404,
@@ -412,34 +455,221 @@ exports.updateGroundBooking = async (req, res) => {
             );
         }
 
-        const currentStatus = existingBooking.rows[0].status;
-        const newStatus = req.body.status;
+        const currentBooking = bookingResult.rows[0];
+        let {
+            customer_name,
+            customer_phone,
+            purpose,
+            booking_date,
+            time_slot,
+            payment_type,
+            total_amount,
+            advance_paid,
+            remarks,
+            status,
+        } = req.body;
 
-        if (newStatus && newStatus !== currentStatus) {
-            const allowedTransitions = statusFlow[currentStatus] || [];
+        customer_name = customer_name?.trim();
+        customer_phone = customer_phone?.trim();
+        purpose = purpose?.trim();
+        payment_type = payment_type?.trim();
+        time_slot = time_slot?.trim();
+        remarks = remarks?.trim() || null;
 
-            if (!allowedTransitions.includes(newStatus)) {
-                return sendErrorResponse(
-                    res,
-                    400,
-                    `Status cannot be changed from ${currentStatus} to ${newStatus}.`
-                );
+        // Phone validation
+        if (
+            customer_phone &&
+            !/^[6-9]\d{9}$/.test(customer_phone)
+        ) {
+            await client.query("ROLLBACK");
+
+            return sendErrorResponse(
+                res,
+                400,
+                "Invalid customer phone number."
+            );
+        }
+
+
+        const allowedPaymentTypes = [
+            "Cash",
+            "UPI",
+            "Card",
+            "Bank Transfer",
+        ];
+
+        if (
+            payment_type &&
+            !allowedPaymentTypes.includes(payment_type)
+        ) {
+            await client.query("ROLLBACK");
+
+            return sendErrorResponse(
+                res,
+                400,
+                "Invalid payment type."
+            );
+        }
+
+        const finalTotalAmount =
+            total_amount !== undefined
+                ? Number(total_amount)
+                : Number(currentBooking.total_amount);
+
+        const finalAdvancePaid =
+            advance_paid !== undefined
+                ? Number(advance_paid)
+                : Number(currentBooking.advance_paid);
+
+        if (isNaN(finalTotalAmount) || finalTotalAmount <= 0) {
+            await client.query("ROLLBACK");
+            return sendErrorResponse(
+                res,
+                400,
+                "Total amount must be greater than 0."
+            );
+        }
+
+        if (isNaN(finalAdvancePaid) || finalAdvancePaid < 0) {
+            await client.query("ROLLBACK");
+            return sendErrorResponse(
+                res,
+                400,
+                "Advance paid cannot be negative."
+            );
+        }
+
+        if (finalAdvancePaid > finalTotalAmount) {
+            await client.query("ROLLBACK");
+            return sendErrorResponse(
+                res,
+                400,
+                "Advance paid cannot be greater than the total amount."
+            );
+        }
+
+        const remaining_amount = finalTotalAmount - finalAdvancePaid;
+
+        // Duplicate slot validation
+        const checkDate = booking_date || currentBooking.booking_date;
+
+        const checkSlot = time_slot || currentBooking.time_slot;
+
+        const duplicateBooking = await client.query(
+            `
+            SELECT booking_id
+            FROM tbl_ground_booking
+            WHERE booking_date = $1
+                AND time_slot = $2
+                AND status != 'Cancelled'
+                AND booking_id <> $3
+            `,
+            [
+                checkDate,
+                checkSlot,
+                booking_id,
+            ]
+        );
+
+        if (duplicateBooking.rowCount > 0) {
+            await client.query("ROLLBACK");
+
+            return sendErrorResponse(
+                res,
+                409,
+                "The selected time slot is already booked."
+            );
+        }
+        const allowedFields = [
+            "customer_name",
+            "customer_phone",
+            "purpose",
+            "booking_date",
+            "time_slot",
+            "payment_type",
+            "total_amount",
+            "advance_paid",
+            "remarks",
+            "status",
+        ];
+
+        const updates = [];
+        const values = [];
+        let index = 1;
+
+        for (const field of allowedFields) {
+            if (req.body[field] !== undefined) {
+                let value = req.body[field];
+                if (typeof value === "string") {
+                    value = value.trim();
+                }
+                updates.push(`${field} = $${index}`);
+                values.push(value === "" ? null : value);
+                index++;
             }
         }
 
-        updates.push("updated_at = CURRENT_TIMESTAMP");
+        // Always update remaining amount
+        updates.push(`remaining_amount = $${index}`);
+        values.push(remaining_amount);
+        index++;
+        updates.push(`updated_at = CURRENT_TIMESTAMP`);
         values.push(booking_id);
 
-        const updatedBooking = await pool.query(
+        const updatedBooking = await client.query(
             `
             UPDATE tbl_ground_booking
             SET ${updates.join(", ")}
             WHERE booking_id = $${index}
-            RETURNING *
+            RETURNING *;
             `,
             values
         );
 
+        // Logged-in user
+        const userResult = await client.query(
+            `
+            SELECT full_name
+            FROM tbl_users
+            WHERE user_id = $1
+            `,
+            [req.user.user_id]
+        );
+
+        const performedBy = userResult.rows[0].full_name;
+
+        let action = "Updated";
+        let description = `Ground booking ${updatedBooking.rows[0].booking_code} was updated.`;
+
+        // Special notifications
+        if (status === "Confirmed") {
+            action = "Confirmed";
+            description = `Ground booking ${updatedBooking.rows[0].booking_code} for ${updatedBooking.rows[0].customer_name} has been approved.`;
+        } else if (status === "Cancelled") {
+            action = "Cancelled";
+            description = `Reason: ${updatedBooking.rows[0].remarks || "Not provided"}`;
+        }
+
+        await client.query(
+            `
+            INSERT INTO tbl_notification_logs
+            (
+                module_name,
+                action,
+                description,
+                performed_by
+            )
+            VALUES
+            ($1,$2,$3,$4)
+            `,
+            [
+                "Ground Booking",
+                action,
+                description,
+                performedBy,
+            ]
+        );
+        await client.query("COMMIT");
 
         return sendSuccessResponse(
             res,
@@ -447,38 +677,36 @@ exports.updateGroundBooking = async (req, res) => {
             "Ground booking updated successfully.",
             updatedBooking.rows[0]
         );
-
-
     } catch (error) {
+        if (client) {
+            await client.query("ROLLBACK");
+        }
 
         return sendErrorResponse(
             res,
             500,
             error.message || "Internal Server Error"
         );
-
+    } finally {
+        if (client) {
+            client.release();
+        }
     }
-
 };
-
 
 exports.deleteGroundBooking = async (req, res) => {
 
     const { booking_id } = req.params;
 
     if (!booking_id || isNaN(booking_id)) {
-
         return sendErrorResponse(
             res,
             400,
             "Invalid booking ID."
         );
-
     }
 
     try {
-
-
         const deleted = await pool.query(
             `
             DELETE FROM tbl_ground_booking

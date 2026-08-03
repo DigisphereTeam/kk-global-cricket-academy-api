@@ -128,11 +128,19 @@ exports.signIn = async (req, res) => {
   let { email, password } = req.body;
 
   if (!email) {
-    return sendErrorResponse(res, 400, "Email is required.");
+    return sendErrorResponse(
+      res,
+      400,
+      "Email is required."
+    );
   }
 
   if (!password) {
-    return sendErrorResponse(res, 400, "Password is required.");
+    return sendErrorResponse(
+      res,
+      400,
+      "Password is required."
+    );
   }
 
   try {
@@ -143,7 +151,7 @@ exports.signIn = async (req, res) => {
       `
       SELECT *
       FROM tbl_users
-      WHERE email = $1
+      WHERE LOWER(email) = $1
       LIMIT 1
       `,
       [email]
@@ -152,7 +160,7 @@ exports.signIn = async (req, res) => {
     if (result.rowCount === 0) {
       return sendErrorResponse(
         res,
-        401,
+        404,
         "Invalid email or password."
       );
     }
@@ -167,7 +175,7 @@ exports.signIn = async (req, res) => {
     if (!isPasswordValid) {
       return sendErrorResponse(
         res,
-        401,
+        404,
         "Invalid email or password."
       );
     }

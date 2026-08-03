@@ -10,6 +10,6 @@ notificationLogRouter.use(verifyToken);
 
 notificationLogRouter.get('/', getNotifications);
 
-notificationLogRouter.delete('/:log_id', checkRole("ADMIN"), deleteNotification);
+notificationLogRouter.delete('/:log_id', deleteNotification);
 
 module.exports = notificationLogRouter;
