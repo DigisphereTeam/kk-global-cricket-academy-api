@@ -162,10 +162,25 @@ exports.applyOneOnOne = async (req, res) => {
 };
 
 exports.renewOneOnOne = async (req, res) => {
+  const { application_id } = req.params;
+
+  if (!application_id) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Application ID is required."
+    );
+  }
+
+  if (isNaN(application_id) || Number(application_id) <= 0) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Invalid application ID."
+    );
+  }
+
   const {
-    player_id,
-    coach_id,
-    application_date,
     focus_area,
     payment_type,
     fee_amount,
@@ -176,8 +191,6 @@ exports.renewOneOnOne = async (req, res) => {
 
   try {
     if (
-      !player_id ||
-      !coach_id ||
       !focus_area ||
       !payment_type ||
       fee_amount == null ||
@@ -190,7 +203,7 @@ exports.renewOneOnOne = async (req, res) => {
       );
     }
 
-    if (fee_amount <= 0) {
+    if (Number(fee_amount) <= 0) {
       return sendErrorResponse(
         res,
         400,
@@ -198,45 +211,94 @@ exports.renewOneOnOne = async (req, res) => {
       );
     }
 
-    const [student, coach] = await Promise.all([
-      pool.query(
-        `SELECT 1 FROM tbl_players WHERE player_id = $1`,
-        [player_id]
-      ),
-      pool.query(
-        `SELECT 1 FROM tbl_coach WHERE coach_id = $1`,
-        [coach_id]
-      ),
-    ]);
-
-    if (student.rowCount === 0) {
-      return sendErrorResponse(res, 404, "Student not found.");
-    }
-
-    if (coach.rowCount === 0) {
-      return sendErrorResponse(res, 404, "Coach not found.");
-    }
-
-    // Check previous application exists
-    const previousApplication = await pool.query(
+    // Get selected application
+    const applicationResult = await pool.query(
       `
-      SELECT application_id
+      SELECT
+        oa.application_id,
+        oa.player_id,
+        oa.coach_id,
+        oa.application_date,
+        oa.application_type,
+        p.full_name AS player_name,
+        c.full_name AS coach_name
+      FROM tbl_one_on_one_applications oa
+      INNER JOIN tbl_players p
+        ON oa.player_id = p.player_id
+      INNER JOIN tbl_coach c
+        ON oa.coach_id = c.coach_id
+      WHERE oa.application_id = $1
+      `,
+      [application_id]
+    );
+
+    if (applicationResult.rowCount === 0) {
+      return sendErrorResponse(
+        res,
+        404,
+        "Application not found."
+      );
+    }
+
+    const application = applicationResult.rows[0];
+
+    // Allow renewal only for latest application
+    const latestApplication = await pool.query(
+      `
+      SELECT
+        application_id
       FROM tbl_one_on_one_applications
       WHERE player_id = $1
       ORDER BY application_date DESC, application_id DESC
       LIMIT 1
       `,
-      [player_id]
+      [application.player_id]
     );
 
-    if (previousApplication.rowCount === 0) {
+    if (
+      latestApplication.rows[0].application_id !==
+      Number(application_id)
+    ) {
       return sendErrorResponse(
         res,
-        400,
-        "Student does not have an active one-on-one application to renew."
+        409,
+        "Only the latest application can be renewed."
       );
     }
 
+    // Renewal is always for next month
+    const renewalDate = new Date();
+
+    // Prevent duplicate renewal/application for the renewal month
+    const existingApplication = await pool.query(
+      `
+      SELECT
+        application_id,
+        application_type,
+        application_date
+      FROM tbl_one_on_one_applications
+      WHERE player_id = $1
+        AND EXTRACT(MONTH FROM application_date) =
+            EXTRACT(MONTH FROM $2::date)
+        AND EXTRACT(YEAR FROM application_date) =
+            EXTRACT(YEAR FROM $2::date)
+      LIMIT 1
+      `,
+      [
+        application.player_id,
+        renewalDate,
+      ]
+    );
+
+    if (existingApplication.rowCount > 0) {
+      return sendErrorResponse(
+        res,
+        409,
+        `Player already has a ${existingApplication.rows[0].application_type.toLowerCase()} application for this month.`
+      );
+    }
+
+    // Create renewal
     const renewal = await pool.query(
       `
       INSERT INTO tbl_one_on_one_applications
@@ -256,7 +318,7 @@ exports.renewOneOnOne = async (req, res) => {
       (
         $1,
         $2,
-        COALESCE($3::date, CURRENT_DATE),
+        $3,
         $4,
         $5,
         $6,
@@ -268,9 +330,9 @@ exports.renewOneOnOne = async (req, res) => {
       RETURNING *;
       `,
       [
-        player_id,
-        coach_id,
-        application_date || null,
+        application.player_id,
+        application.coach_id,
+        renewalDate,
         focus_area.trim(),
         payment_type,
         fee_amount,
@@ -280,7 +342,7 @@ exports.renewOneOnOne = async (req, res) => {
       ]
     );
 
-    // Get logged-in user
+    // Logged-in user
     const userResult = await pool.query(
       `
       SELECT full_name
@@ -292,19 +354,7 @@ exports.renewOneOnOne = async (req, res) => {
 
     const performedBy = userResult.rows[0].full_name;
 
-    const details = await pool.query(
-      `
-      SELECT
-        p.full_name AS player_name,
-        c.full_name AS coach_name
-      FROM tbl_players p
-      JOIN tbl_coach c
-        ON c.coach_id = $2
-      WHERE p.player_id = $1
-      `,
-      [player_id, coach_id]
-    );
-
+    // Notification
     await pool.query(
       `
       INSERT INTO tbl_notification_logs
@@ -315,12 +365,12 @@ exports.renewOneOnOne = async (req, res) => {
         performed_by
       )
       VALUES
-      ($1, $2, $3, $4)
+      ($1,$2,$3,$4)
       `,
       [
         "One-on-One Training",
         "Renewed",
-        `${details.rows[0].player_name} renewed one-on-one training with Coach ${details.rows[0].coach_name}.`,
+        `${application.player_name} renewed one-on-one training with Coach ${application.coach_name}.`,
         performedBy,
       ]
     );
@@ -363,109 +413,143 @@ exports.getAllApplications = async (req, res) => {
     const applications = await pool.query(
       `
       SELECT
-        latest.application_id,
-        latest.player_id,
-        p.admission_id,
-        p.full_name AS student_name,
+          latest.application_id,
 
-        latest.coach_id,
-        c.full_name AS coach_name,
+          latest.player_id,
+          p.admission_id,
+          p.full_name AS student_name,
 
-        latest.focus_area,
-        latest.payment_type,
-        latest.payment_status,
-        latest.fee_amount,
-        latest.preferred_slot,
-        latest.application_type,
-        latest.application_date,
-        latest.monthly_performance_review,
-        latest.remarks,
-        latest.created_at,
-        latest.updated_at,
+          latest.coach_id,
+          c.full_name AS coach_name,
 
-        latest.application_month,
-        latest.application_year
+          latest.focus_area,
+          latest.payment_type,
+          latest.payment_status,
+          latest.fee_amount,
+          latest.preferred_slot,
+          latest.application_type,
+          latest.application_date,
+          latest.monthly_performance_review,
+          latest.remarks,
+          latest.created_at,
+          latest.updated_at,
+
+          latest.application_month,
+          latest.application_year
 
       FROM tbl_players p
 
       JOIN LATERAL (
-        SELECT
-          oa.*,
-          EXTRACT(MONTH FROM oa.application_date)::INT AS application_month,
-          EXTRACT(YEAR FROM oa.application_date)::INT AS application_year
-        FROM tbl_one_on_one_applications oa
-        WHERE oa.player_id = p.player_id
-          AND (
-            EXTRACT(YEAR FROM oa.application_date) < $2
-            OR (
-              EXTRACT(YEAR FROM oa.application_date) = $2
-              AND EXTRACT(MONTH FROM oa.application_date) <= $1
-            )
+
+          SELECT
+              oa.*,
+
+              EXTRACT(MONTH FROM oa.application_date)::INT AS application_month,
+              EXTRACT(YEAR FROM oa.application_date)::INT AS application_year
+
+          FROM tbl_one_on_one_applications oa
+
+          WHERE oa.player_id = p.player_id AND oa.renewal_status = 'Active'
+
+          AND
+          (
+              (
+                EXTRACT(MONTH FROM oa.application_date)::INT = $1
+                AND
+                EXTRACT(YEAR FROM oa.application_date)::INT = $2
+              )
+
+              OR
+
+              (
+                (
+                  EXTRACT(YEAR FROM oa.application_date)::INT * 12 +
+                  EXTRACT(MONTH FROM oa.application_date)::INT
+                )
+                =
+                (($2 * 12 + $1) - 1)
+              )
           )
-        ORDER BY
-          oa.application_date DESC,
-          oa.application_id DESC
-        LIMIT 1
+
+          ORDER BY
+
+              CASE
+                  WHEN
+                    EXTRACT(MONTH FROM oa.application_date)::INT = $1
+                    AND
+                    EXTRACT(YEAR FROM oa.application_date)::INT = $2
+                  THEN 0
+
+                  ELSE 1
+              END,
+
+              oa.application_date DESC,
+              oa.application_id DESC
+
+          LIMIT 1
+
       ) latest ON TRUE
 
-      INNER JOIN tbl_coach c
+
+      JOIN tbl_coach c
         ON latest.coach_id = c.coach_id
 
+
       ORDER BY latest.application_date DESC;
+
       `,
       [month, year]
     );
 
+    const totalApplications = await pool.query(
+      `
+      SELECT COUNT(DISTINCT player_id)::INT AS total_applications
+      FROM tbl_one_on_one_applications
+      `
+    );
+
+
     const data = applications.rows.map((row) => {
-      const actualMonth = Number(row.application_month);
-      const actualYear = Number(row.application_year);
 
-      if (
-        actualMonth === month &&
-        actualYear === year
-      ) {
-        return {
-          ...row,
-          payment_status: row.payment_status,
-        };
-      }
+      const isCurrentMonth =
+        Number(row.application_month) === month &&
+        Number(row.application_year) === year;
 
-      let nextMonth = actualMonth + 1;
-      let nextYear = actualYear;
-
-      if (nextMonth > 12) {
-        nextMonth = 1;
-        nextYear++;
-      }
-
-      let paymentStatus = "Pending";
-
-      if (
-        month === nextMonth &&
-        year === nextYear
-      ) {
-        paymentStatus = "Pending";
-      }
 
       return {
         ...row,
-        application_date: `${year}-${String(month).padStart(2, "0")}-01`,
-        payment_status: paymentStatus,
+
+        payment_status: isCurrentMonth
+          ? row.payment_status
+          : "Pending",
       };
+
     });
 
+
     const statistics = {
-      total_applications: data.length,
+
+      total_applications:
+        totalApplications.rows[0].total_applications,
+
       active_sessions: data.filter(
-        (x) => x.payment_status === "Paid"
+        (item) => item.payment_status === "Paid"
       ).length,
+
+
       pending_renewal: data.filter(
-        (x) => x.payment_status === "Pending"
+        (item) => item.payment_status === "Pending"
       ).length,
+
+
       this_month: data.filter(
-        (x) => month === now.getMonth() + 1 && year === now.getFullYear()
+        (item) =>
+          Number(item.application_month) === month &&
+          Number(item.application_year) === year
       ).length,
+
     };
+
 
     return sendSuccessResponse(
       res,
@@ -478,12 +562,16 @@ exports.getAllApplications = async (req, res) => {
         applications: data,
       }
     );
+
+
   } catch (error) {
+
     return sendErrorResponse(
       res,
       500,
       error.message || "Internal Server Error"
     );
+
   }
 };
 
@@ -635,6 +723,84 @@ exports.getApplicationById = async (req, res) => {
       "Application fetched successfully.",
       application.rows[0],
     );
+  } catch (error) {
+
+    return sendErrorResponse(
+      res,
+      500,
+      error.message || "Internal Server Error"
+    );
+
+  }
+};
+
+exports.cancelRenewal = async (req, res) => {
+  const { application_id } = req.params;
+  const { cancellation_reason } = req.body;
+
+  try {
+    if (!application_id) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Application ID is required."
+      );
+    }
+
+    const application = await pool.query(
+      `
+      SELECT application_id, payment_status, renewal_status
+      FROM tbl_one_on_one_applications
+      WHERE application_id = $1
+      `,
+      [application_id]
+    );
+
+
+    if (application.rows.length === 0) {
+      return sendErrorResponse(
+        res,
+        404,
+        "Application not found."
+      );
+    }
+
+
+    if (
+      application.rows[0].renewal_status === "Cancelled"
+    ) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Renewal already cancelled."
+      );
+    }
+
+
+    await pool.query(
+      `
+      UPDATE tbl_one_on_one_applications
+      SET
+        renewal_status = 'Cancelled',
+        cancellation_reason = $2,
+        cancelled_at = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE application_id = $1
+      `,
+      [
+        application_id,
+        cancellation_reason || null
+      ]
+    );
+
+
+    return sendSuccessResponse(
+      res,
+      200,
+      "Renewal cancelled successfully."
+    );
+
+
   } catch (error) {
 
     return sendErrorResponse(
