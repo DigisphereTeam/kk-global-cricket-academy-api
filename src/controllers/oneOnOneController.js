@@ -585,6 +585,8 @@ exports.getPlayerApplications = async (req, res) => {
         c.full_name AS coach_name,
         oa.focus_area,
         oa.payment_type,
+        'Active' AS status,
+        2 AS sessions,
         oa.payment_status,
         oa.fee_amount,
         oa.preferred_slot,
