@@ -268,51 +268,80 @@ exports.renewOneOnOne = async (req, res) => {
 
 exports.getAllApplications = async (req, res) => {
   try {
-    const applications = await pool.query(
-      `
-      SELECT
-        oa.application_id,
+    const [applications, statistics] = await Promise.all([
+      pool.query(
+        `
+        SELECT
+          oa.application_id,
+          p.admission_id,
 
-        oa.player_id,
-        p.full_name AS student_name,
+          oa.player_id,
+          p.full_name AS student_name,
 
-        oa.coach_id,
-        c.full_name AS coach_name,
+          oa.coach_id,
+          c.full_name AS coach_name,
 
-        oa.focus_area,
-        oa.payment_type,
-        oa.fee_amount,
-        oa.preferred_slot,
-        oa.application_date,
-        oa.remarks,
+          oa.focus_area,
+          oa.payment_type,
+          oa.payment_status,
+          oa.fee_amount,
+          oa.preferred_slot,
+          oa.application_date,
+          oa.monthly_performance_review,
+          oa.remarks,
 
-        oa.created_at,
-        oa.updated_at
+          oa.created_at,
+          oa.updated_at
 
-      FROM tbl_one_on_one_applications oa
+        FROM tbl_one_on_one_applications oa
 
-      INNER JOIN tbl_players p
-      ON oa.player_id = p.player_id
+        INNER JOIN tbl_players p
+          ON oa.player_id = p.player_id
 
-      INNER JOIN tbl_coach c
-      ON oa.coach_id = c.coach_id
+        INNER JOIN tbl_coach c
+          ON oa.coach_id = c.coach_id
 
-      ORDER BY oa.application_id DESC
-      `,
+        ORDER BY oa.application_id DESC
+        `
+      ),
+
+      pool.query(
+        `
+        SELECT
+          COUNT(*) AS total_applications,
+
+          COUNT(*) FILTER (
+            WHERE payment_status = 'Paid'
+          ) AS active_sessions,
+
+          COUNT(*) FILTER (
+            WHERE payment_status = 'Pending'
+          ) AS pending_renewal,
+
+          COUNT(*) FILTER (
+            WHERE DATE_TRUNC('month', application_date) = DATE_TRUNC('month', CURRENT_DATE)
+          ) AS this_month
+
+        FROM tbl_one_on_one_applications
+        `
+      )
+    ]);
+
+    return sendSuccessResponse(
+      res,
+      200,
+      "Applications fetched successfully.",
+      {
+        statistics: statistics.rows[0],
+        applications: applications.rows,
+      }
     );
-
-    return sendSuccessResponse(res, 200, "Applications fetched successfully.", {
-      total_applications: applications.rowCount,
-      applications: applications.rows,
-    });
   } catch (error) {
-
     return sendErrorResponse(
       res,
       500,
       error.message || "Internal Server Error"
     );
-
   }
 };
 
@@ -320,66 +349,67 @@ exports.getPlayerApplications = async (req, res) => {
   const { player_id } = req.params;
 
   if (!player_id) {
-    return sendErrorResponse(res, 400, "Student ID is required.");
+    return sendErrorResponse(res, 400, "Player ID is required.");
   }
 
   if (isNaN(player_id) || Number(player_id) <= 0) {
-    return sendErrorResponse(res, 400, "Invalid student ID.");
+    return sendErrorResponse(res, 400, "Invalid player ID.");
   }
 
   try {
-    // Check Student
-    const student = await pool.query(
+    // Get Player Details
+    const playerResult = await pool.query(
       `
-      SELECT player_id
-      FROM tbl_players
-      WHERE player_id = $1
+      SELECT
+        p.player_id,
+        p.admission_id,
+        p.full_name,
+        (
+          SELECT oa.focus_area
+          FROM tbl_one_on_one_applications oa
+          WHERE oa.player_id = p.player_id
+          ORDER BY oa.application_date DESC, oa.application_id DESC
+          LIMIT 1
+        ) AS focus_area,
+        p.phone_number,
+        p.email
+      FROM tbl_players p
+      WHERE p.player_id = $1
       `,
-      [player_id],
+      [player_id]
     );
 
-    if (student.rowCount === 0) {
-      return sendErrorResponse(res, 404, "Student not found.");
+    if (playerResult.rowCount === 0) {
+      return sendErrorResponse(res, 404, "Player not found.");
     }
 
-    // Get Student Applications
+    const player = playerResult.rows[0];
+
+    // Get Player Applications
     const applications = await pool.query(
       `
       SELECT
         oa.application_id,
-
-        oa.player_id,
-        s.full_name AS student_name,
-
         oa.coach_id,
         c.full_name AS coach_name,
-
         oa.focus_area,
         oa.payment_type,
+        oa.payment_status,
         oa.fee_amount,
         oa.preferred_slot,
-
         oa.application_type,
         oa.application_date,
-
+        oa.monthly_performance_review,
         oa.remarks,
-
         oa.created_at,
         oa.updated_at
-
       FROM tbl_one_on_one_applications oa
-
-      INNER JOIN tbl_players s
-      ON oa.player_id = s.player_id
-
       INNER JOIN tbl_coach c
-      ON oa.coach_id = c.coach_id
-
+        ON oa.coach_id = c.coach_id
       WHERE oa.player_id = $1
-
       ORDER BY oa.application_id DESC
       `,
-      [player_id],
+      [player_id]
     );
 
     return sendSuccessResponse(
@@ -387,18 +417,16 @@ exports.getPlayerApplications = async (req, res) => {
       200,
       "Player one-on-one applications fetched successfully.",
       {
-        total_applications: applications.rowCount,
+        player,
         applications: applications.rows,
-      },
+      }
     );
   } catch (error) {
-
     return sendErrorResponse(
       res,
       500,
       error.message || "Internal Server Error"
     );
-
   }
 };
 
@@ -436,6 +464,7 @@ exports.getApplicationById = async (req, res) => {
         oa.fee_amount,
         oa.preferred_slot,
         oa.application_date,
+        oa.monthly_performance_review,
         oa.remarks,
 
         oa.created_at,
@@ -493,6 +522,7 @@ exports.updateApplication = async (req, res) => {
       "payment_type",
       "fee_amount",
       "preferred_slot",
+      "monthly_performance_review",
       "remarks",
     ];
 

@@ -107,6 +107,7 @@ exports.getUsers = async (req, res) => {
         role,
         created_at
       FROM tbl_users
+      WHERE role <> 'ADMIN'
       ORDER BY created_at DESC
     `);
 
