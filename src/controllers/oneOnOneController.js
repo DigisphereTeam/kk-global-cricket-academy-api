@@ -490,6 +490,7 @@ exports.getAllApplications = async (req, res) => {
       return {
         ...row,
         status: "Active",
+        sessions: 1,
         payment_status: isCurrentMonth
           ? row.payment_status
           : "Pending",
