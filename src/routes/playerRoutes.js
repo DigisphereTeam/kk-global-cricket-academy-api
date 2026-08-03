@@ -5,7 +5,7 @@ const playerRouter = express.Router();
 const validateRequestBody = require("../middlewares/validateRequestBody");
 const verifyToken = require("../middlewares/verifyToken");
 const { checkRole } = require("../middlewares/checkRole");
-const { createPlayerAdmission, getAllPlayers, searchPlayers, getPlayerById, updatePlayer, deletePlayer } = require("../controllers/playerController");
+const { createPlayerAdmission, getAllPlayers, searchPlayers, getPlayerById, updatePlayer, deletePlayer, getPlayersAndCoaches } = require("../controllers/playerController");
 const fileUpload = require("../middlewares/uploadMiddleware");
 
 playerRouter.use(verifyToken);
@@ -13,6 +13,8 @@ playerRouter.use(verifyToken);
 playerRouter.post("/", fileUpload.single("document_url"), validateRequestBody, checkRole("PRIMARY"), createPlayerAdmission);
 
 playerRouter.get("/", getAllPlayers);
+
+playerRouter.get("/players-coaches", getPlayersAndCoaches);
 
 playerRouter.get("/search", searchPlayers);
 

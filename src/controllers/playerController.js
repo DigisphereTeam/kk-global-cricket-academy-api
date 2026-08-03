@@ -825,3 +825,52 @@ exports.searchPlayers = async (req, res) => {
     );
   }
 };
+
+
+exports.getPlayersAndCoaches = async (req, res) => {
+  try {
+    const [players, coaches] = await Promise.all([
+
+      // Players
+      pool.query(`
+        SELECT
+          player_id AS id,
+          full_name
+        FROM tbl_players
+        ORDER BY player_id DESC
+      `),
+
+
+      // Coaches
+      pool.query(`
+        SELECT
+          coach_id AS id,
+          full_name
+        FROM tbl_coach
+        ORDER BY coach_id DESC
+      `),
+
+    ]);
+
+
+    return sendSuccessResponse(
+      res,
+      200,
+      "Players and coaches fetched successfully.",
+      {
+        players: players.rows,
+        coaches: coaches.rows,
+      }
+    );
+
+
+  } catch (error) {
+
+    return sendErrorResponse(
+      res,
+      500,
+      error.message || "Internal Server Error"
+    );
+
+  }
+};

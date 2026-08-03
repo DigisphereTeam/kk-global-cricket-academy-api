@@ -575,65 +575,80 @@ exports.getPlayerFeeStatistics = async (req, res) => {
       thisMonthCollection,
       collectionSummary,
     ] = await Promise.all([
-      // Total Collection (All Paid Fees)
+
+      // Total Collection
       pool.query(`
         SELECT
-          COALESCE(SUM(amount), 0) AS total_collection
+          COALESCE(SUM(amount),0) AS total_collection
         FROM tbl_player_fees
         WHERE status = 'Paid'
       `),
 
-      // Total Paid Members (Unique Players Paid This Month)
+
+      // Paid Unique Players This Month
       pool.query(`
         SELECT
-          COUNT(DISTINCT player_id) AS paid_members
+          COUNT(DISTINCT player_id)::INT AS paid_members
         FROM tbl_player_fees
         WHERE status = 'Paid'
           AND payment_date >= DATE_TRUNC('month', CURRENT_DATE)
           AND payment_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
       `),
 
-      // Pending Fees (Players who have not paid this month)
+
+      // Pending Unique Players This Month
       pool.query(`
-      SELECT
-        COUNT(DISTINCT pf.player_id) AS pending_fees
-      FROM tbl_player_fees pf
-      WHERE NOT EXISTS (
-        SELECT 1
-        FROM tbl_player_fees paid
-        WHERE paid.player_id = pf.player_id
-          AND paid.status = 'Paid'
-          AND paid.payment_date >= DATE_TRUNC('month', CURRENT_DATE)
-          AND paid.payment_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
-      )
-    `),
+        SELECT
+          COUNT(DISTINCT pf.player_id)::INT AS pending_fees
+        FROM tbl_player_fees pf
+
+        WHERE NOT EXISTS (
+          SELECT 1
+          FROM tbl_player_fees paid
+
+          WHERE paid.player_id = pf.player_id
+            AND paid.status = 'Paid'
+            AND paid.payment_date >= DATE_TRUNC('month', CURRENT_DATE)
+            AND paid.payment_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+        )
+      `),
 
       // Current Month Collection
       pool.query(`
         SELECT
-          COALESCE(SUM(amount), 0) AS this_month_collection
+          COALESCE(SUM(amount),0) AS this_month_collection
         FROM tbl_player_fees
         WHERE status = 'Paid'
           AND payment_date >= DATE_TRUNC('month', CURRENT_DATE)
           AND payment_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
       `),
 
-      // Monthly Collection Chart
+
+      // Last 6 Months Collection
       pool.query(`
         SELECT
-          EXTRACT(MONTH FROM payment_date) AS month_number,
-          TO_CHAR(payment_date, 'Mon') AS month,
-          COALESCE(SUM(amount), 0) AS collected
-        FROM tbl_player_fees
-        WHERE status = 'Paid'
-          AND payment_date >= DATE_TRUNC('year', CURRENT_DATE)
-          AND payment_date < DATE_TRUNC('year', CURRENT_DATE) + INTERVAL '1 year'
-        GROUP BY
-          EXTRACT(MONTH FROM payment_date),
-          TO_CHAR(payment_date, 'Mon')
-        ORDER BY month_number
-      `),
+          EXTRACT(MONTH FROM months.month_date)::INT AS month_number,
+          TO_CHAR(months.month_date, 'Mon') AS month,
+          COALESCE(SUM(pf.amount), 0) AS collected
+
+        FROM (
+          SELECT
+            DATE_TRUNC('month', CURRENT_DATE)
+            - (INTERVAL '1 month' * generate_series(5, 0, -1))
+            AS month_date
+        ) months
+
+        LEFT JOIN tbl_player_fees pf
+          ON DATE_TRUNC('month', pf.payment_date) = months.month_date
+          AND pf.status = 'Paid'
+
+        GROUP BY months.month_date
+
+        ORDER BY months.month_date
+      `)
+
     ]);
+
 
     return sendSuccessResponse(
       res,
@@ -641,11 +656,11 @@ exports.getPlayerFeeStatistics = async (req, res) => {
       "Player fee statistics fetched successfully.",
       {
         statistics: {
+
           total_collection: Number(
             totalCollection.rows[0].total_collection
           ),
 
-          // Unique paid members count
           paid_fees: Number(
             paidFees.rows[0].paid_members
           ),
@@ -657,13 +672,16 @@ exports.getPlayerFeeStatistics = async (req, res) => {
           this_month_collection: Number(
             thisMonthCollection.rows[0].this_month_collection
           ),
+
         },
 
         collection_summary: collectionSummary.rows,
       }
     );
 
+
   } catch (error) {
+
     console.error(error);
 
     return sendErrorResponse(
@@ -671,5 +689,6 @@ exports.getPlayerFeeStatistics = async (req, res) => {
       500,
       error.message || "Failed to fetch player fee statistics."
     );
+
   }
 };
