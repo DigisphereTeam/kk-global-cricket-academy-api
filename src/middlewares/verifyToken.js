@@ -63,7 +63,7 @@ const verifyToken = async (req, res, next) => {
     return sendErrorResponse(
       res,
       401,
-      "Invalid or expired token."
+      error.message || "Invalid or expired token."
     );
   }
 };
