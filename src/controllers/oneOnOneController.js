@@ -699,7 +699,7 @@ exports.getApplicationById = async (req, res) => {
 
 exports.cancelRenewal = async (req, res) => {
   const { application_id } = req.params;
-  const { cancellation_reason } = req.body;
+  const { cancellation_reason } = req.body || {};
 
   try {
     if (!application_id) {
@@ -712,7 +712,10 @@ exports.cancelRenewal = async (req, res) => {
 
     const application = await pool.query(
       `
-      SELECT application_id, payment_status, renewal_status
+      SELECT
+        application_id,
+        payment_status,
+        renewal_status
       FROM tbl_one_on_one_applications
       WHERE application_id = $1
       `,
@@ -752,7 +755,7 @@ exports.cancelRenewal = async (req, res) => {
       `,
       [
         application_id,
-        cancellation_reason || null
+        cancellation_reason?.trim() || null
       ]
     );
 

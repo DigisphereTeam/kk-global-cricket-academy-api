@@ -109,26 +109,51 @@ exports.createPlayerFee = async (req, res) => {
       );
     }
 
+    // Check duplicate fee for same player and payment date
+    const existingFee = await client.query(
+      `
+        SELECT fee_id
+        FROM tbl_player_fees
+        WHERE player_id = $1
+          AND payment_date = $2
+        `,
+      [
+        Number(player_id),
+        formattedPaymentDate,
+      ]
+    );
+
+    if (existingFee.rowCount > 0) {
+      await client.query("ROLLBACK");
+
+      return sendErrorResponse(
+        res,
+        409,
+        "Fee already exists for this player on this payment date."
+      );
+    }
+
+
     // Insert fee
     const result = await client.query(
       `
-      INSERT INTO tbl_player_fees
-      (
-        player_id,
-        fee_type,
-        amount,
-        payment_type,
-        due_date,
-        payment_date,
-        status,
-        remarks
-      )
-      VALUES
-      (
-        $1,$2,$3,$4,$5,$6,$7,$8
-      )
-      RETURNING *;
-      `,
+        INSERT INTO tbl_player_fees
+        (
+          player_id,
+          fee_type,
+          amount,
+          payment_type,
+          due_date,
+          payment_date,
+          status,
+          remarks
+        )
+        VALUES
+        (
+          $1,$2,$3,$4,$5,$6,$7,$8
+        )
+        RETURNING *;
+        `,
       [
         Number(player_id),
         fee_type.trim(),
