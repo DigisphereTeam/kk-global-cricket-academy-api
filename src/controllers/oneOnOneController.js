@@ -412,123 +412,91 @@ exports.getAllApplications = async (req, res) => {
 
     const applications = await pool.query(
       `
-      SELECT
-          latest.application_id,
+      WITH latest_applications AS (
+          SELECT
+              oa.*,
+              ROW_NUMBER() OVER (
+                  PARTITION BY oa.player_id
+                  ORDER BY
+                      CASE
+                          WHEN date_trunc('month', oa.application_date) =
+                               make_date($2, $1, 1)
+                          THEN 0
+                          ELSE 1
+                      END,
+                      oa.application_date DESC,
+                      oa.application_id DESC
+              ) AS rn
+          FROM tbl_one_on_one_applications oa
+          WHERE
+              oa.renewal_status = 'Active'
+              AND date_trunc('month', oa.application_date) IN (
+                  make_date($2, $1, 1),
+                  make_date($2, $1, 1) - interval '1 month'
+              )
+      )
 
-          latest.player_id,
+      SELECT
+          la.application_id,
+
+          p.player_id,
           p.admission_id,
           p.full_name AS student_name,
 
-          latest.coach_id,
+          la.coach_id,
           c.full_name AS coach_name,
 
-          latest.focus_area,
-          latest.payment_type,
-          latest.payment_status,
-          latest.fee_amount,
-          latest.preferred_slot,
-          latest.application_type,
-          latest.application_date,
-          latest.monthly_performance_review,
-          latest.remarks,
-          latest.created_at,
-          latest.updated_at,
+          la.focus_area,
+          la.payment_type,
+          la.payment_status,
+          la.fee_amount,
+          la.preferred_slot,
+          la.application_type,
+          la.application_date,
+          la.monthly_performance_review,
+          la.remarks,
+          la.created_at,
+          la.updated_at,
 
-          latest.application_month,
-          latest.application_year
+          EXTRACT(MONTH FROM la.application_date)::INT AS application_month,
+          EXTRACT(YEAR FROM la.application_date)::INT AS application_year
 
-      FROM tbl_players p
+      FROM latest_applications la
 
-      JOIN LATERAL (
+      JOIN tbl_players p
+        ON p.player_id = la.player_id
 
-          SELECT
-              oa.*,
+      LEFT JOIN tbl_coach c
+        ON c.coach_id = la.coach_id
 
-              EXTRACT(MONTH FROM oa.application_date)::INT AS application_month,
-              EXTRACT(YEAR FROM oa.application_date)::INT AS application_year
+      WHERE la.rn = 1
 
-          FROM tbl_one_on_one_applications oa
-
-          WHERE oa.player_id = p.player_id AND oa.renewal_status = 'Active'
-
-          AND
-          (
-              (
-                EXTRACT(MONTH FROM oa.application_date)::INT = $1
-                AND
-                EXTRACT(YEAR FROM oa.application_date)::INT = $2
-              )
-
-              OR
-
-              (
-                (
-                  EXTRACT(YEAR FROM oa.application_date)::INT * 12 +
-                  EXTRACT(MONTH FROM oa.application_date)::INT
-                )
-                =
-                (($2 * 12 + $1) - 1)
-              )
-          )
-
-          ORDER BY
-
-              CASE
-                  WHEN
-                    EXTRACT(MONTH FROM oa.application_date)::INT = $1
-                    AND
-                    EXTRACT(YEAR FROM oa.application_date)::INT = $2
-                  THEN 0
-
-                  ELSE 1
-              END,
-
-              oa.application_date DESC,
-              oa.application_id DESC
-
-          LIMIT 1
-
-      ) latest ON TRUE
-
-
-      JOIN tbl_coach c
-        ON latest.coach_id = c.coach_id
-
-
-      ORDER BY latest.application_date DESC;
-
+      ORDER BY la.application_date DESC;
       `,
       [month, year]
     );
 
-    const totalApplications = await pool.query(
-      `
+    const totalApplications = await pool.query(`
       SELECT COUNT(DISTINCT player_id)::INT AS total_applications
       FROM tbl_one_on_one_applications
-      `
-    );
-
+      WHERE renewal_status='Active'
+    `);
 
     const data = applications.rows.map((row) => {
-
       const isCurrentMonth =
         Number(row.application_month) === month &&
         Number(row.application_year) === year;
 
-
       return {
         ...row,
-
+        status: "Active",
         payment_status: isCurrentMonth
           ? row.payment_status
           : "Pending",
       };
-
     });
 
-
     const statistics = {
-
       total_applications:
         totalApplications.rows[0].total_applications,
 
@@ -536,20 +504,16 @@ exports.getAllApplications = async (req, res) => {
         (item) => item.payment_status === "Paid"
       ).length,
 
-
       pending_renewal: data.filter(
         (item) => item.payment_status === "Pending"
       ).length,
-
 
       this_month: data.filter(
         (item) =>
           Number(item.application_month) === month &&
           Number(item.application_year) === year
       ).length,
-
     };
-
 
     return sendSuccessResponse(
       res,
@@ -562,16 +526,12 @@ exports.getAllApplications = async (req, res) => {
         applications: data,
       }
     );
-
-
   } catch (error) {
-
     return sendErrorResponse(
       res,
       500,
       error.message || "Internal Server Error"
     );
-
   }
 };
 
