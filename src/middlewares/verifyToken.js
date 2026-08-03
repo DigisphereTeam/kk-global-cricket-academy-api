@@ -2,14 +2,14 @@ const jwt = require("jsonwebtoken");
 const { sendErrorResponse } = require("../utils/apiResponse");
 
 
-const verifyToken = (req, res, next) => {
+const verifyToken = async (req, res, next) => {
   const authHeader = req.headers.authorization;
 
   if (!authHeader) {
     return sendErrorResponse(
       res,
       401,
-      "Access token is required"
+      "Access token is required."
     );
   }
 
@@ -17,7 +17,7 @@ const verifyToken = (req, res, next) => {
     return sendErrorResponse(
       res,
       401,
-      "Invalid authorization format"
+      "Invalid authorization format."
     );
   }
 
@@ -27,7 +27,7 @@ const verifyToken = (req, res, next) => {
     return sendErrorResponse(
       res,
       401,
-      "Access token is required"
+      "Access token is required."
     );
   }
 
@@ -37,6 +37,24 @@ const verifyToken = (req, res, next) => {
       process.env.JWT_SECRET
     );
 
+    // Check if user still exists
+    const user = await pool.query(
+      `
+      SELECT user_id
+      FROM tbl_users
+      WHERE user_id = $1
+      `,
+      [decoded.user_id]
+    );
+
+    if (user.rowCount === 0) {
+      return sendErrorResponse(
+        res,
+        401,
+        "User account not found. Please sign in again."
+      );
+    }
+
     req.user = decoded;
 
     next();
@@ -44,7 +62,7 @@ const verifyToken = (req, res, next) => {
     return sendErrorResponse(
       res,
       401,
-      "Invalid or expired token"
+      "Invalid or expired token."
     );
   }
 };
