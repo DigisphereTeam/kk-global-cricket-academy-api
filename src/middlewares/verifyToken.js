@@ -1,5 +1,6 @@
 const jwt = require("jsonwebtoken");
 const { sendErrorResponse } = require("../utils/apiResponse");
+const pool = require("../config/dbConfig");
 
 
 const verifyToken = async (req, res, next) => {
