@@ -425,7 +425,7 @@ exports.deleteCoach = async (req, res) => {
     return sendErrorResponse(
       res,
       400,
-      "Coach ID is required"
+      "Coach ID is required."
     );
   }
 
@@ -433,11 +433,31 @@ exports.deleteCoach = async (req, res) => {
     return sendErrorResponse(
       res,
       400,
-      "Invalid Coach ID"
+      "Invalid Coach ID."
     );
   }
 
   try {
+    // Check whether the coach is assigned to any one-on-one application
+    const assignedCoach = await pool.query(
+      `
+      SELECT 1
+      FROM tbl_one_on_one_applications
+      WHERE coach_id = $1
+      LIMIT 1
+      `,
+      [id]
+    );
+
+    if (assignedCoach.rowCount > 0) {
+      return sendErrorResponse(
+        res,
+        409,
+        "Coach is assigned to one or more Coach cannot be deleted."
+      );
+    }
+
+    // Delete the coach
     const result = await pool.query(
       `
       DELETE FROM tbl_coach
@@ -460,6 +480,7 @@ exports.deleteCoach = async (req, res) => {
       200,
       "Coach deleted successfully."
     );
+
   } catch (error) {
     return sendErrorResponse(
       res,
