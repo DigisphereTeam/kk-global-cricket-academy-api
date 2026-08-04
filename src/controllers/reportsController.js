@@ -288,7 +288,8 @@ exports.getTrainerMonthlyReport = async (req, res) => {
         24 AS days_present,
         2 AS days_absent,
 
-        s.net_salary AS salary_paid
+        s.net_salary AS salary_paid,
+        s.payment_date AS salary_paid_date
 
       FROM tbl_employee_salary s
       INNER JOIN tbl_coach c
