@@ -205,6 +205,266 @@ exports.createEmployeeSalary = async (req, res) => {
   }
 };
 
+exports.creditEmployeeSalary = async (req, res) => {
+  const { salary_id } = req.params;
+
+  if (!salary_id || isNaN(salary_id) || Number(salary_id) <= 0) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Valid salary ID is required."
+    );
+  }
+
+  const {
+    basic_salary,
+    bonus,
+    deduction,
+    payment_type,
+    payment_date,
+    remarks,
+  } = req.body;
+
+  try {
+
+    // Required fields
+    if (
+      basic_salary == null ||
+      !payment_type ||
+      !payment_date
+    ) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Basic salary, payment type and payment date are required."
+      );
+    }
+
+
+    // Validate payment date
+    const paymentDateObj = new Date(payment_date);
+
+    if (isNaN(paymentDateObj.getTime())) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Invalid payment date."
+      );
+    }
+
+
+    // Salary month/year from payment date
+    const salary_month =
+      paymentDateObj.getMonth() + 1;
+
+    const salary_year =
+      paymentDateObj.getFullYear();
+
+
+    // Validate payment type
+    const allowedPaymentTypes = [
+      "Cash",
+      "UPI",
+      "Bank Transfer",
+    ];
+
+    if (!allowedPaymentTypes.includes(payment_type)) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Invalid payment type. Allowed values are Cash, UPI and Bank Transfer."
+      );
+    }
+
+
+    // Validate salary amount
+    if (Number(basic_salary) <= 0) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Basic salary must be greater than zero."
+      );
+    }
+
+
+    if (bonus != null && Number(bonus) < 0) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Bonus cannot be negative."
+      );
+    }
+
+
+    if (deduction != null && Number(deduction) < 0) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Deduction cannot be negative."
+      );
+    }
+
+
+    // Get existing salary record
+    const salaryResult = await pool.query(
+      `
+      SELECT *
+      FROM tbl_employee_salary
+      WHERE salary_id = $1
+      `,
+      [salary_id]
+    );
+
+
+    if (salaryResult.rowCount === 0) {
+      return sendErrorResponse(
+        res,
+        404,
+        "Salary record not found."
+      );
+    }
+
+
+    const salary = salaryResult.rows[0];
+
+
+    // Check latest salary record
+    const latestSalary = await pool.query(
+      `
+      SELECT salary_id
+      FROM tbl_employee_salary
+      WHERE
+      (
+        (staff_id = $1 AND $1 IS NOT NULL)
+        OR
+        (coach_id = $2 AND $2 IS NOT NULL)
+      )
+      ORDER BY
+        salary_year DESC,
+        salary_month DESC,
+        salary_id DESC
+      LIMIT 1
+      `,
+      [
+        salary.staff_id,
+        salary.coach_id,
+      ]
+    );
+
+
+    if (
+      latestSalary.rows[0].salary_id !== Number(salary_id)
+    ) {
+      return sendErrorResponse(
+        res,
+        409,
+        "Only the latest salary record can be credited."
+      );
+    }
+
+
+    // Prevent duplicate salary for same month/year
+    const existingSalary = await pool.query(
+      `
+      SELECT salary_id
+      FROM tbl_employee_salary
+      WHERE
+      (
+        (staff_id = $1 AND $1 IS NOT NULL)
+        OR
+        (coach_id = $2 AND $2 IS NOT NULL)
+      )
+      AND salary_month = $3
+      AND salary_year = $4
+      LIMIT 1
+      `,
+      [
+        salary.staff_id,
+        salary.coach_id,
+        salary_month,
+        salary_year,
+      ]
+    );
+
+
+    if (existingSalary.rowCount > 0) {
+      return sendErrorResponse(
+        res,
+        409,
+        "Salary already exists for this employee for the selected month."
+      );
+    }
+
+
+    // Calculate net salary
+    const net_salary =
+      Number(basic_salary) +
+      Number(bonus || 0) -
+      Number(deduction || 0);
+
+
+
+    // Insert new salary
+    const result = await pool.query(
+      `
+      INSERT INTO tbl_employee_salary
+      (
+        staff_id,
+        coach_id,
+        salary_month,
+        salary_year,
+        basic_salary,
+        bonus,
+        deduction,
+        net_salary,
+        payment_status,
+        payment_type,
+        payment_date,
+        remarks
+      )
+      VALUES
+      (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12
+      )
+      RETURNING *;
+      `,
+      [
+        salary.staff_id,
+        salary.coach_id,
+        salary_month,
+        salary_year,
+        Number(basic_salary),
+        Number(bonus || 0),
+        Number(deduction || 0),
+        net_salary,
+        "Paid",
+        payment_type,
+        payment_date,
+        remarks?.trim() || null,
+      ]
+    );
+
+
+    return sendSuccessResponse(
+      res,
+      201,
+      "Salary credited successfully.",
+      result.rows[0]
+    );
+
+
+  } catch (error) {
+
+    console.error(error);
+
+    return sendErrorResponse(
+      res,
+      500,
+      error.message || "Failed to credit salary."
+    );
+  }
+};
+
 exports.getEmployeeSalaries = async (req, res) => {
   const now = new Date();
 
@@ -437,11 +697,32 @@ exports.getEmployeeSalaries = async (req, res) => {
         payment_status: paymentStatus,
         payment_date: paymentDate,
       };
-    }); return sendSuccessResponse(
+    });
+
+    const statistics = {
+      total_salary: 0,
+      paid_salary: 0,
+      pending_salary: 0,
+      employees: data.length,
+    };
+
+    data.forEach((employee) => {
+      if (employee.payment_status === "Paid") {
+        statistics.paid_salary += 1;
+        statistics.total_salary += Number(employee.net_salary || 0);
+      } else {
+        statistics.pending_salary += 1;
+      }
+    });
+
+    return sendSuccessResponse(
       res,
       200,
       "Employee salaries fetched successfully.",
-      data
+      {
+        statistics,
+        salaries: data,
+      }
     );
 
   } catch (error) {
