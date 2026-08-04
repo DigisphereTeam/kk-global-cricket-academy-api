@@ -20,7 +20,7 @@ const dashboardRouter = require("./src/routes/dashboardRoutes");
 const apiLogger = require("./src/middlewares/apiLogger");
 const employeeSalaryRouter = require("./src/routes/employeeSalaryRoutes");
 const playerFeeRouter = require("./src/routes/playerFeeRoutes");
-
+const reportsRouter = require("./src/routes/reportsRoutes");
 
 const app = express();
 
@@ -49,6 +49,7 @@ app.use("/employee-salaries", employeeSalaryRouter);
 app.use("/users", userRouter);
 app.use("/expenditures", expenditureRouter);
 app.use("/notifications", notificationLogRouter);
+app.use("/reports", reportsRouter);
 
 
 app.use(notFoundHandler);
