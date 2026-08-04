@@ -527,6 +527,7 @@ exports.getEmployeeSalaries = async (req, res) => {
       SELECT
         es.salary_id,
         c.coach_id AS employee_id,
+        c.coach_code AS employee_code,
         c.full_name AS employee_name,
         'Coach' AS employee_type,
 
@@ -572,6 +573,7 @@ exports.getEmployeeSalaries = async (req, res) => {
       SELECT
         es.salary_id,
         s.staff_id AS employee_id,
+        s.staff_code AS employee_code,
         s.full_name AS employee_name,
         'Staff' AS employee_type,
 
