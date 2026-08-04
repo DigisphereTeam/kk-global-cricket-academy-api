@@ -271,109 +271,169 @@ exports.getDashboardCharts = async (req, res) => {
       // Player Growth - Last 6 Months
       pool.query(`
         WITH months AS (
+
           SELECT
             DATE_TRUNC('month', CURRENT_DATE)
             - (INTERVAL '1 month' * generate_series(5,0,-1))
             AS month_date
+
         )
 
         SELECT
-          TO_CHAR(months.month_date, 'Mon') AS month,
 
-          (
-            SELECT COUNT(*)
-            FROM tbl_players p
-            WHERE DATE_TRUNC(
-              'month',
-              p.created_at
-            ) <= months.month_date
-          )::INT AS players
+          TO_CHAR(
+            months.month_date,
+            'Mon'
+          ) AS month,
+
+
+          COUNT(p.player_id)::INT AS players
+
 
         FROM months
 
-        ORDER BY months.month_date;
+
+        LEFT JOIN tbl_players p
+
+        ON DATE_TRUNC(
+            'month',
+            p.admission_date
+          ) <= months.month_date
+
+
+        GROUP BY
+          months.month_date
+
+
+        ORDER BY
+          months.month_date;
+
       `),
 
 
 
       // Fee Collection - Current Month
       pool.query(`
+
         WITH current_month AS (
 
           SELECT
+
             DATE_TRUNC(
               'month',
               CURRENT_DATE
             ) AS start_date,
+
 
             DATE_TRUNC(
               'month',
               CURRENT_DATE
             ) + INTERVAL '1 month'
             AS end_date
+
+        ),
+
+
+        latest_player_fee AS (
+
+          SELECT DISTINCT ON (player_id)
+
+            player_id,
+
+            amount
+
+          FROM tbl_player_fees
+
+
+          ORDER BY
+
+            player_id,
+
+            created_at DESC
+
         )
 
 
         SELECT
 
+
+          -- Paid this month
+
           COALESCE(
-            (
-              SELECT SUM(amount)
-              FROM tbl_player_fees pf
-              WHERE pf.status = 'Paid'
 
-              AND pf.payment_date >= start_date
-              AND pf.payment_date < end_date
+            SUM(
+              CASE
 
+                WHEN pf.status='Paid'
+                AND pf.payment_date >= cm.start_date
+                AND pf.payment_date < cm.end_date
+
+                THEN pf.amount
+
+                ELSE 0
+
+              END
             ),
+
             0
+
           ) AS collected,
 
 
+
+          -- Pending this month
+
           COALESCE(
-            (
-              SELECT SUM(latest_fee.amount)
 
-              FROM tbl_players p
+            SUM(
 
-              LEFT JOIN LATERAL (
+              CASE
 
-                SELECT amount
+                WHEN NOT EXISTS (
 
-                FROM tbl_player_fees pf2
+                  SELECT 1
 
-                WHERE pf2.player_id = p.player_id
+                  FROM tbl_player_fees paid
 
-                ORDER BY
-                  pf2.created_at DESC
+                  WHERE paid.player_id = p.player_id
 
-                LIMIT 1
+                  AND paid.status='Paid'
 
-              ) latest_fee ON TRUE
+                  AND paid.payment_date >= cm.start_date
 
+                  AND paid.payment_date < cm.end_date
 
-              WHERE NOT EXISTS (
+                )
 
-                SELECT 1
+                THEN lpf.amount
 
-                FROM tbl_player_fees pf3
+                ELSE 0
 
-                WHERE pf3.player_id = p.player_id
-
-                AND pf3.status = 'Paid'
-
-                AND pf3.payment_date >= start_date
-
-                AND pf3.payment_date < end_date
-
-              )
+              END
 
             ),
+
             0
+
           ) AS pending
 
 
-        FROM current_month;
+
+        FROM tbl_players p
+
+
+        LEFT JOIN latest_player_fee lpf
+
+        ON lpf.player_id = p.player_id
+
+
+        LEFT JOIN tbl_player_fees pf
+
+        ON pf.player_id = p.player_id
+
+
+        CROSS JOIN current_month cm;
+
       `)
 
     ]);
@@ -395,6 +455,7 @@ exports.getDashboardCharts = async (req, res) => {
           collected: Number(
             feeCollection.rows[0].collected
           ),
+
 
           pending: Number(
             feeCollection.rows[0].pending
@@ -418,6 +479,7 @@ exports.getDashboardCharts = async (req, res) => {
 
   }
 };
+
 
 exports.getDashboardRevenueAndActivities = async (req, res) => {
   try {
