@@ -5,43 +5,63 @@ const {
 } = require("../utils/apiResponse");
 
 exports.getPlayerWiseReport = async (req, res) => {
-  const { year } = req.query;
+  const { search, player_id, from_date, to_date } = req.query;
 
   try {
+
     let query = `
       SELECT
         p.player_id,
         p.admission_id,
         p.full_name,
+        p.batch,
         p.gender,
         p.age,
-        EXTRACT(YEAR FROM p.admission_date) AS admission_year,
-        COALESCE(SUM(f.amount), 0) AS total_paid
+        p.admission_date,
+        p.phone_number AS contact_number,
+        p.email,
+        p.father_name,
+        p.address
       FROM tbl_players p
-      LEFT JOIN tbl_player_fees f
-        ON p.player_id = f.player_id
-        AND f.status = 'Paid'
+      WHERE 1=1
     `;
 
     const values = [];
+    let index = 1;
 
-    if (year) {
+    if (search) {
       query += `
-        AND EXTRACT(YEAR FROM f.payment_date) = $1
-        WHERE EXTRACT(YEAR FROM p.admission_date) = $1
+        AND (
+          p.full_name ILIKE $${index}
+          OR p.admission_id ILIKE $${index}
+        )
       `;
-      values.push(year);
+      values.push(`%${search}%`);
+      index++;
+    }
+
+    if (player_id) {
+      query += ` AND p.player_id = $${index}`;
+      values.push(player_id);
+      index++;
+    }
+
+    if (from_date) {
+      query += ` AND p.admission_date >= $${index}`;
+      values.push(from_date);
+      index++;
+    }
+
+    if (to_date) {
+      query += ` AND p.admission_date <= $${index}`;
+      values.push(to_date);
+      index++;
     }
 
     query += `
-      GROUP BY
-        p.player_id,
-        p.admission_id,
-        p.full_name,
-        p.gender,
-        p.age,
-        p.admission_date
-      ORDER BY p.admission_id;
+      ORDER BY
+        p.admission_date DESC,
+        p.full_name ASC
     `;
 
     const result = await pool.query(query, values);
@@ -50,114 +70,91 @@ exports.getPlayerWiseReport = async (req, res) => {
       res,
       200,
       "Player report fetched successfully.",
-      result.rows,
+      result.rows
     );
+
   } catch (error) {
     return sendErrorResponse(
       res,
       500,
-      error.message || "Internal Server Error",
+      error.message || "Internal Server Error"
     );
   }
 };
 
-exports.getYearWisePlayerReport = async (req, res) => {
-  try {
-    const result = await pool.query(
-      `
-      SELECT
-        EXTRACT(YEAR FROM p.admission_date) AS admission_year,
-
-        COUNT(DISTINCT p.player_id) AS total_players,
-
-        COUNT(DISTINCT CASE
-          WHEN p.batch = 'Regular'
-          THEN p.player_id
-        END) AS regular_players,
-
-        COUNT(DISTINCT CASE
-          WHEN p.batch = 'One-on-One'
-          THEN p.player_id
-        END) AS one_on_one_players,
-
-        COALESCE(SUM(CASE
-          WHEN f.status = 'Paid'
-          THEN f.amount
-          ELSE 0
-        END),0) AS total_collected
-
-      FROM tbl_players p
-
-      LEFT JOIN tbl_player_fees f
-        ON p.player_id = f.player_id
-        AND EXTRACT(YEAR FROM f.payment_date) =
-            EXTRACT(YEAR FROM p.admission_date)
-
-      GROUP BY
-        EXTRACT(YEAR FROM p.admission_date)
-
-      ORDER BY
-        admission_year DESC
-      `,
-    );
-
-    return sendSuccessResponse(
-      res,
-      200,
-      "Year-wise player report fetched successfully.",
-      result.rows,
-    );
-  } catch (error) {
-    return sendErrorResponse(
-      res,
-      500,
-      error.message || "Internal Server Error",
-    );
-  }
-};
-
-exports.getMonthlyPlayerReport = async (req, res) => {
-  const { year, category } = req.query;
+exports.getPlayerMonthlyReport = async (req, res) => {
+  const {
+    search,
+    player_id,
+    from_date,
+    to_date,
+  } = req.query;
 
   try {
 
     let query = `
-      SELECT
-        EXTRACT(YEAR FROM f.payment_date)::INT AS year,
-        TO_CHAR(DATE_TRUNC('month', f.payment_date), 'FMMonth') AS month,
-        p.batch AS category,
-        COUNT(DISTINCT p.player_id) AS player_count,
-        COALESCE(SUM(f.amount), 0) AS revenue
-      FROM tbl_player_fees f
-      INNER JOIN tbl_players p
-        ON p.player_id = f.player_id
-      WHERE f.status = 'Paid'
-    `;
+  SELECT
+    p.admission_id,
+    p.player_id,
+    p.full_name AS player_name,
+    p.batch,
+
+    TO_CHAR(f.payment_date, 'FMMonth') AS month,
+    EXTRACT(YEAR FROM f.payment_date)::INT AS year,
+
+    p.phone_number AS contact_number,
+    p.email,
+
+    f.amount,
+    f.payment_date,
+
+    24 AS days_present,
+    2 AS days_absent
+
+  FROM tbl_players p
+
+  LEFT JOIN tbl_player_fees f
+    ON p.player_id = f.player_id
+
+  WHERE 1=1
+`;
 
     const values = [];
     let index = 1;
 
-    if (year) {
-      query += ` AND EXTRACT(YEAR FROM f.payment_date) = $${index}`;
-      values.push(year);
+    if (search) {
+      query += `
+        AND (
+          p.full_name ILIKE $${index}
+          OR p.admission_id ILIKE $${index}
+        )
+      `;
+      values.push(`%${search}%`);
       index++;
     }
 
-    if (category) {
-      query += ` AND p.batch = $${index}`;
-      values.push(category);
+    if (player_id) {
+      query += ` AND p.player_id = $${index}`;
+      values.push(player_id);
+      index++;
+    }
+
+    if (from_date) {
+      query += ` AND p.admission_date >= $${index}`;
+      values.push(from_date);
+      index++;
+    }
+
+    if (to_date) {
+      query += ` AND p.admission_date <= $${index}`;
+      values.push(to_date);
       index++;
     }
 
     query += `
-      GROUP BY
-        EXTRACT(YEAR FROM f.payment_date),
-        DATE_TRUNC('month', f.payment_date),
-        p.batch
       ORDER BY
-        EXTRACT(YEAR FROM f.payment_date) DESC,
-        DATE_TRUNC('month', f.payment_date) ASC,
-        p.batch;
+      p.admission_date DESC,
+      p.full_name ASC
     `;
 
     const result = await pool.query(query, values);
@@ -178,28 +175,33 @@ exports.getMonthlyPlayerReport = async (req, res) => {
   }
 };
 
-exports.getTrainerWiseSalaryReport = async (req, res) => {
-  const { search } = req.query;
+exports.getTrainerWiseReport = async (req, res) => {
+  const {
+    search,
+    coach_id,
+    from_date,
+    to_date,
+  } = req.query;
 
   try {
     let query = `
       SELECT
+        c.coach_id,
         c.coach_code AS trainer_id,
         c.full_name AS trainer_name,
-        c.specialization AS role,
-        COUNT(es.salary_id) AS months_count,
-        COALESCE(AVG(es.net_salary), 0) AS avg_salary_per_month,
-        COALESCE(SUM(es.net_salary), 0) AS total_salary_paid
+        c.specialization,
+        c.phone_number AS contact_number,
+        c.experience,
+        c.join_date
+
       FROM tbl_coach c
-      LEFT JOIN tbl_employee_salary es
-        ON c.coach_id = es.coach_id
-        AND es.payment_status = 'Paid'
       WHERE 1=1
     `;
 
     const values = [];
     let index = 1;
 
+    
     if (search) {
       query += `
         AND (
@@ -212,13 +214,34 @@ exports.getTrainerWiseSalaryReport = async (req, res) => {
       index++;
     }
 
+    if (coach_id) {
+      query += `
+        AND c.coach_id = $${index}
+      `;
+      values.push(coach_id);
+      index++;
+    }
+
+    if (from_date) {
+      query += `
+        AND c.join_date >= $${index}
+      `;
+      values.push(from_date);
+      index++;
+    }
+
+    if (to_date) {
+      query += `
+        AND c.join_date <= $${index}
+      `;
+      values.push(to_date);
+      index++;
+    }
+
     query += `
-      GROUP BY
-        c.coach_code,
-        c.full_name,
-        c.specialization
       ORDER BY
-        c.full_name ASC
+      c.join_date DESC,
+      c.full_name ASC;
     `;
 
     const result = await pool.query(query, values);
@@ -226,7 +249,314 @@ exports.getTrainerWiseSalaryReport = async (req, res) => {
     return sendSuccessResponse(
       res,
       200,
-      "Trainer salary report fetched successfully.",
+      "Trainer-wise report fetched successfully.",
+      result.rows
+    );
+
+  } catch (error) {
+    return sendErrorResponse(
+      res,
+      500,
+      error.message || "Internal Server Error"
+    );
+  }
+};
+
+exports.getTrainerMonthlyReport = async (req, res) => {
+  const {
+    search,
+    coach_id,
+    from_date,
+    to_date,
+  } = req.query;
+
+  try {
+
+    let query = `
+      SELECT
+        c.coach_code AS trainer_id,
+        c.full_name AS trainer_name,
+        c.specialization,
+
+        TO_CHAR(
+          TO_DATE(s.salary_month::text, 'MM'),
+          'Month'
+        ) AS month,
+
+        s.salary_year AS year,
+
+        24 AS days_present,
+        2 AS days_absent,
+
+        s.net_salary AS salary_paid
+
+      FROM tbl_employee_salary s
+      INNER JOIN tbl_coach c
+        ON c.coach_id = s.coach_id
+
+      WHERE 1=1
+    `;
+
+    const values = [];
+    let index = 1;
+
+    // Search
+    if (search) {
+      query += `
+        AND (
+          c.full_name ILIKE $${index}
+          OR c.coach_code ILIKE $${index}
+        )
+      `;
+      values.push(`%${search}%`);
+      index++;
+    }
+
+    // Trainer Filter
+    if (coach_id) {
+      query += `
+        AND c.coach_id = $${index}
+      `;
+      values.push(coach_id);
+      index++;
+    }
+
+    // From Date
+    if (from_date) {
+      query += `
+        AND make_date(
+          s.salary_year,
+          s.salary_month,
+          1
+        ) >= $${index}
+      `;
+      values.push(from_date);
+      index++;
+    }
+
+    // To Date
+    if (to_date) {
+      query += `
+        AND make_date(
+          s.salary_year,
+          s.salary_month,
+          1
+        ) <= $${index}
+      `;
+      values.push(to_date);
+      index++;
+    }
+
+    query += `
+      ORDER BY
+        s.salary_year DESC,
+        s.salary_month DESC,
+        c.full_name ASC;
+    `;
+
+    const result = await pool.query(query, values);
+
+    return sendSuccessResponse(
+      res,
+      200,
+      "Trainer monthly report fetched successfully.",
+      result.rows
+    );
+
+  } catch (error) {
+    return sendErrorResponse(
+      res,
+      500,
+      error.message || "Internal Server Error"
+    );
+  }
+};
+
+exports.getStaffWiseReport = async (req, res) => {
+  const {
+    search,
+    staff_id,
+    from_date,
+    to_date,
+  } = req.query;
+
+  try {
+
+    let query = `
+      SELECT
+        s.staff_code,
+        s.full_name AS staff_name,
+        s.designation,
+        s.join_date AS joining_date,
+        s.phone_number AS contact_number
+
+      FROM tbl_staff s
+
+      WHERE 1=1
+    `;
+
+    const values = [];
+    let index = 1;
+
+    // Search
+    if (search) {
+      query += `
+        AND (
+          s.full_name ILIKE $${index}
+          OR s.staff_code ILIKE $${index}
+          OR s.role ILIKE $${index}
+        )
+      `;
+      values.push(`%${search}%`);
+      index++;
+    }
+
+    // Staff Filter
+    if (staff_id) {
+      query += `
+        AND s.staff_id = $${index}
+      `;
+      values.push(staff_id);
+      index++;
+    }
+
+    // From Date
+    if (from_date) {
+      query += `
+        AND s.join_date >= $${index}
+      `;
+      values.push(from_date);
+      index++;
+    }
+
+    // To Date
+    if (to_date) {
+      query += `
+        AND s.join_date <= $${index}
+      `;
+      values.push(to_date);
+      index++;
+    }
+
+    query += `
+      ORDER BY
+        s.join_date DESC,
+        s.full_name ASC;
+    `;
+
+    const result = await pool.query(query, values);
+
+    return sendSuccessResponse(
+      res,
+      200,
+      "Staff report fetched successfully.",
+      result.rows
+    );
+
+  } catch (error) {
+    return sendErrorResponse(
+      res,
+      500,
+      error.message || "Internal Server Error"
+    );
+  }
+};
+
+exports.getStaffMonthlyReport = async (req, res) => {
+  const {
+    search,
+    staff_id,
+    from_date,
+    to_date,
+  } = req.query;
+
+  try {
+
+    let query = `
+      SELECT
+        s.staff_code,
+        s.full_name AS staff_name,
+        s.designation,
+
+        TRIM(
+          TO_CHAR(
+            TO_DATE(es.salary_month::text, 'MM'),
+            'Month'
+          )
+        ) AS month,
+
+        es.salary_year AS year,
+
+        23 AS present,
+        3 AS absent,
+
+        es.net_salary AS salary_paid,
+        es.payment_date AS salary_paid_date
+
+      FROM tbl_employee_salary es
+
+      INNER JOIN tbl_staff s
+      ON s.staff_id = es.staff_id
+
+      WHERE 1=1
+    `;
+
+    const values = [];
+    let index = 1;
+
+    // Search
+    if (search) {
+      query += `
+        AND (
+          s.full_name ILIKE $${index}
+          OR s.staff_code ILIKE $${index}
+          OR s.role ILIKE $${index}
+        )
+      `;
+      values.push(`%${search}%`);
+      index++;
+    }
+
+    // Staff Filter
+    if (staff_id) {
+      query += `
+        AND s.staff_id = $${index}
+      `;
+      values.push(staff_id);
+      index++;
+    }
+
+    // From Date
+    if (from_date) {
+      query += `
+        AND es.payment_date >= $${index}
+      `;
+      values.push(from_date);
+      index++;
+    }
+
+    // To Date
+    if (to_date) {
+      query += `
+        AND es.payment_date <= $${index}
+      `;
+      values.push(to_date);
+      index++;
+    }
+
+    query += `
+      ORDER BY
+        es.salary_year DESC,
+        es.salary_month DESC,
+        s.full_name ASC;
+    `;
+
+    const result = await pool.query(query, values);
+
+    return sendSuccessResponse(
+      res,
+      200,
+      "Staff monthly report fetched successfully.",
       result.rows
     );
 
