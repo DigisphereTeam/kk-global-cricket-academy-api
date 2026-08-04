@@ -115,8 +115,10 @@ exports.createPlayerFee = async (req, res) => {
         SELECT fee_id
         FROM tbl_player_fees
         WHERE player_id = $1
-          AND payment_date = $2
-        `,
+          AND payment_date >= DATE_TRUNC('month', $2::date)
+          AND payment_date < DATE_TRUNC('month', $2::date) + INTERVAL '1 month'
+        LIMIT 1
+      `,
       [
         Number(player_id),
         formattedPaymentDate,
@@ -233,6 +235,76 @@ exports.createPlayerFee = async (req, res) => {
   }
 };
 
+// exports.getAllPlayerFees = async (req, res) => {
+//   const { date } = req.query;
+
+//   try {
+//     const query = `
+//       SELECT
+//         pf.*,
+//         p.admission_id,
+//         p.full_name
+//       FROM tbl_player_fees pf
+//       INNER JOIN tbl_players p
+//         ON pf.player_id = p.player_id
+//       INNER JOIN (
+//         SELECT
+//           player_id,
+//           MAX(fee_id) AS latest_fee_id
+//         FROM tbl_player_fees
+//         GROUP BY player_id
+//       ) latest
+//         ON latest.latest_fee_id = pf.fee_id
+//       ORDER BY
+//         pf.fee_id DESC;
+//     `;
+
+//     const result = await pool.query(query);
+
+//     const currentDate = date ? new Date(date) : new Date();
+
+//     if (isNaN(currentDate.getTime())) {
+//       return sendErrorResponse(
+//         res,
+//         400,
+//         "Invalid date."
+//       );
+//     }
+
+//     const data = result.rows.map((fee) => {
+//       if (
+//         fee.status === "Paid" &&
+//         fee.due_date &&
+//         currentDate > new Date(fee.due_date)
+//       ) {
+//         return {
+//           ...fee,
+//           status: "Unpaid",
+//         };
+//       }
+
+//       return fee;
+//     });
+
+//     return sendSuccessResponse(
+//       res,
+//       200,
+//       "Player fees fetched successfully.",
+//       data
+//     );
+
+//   } catch (error) {
+//     console.error(error);
+
+//     return sendErrorResponse(
+//       res,
+//       500,
+//       error.message || "Failed to fetch player fees."
+//     );
+//   }
+// };
+
+
 exports.getAllPlayerFees = async (req, res) => {
   const { date } = req.query;
 
@@ -259,9 +331,7 @@ exports.getAllPlayerFees = async (req, res) => {
 
     const result = await pool.query(query);
 
-    const currentDate = date
-      ? new Date(date)
-      : new Date();
+    const currentDate = date ? new Date(date) : new Date();
 
     if (isNaN(currentDate.getTime())) {
       return sendErrorResponse(
@@ -272,17 +342,24 @@ exports.getAllPlayerFees = async (req, res) => {
     }
 
     const data = result.rows.map((fee) => {
-      if (
-        fee.status !== "Paid" &&
-        fee.due_date &&
-        currentDate > new Date(fee.due_date)
-      ) {
-        fee.status = "Pending";
+      if (fee.status === "Paid" && fee.due_date) {
+        const dueDate = new Date(fee.due_date);
+
+        const isCurrentOrLaterMonth =
+          currentDate.getFullYear() > dueDate.getFullYear() ||
+          (currentDate.getFullYear() === dueDate.getFullYear() &&
+            currentDate.getMonth() >= dueDate.getMonth());
+
+        if (isCurrentOrLaterMonth) {
+          return {
+            ...fee,
+            status: "Pending",
+          };
+        }
       }
 
       return fee;
     });
-
     return sendSuccessResponse(
       res,
       200,
@@ -300,7 +377,6 @@ exports.getAllPlayerFees = async (req, res) => {
     );
   }
 };
-
 
 exports.getPlayerFeeById = async (req, res) => {
   const { fee_id } = req.params;
