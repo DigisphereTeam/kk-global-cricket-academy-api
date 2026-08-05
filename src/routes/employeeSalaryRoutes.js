@@ -11,7 +11,7 @@ employeeSalaryRouter.use(verifyToken);
 
 employeeSalaryRouter.post("/", validateRequestBody, checkRole("ADMIN"), createEmployeeSalary);
 
-employeeSalaryRouter.post("/credit/:salary_id", validateRequestBody, checkRole("PRIMARY"), creditEmployeeSalary);
+employeeSalaryRouter.post("/credit/:salary_id", validateRequestBody, checkRole("ADMIN"), creditEmployeeSalary);
 
 employeeSalaryRouter.get("/", getEmployeeSalaries);
 
