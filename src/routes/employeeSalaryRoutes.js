@@ -9,7 +9,7 @@ const employeeSalaryRouter = express.Router();
 
 employeeSalaryRouter.use(verifyToken);
 
-employeeSalaryRouter.post("/", validateRequestBody, checkRole("PRIMARY"), createEmployeeSalary);
+employeeSalaryRouter.post("/", validateRequestBody, checkRole("ADMIN"), createEmployeeSalary);
 
 employeeSalaryRouter.post("/credit/:salary_id", validateRequestBody, checkRole("PRIMARY"), creditEmployeeSalary);
 
