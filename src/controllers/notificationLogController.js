@@ -37,7 +37,7 @@ exports.getNotifications = async (req, res) => {
           )
           OR
           (
-            module_name = 'Fee Management'
+            module_name = 'Player Fee'
           )
         ORDER BY created_at DESC
       `;
