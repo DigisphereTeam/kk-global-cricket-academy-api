@@ -218,7 +218,7 @@ exports.getAllCoaches = async (req, res) => {
       SELECT
         COUNT(*) AS total_trainers,
         COUNT(*) FILTER (WHERE is_active = TRUE) AS active_trainers,
-        COALESCE(ROUND(AVG(rating), 1), 0) AS average_rating,
+        COUNT(*) FILTER (WHERE is_active = FALSE) AS inactive_trainers,
         COALESCE(ROUND(AVG(experience::NUMERIC), 1), 0) AS average_experience
       FROM tbl_coach
       `
@@ -233,7 +233,7 @@ exports.getAllCoaches = async (req, res) => {
         statistics: {
           total_trainers: Number(statistics.rows[0].total_trainers),
           active_trainers: Number(statistics.rows[0].active_trainers),
-          average_rating: Number(statistics.rows[0].average_rating),
+          inactive_trainers: Number(statistics.rows[0].inactive_trainers),
           average_experience: Number(statistics.rows[0].average_experience),
         },
         coaches: result.rows,
