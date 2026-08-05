@@ -209,21 +209,19 @@ exports.getAllCoaches = async (req, res) => {
         `
         SELECT *
         FROM tbl_coach
-        WHERE is_active = TRUE
         ORDER BY coach_id DESC
         `
       ),
 
       pool.query(
         `
-        SELECT
-          COUNT(*) AS total_trainers,
-          COUNT(*) AS active_trainers,
-          COALESCE(ROUND(AVG(rating), 1), 0) AS average_rating,
-          COALESCE(ROUND(AVG(experience::NUMERIC), 1), 0) AS average_experience
-        FROM tbl_coach
-        WHERE is_active = TRUE
-        `
+      SELECT
+        COUNT(*) AS total_trainers,
+        COUNT(*) FILTER (WHERE is_active = TRUE) AS active_trainers,
+        COALESCE(ROUND(AVG(rating), 1), 0) AS average_rating,
+        COALESCE(ROUND(AVG(experience::NUMERIC), 1), 0) AS average_experience
+      FROM tbl_coach
+      `
       ),
     ]);
 
