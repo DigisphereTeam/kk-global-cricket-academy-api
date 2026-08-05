@@ -544,6 +544,7 @@ exports.getEmployeeSalaries = async (req, res) => {
 
         es.payment_status,
         es.payment_date,
+        es.payment_type,
         es.remarks
 
       FROM tbl_coach c
@@ -590,6 +591,7 @@ exports.getEmployeeSalaries = async (req, res) => {
 
         es.payment_status,
         es.payment_date,
+        es.payment_type,
         es.remarks
 
       FROM tbl_staff s
