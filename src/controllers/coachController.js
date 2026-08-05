@@ -203,23 +203,28 @@ exports.addCoach = async (req, res) => {
 
 
 exports.getAllCoaches = async (req, res) => {
-
   try {
     const [result, statistics] = await Promise.all([
-      pool.query(`
+      pool.query(
+        `
         SELECT *
         FROM tbl_coach
+        WHERE is_active = TRUE
         ORDER BY coach_id DESC
-      `),
+        `
+      ),
 
-      pool.query(`
+      pool.query(
+        `
         SELECT
           COUNT(*) AS total_trainers,
           COUNT(*) AS active_trainers,
           COALESCE(ROUND(AVG(rating), 1), 0) AS average_rating,
-          COALESCE(ROUND(AVG(experience::NUMERIC), 1),0) AS average_experience
+          COALESCE(ROUND(AVG(experience::NUMERIC), 1), 0) AS average_experience
         FROM tbl_coach
-      `),
+        WHERE is_active = TRUE
+        `
+      ),
     ]);
 
     return sendSuccessResponse(
@@ -253,7 +258,7 @@ exports.getCoachById = async (req, res) => {
     return sendErrorResponse(
       res,
       400,
-      "Coach ID is required"
+      "Coach ID is required."
     );
   }
 
@@ -261,7 +266,7 @@ exports.getCoachById = async (req, res) => {
     return sendErrorResponse(
       res,
       400,
-      "Invalid Coach ID"
+      "Invalid Coach ID."
     );
   }
 
@@ -271,6 +276,7 @@ exports.getCoachById = async (req, res) => {
       SELECT *
       FROM tbl_coach
       WHERE coach_id = $1
+        AND is_active = TRUE
       `,
       [id]
     );
@@ -279,7 +285,7 @@ exports.getCoachById = async (req, res) => {
       return sendErrorResponse(
         res,
         404,
-        "Coach not found."
+        "Active coach not found."
       );
     }
 
@@ -326,6 +332,7 @@ exports.updateCoach = async (req, res) => {
       SELECT *
       FROM tbl_coach
       WHERE coach_id = $1
+        AND is_active = TRUE
       `,
       [id]
     );
@@ -479,6 +486,100 @@ exports.deleteCoach = async (req, res) => {
       res,
       200,
       "Coach deleted successfully."
+    );
+
+  } catch (error) {
+    return sendErrorResponse(
+      res,
+      500,
+      error.message || "Internal Server Error"
+    );
+  }
+};
+
+
+exports.updateCoachStatus = async (req, res) => {
+  const { id } = req.params;
+  const { is_active } = req.body;
+
+  // Validate Coach ID
+  if (!id) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Coach ID is required."
+    );
+  }
+
+  if (!Number.isInteger(Number(id)) || Number(id) <= 0) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Invalid Coach ID."
+    );
+  }
+
+  // Validate is_active
+  if (is_active === undefined) {
+    return sendErrorResponse(
+      res,
+      400,
+      "is_active is required."
+    );
+  }
+
+  if (typeof is_active !== "boolean") {
+    return sendErrorResponse(
+      res,
+      400,
+      "is_active must be a boolean value."
+    );
+  }
+
+  try {
+    // Check coach exists
+    const coach = await pool.query(
+      `
+      SELECT coach_id, is_active
+      FROM tbl_coach
+      WHERE coach_id = $1;
+      `,
+      [id]
+    );
+
+    if (coach.rowCount === 0) {
+      return sendErrorResponse(
+        res,
+        404,
+        "Coach not found."
+      );
+    }
+
+    // Check if status is already the same
+    if (coach.rows[0].is_active === is_active) {
+      return sendErrorResponse(
+        res,
+        409,
+        `Coach is already ${is_active ? "active" : "inactive"}.`
+      );
+    }
+
+    const result = await pool.query(
+      `
+      UPDATE tbl_coach
+      SET
+        is_active = $1
+      WHERE coach_id = $2
+      RETURNING *;
+      `,
+      [is_active, id]
+    );
+
+    return sendSuccessResponse(
+      res,
+      200,
+      `Coach ${is_active ? "activated" : "deactivated"} successfully.`,
+      result.rows[0]
     );
 
   } catch (error) {

@@ -784,14 +784,15 @@ exports.getEligibleEmployees = async (req, res) => {
           coach_id AS employee_id,
           full_name AS employee_name
         FROM tbl_coach c
-        WHERE NOT EXISTS (
-          SELECT 1
-          FROM tbl_employee_salary es
-          WHERE es.coach_id = c.coach_id
-            AND es.salary_month = $1
-            AND es.salary_year = $2
-            AND es.payment_status = 'Paid'
-        )
+        WHERE c.is_active = TRUE
+          AND NOT EXISTS (
+            SELECT 1
+            FROM tbl_employee_salary es
+            WHERE es.coach_id = c.coach_id
+              AND es.salary_month = $1
+              AND es.salary_year = $2
+              AND es.payment_status = 'Paid'
+          )
         ORDER BY full_name;
       `;
     } else {
