@@ -131,7 +131,7 @@ exports.createPlayerFee = async (req, res) => {
       return sendErrorResponse(
         res,
         409,
-        "Fee already exists for this player on this payment date."
+        "Fee has already been paid for this month."
       );
     }
 
