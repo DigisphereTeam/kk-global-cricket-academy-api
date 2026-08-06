@@ -1,4 +1,5 @@
 const pool = require("../config/dbConfig");
+const { generateMonthlyDues } = require("../jobs/generateMonthlyDues");
 const {
   sendSuccessResponse,
   sendErrorResponse,
@@ -867,6 +868,25 @@ exports.getPlayersAndCoaches = async (req, res) => {
       res,
       500,
       error.message || "Internal Server Error"
+    );
+  }
+};
+
+exports.generateDues = async (req, res) => {
+  try {
+    const result = await generateMonthlyDues();
+
+    return sendSuccessResponse(
+      res,
+      200,
+      "Monthly dues generated successfully.",
+      result
+    );
+  } catch (error) {
+    return sendErrorResponse(
+      res,
+      500,
+      error.message
     );
   }
 };

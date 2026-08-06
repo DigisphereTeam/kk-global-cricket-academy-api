@@ -80,7 +80,7 @@ exports.addStaff = async (req, res) => {
 
     const yearCode = String(currentYear).slice(-2);
 
-    const prefix = `ST${yearCode}`;
+    const prefix = `S${yearCode}`;
 
 
     // Prevent duplicate code generation

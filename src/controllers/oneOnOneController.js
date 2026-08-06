@@ -492,10 +492,11 @@ exports.getAllApplications = async (req, res) => {
       ),
 
       pool.query(`
-    SELECT COUNT(DISTINCT player_id)::INT AS total_applications
-    FROM tbl_one_on_one_applications
-    WHERE renewal_status = 'Active'
-  `),
+      SELECT
+        COUNT(DISTINCT player_id)::INT AS total_applications
+      FROM tbl_one_on_one_applications
+    `),
+
     ]);
 
     const data = applications.rows.map((row) => {
@@ -715,87 +716,6 @@ exports.getApplicationById = async (req, res) => {
   }
 };
 
-exports.cancelRenewal = async (req, res) => {
-  const { application_id } = req.params;
-  const { cancellation_reason } = req.body || {};
-
-  try {
-    if (!application_id) {
-      return sendErrorResponse(
-        res,
-        400,
-        "Application ID is required."
-      );
-    }
-
-    const application = await pool.query(
-      `
-      SELECT
-        application_id,
-        payment_status,
-        renewal_status
-      FROM tbl_one_on_one_applications
-      WHERE application_id = $1
-      `,
-      [application_id]
-    );
-
-
-    if (application.rows.length === 0) {
-      return sendErrorResponse(
-        res,
-        404,
-        "Application not found."
-      );
-    }
-
-
-    if (
-      application.rows[0].renewal_status === "Cancelled"
-    ) {
-      return sendErrorResponse(
-        res,
-        400,
-        "Renewal already cancelled."
-      );
-    }
-
-
-    await pool.query(
-      `
-      UPDATE tbl_one_on_one_applications
-      SET
-        renewal_status = 'Cancelled',
-        cancellation_reason = $2,
-        cancelled_at = CURRENT_TIMESTAMP,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE application_id = $1
-      `,
-      [
-        application_id,
-        cancellation_reason?.trim() || null
-      ]
-    );
-
-
-    return sendSuccessResponse(
-      res,
-      200,
-      "Renewal cancelled successfully."
-    );
-
-
-  } catch (error) {
-
-    return sendErrorResponse(
-      res,
-      500,
-      error.message || "Internal Server Error"
-    );
-
-  }
-};
-
 exports.updateOneOnOneApplicationStatus = async (req, res) => {
   const { id } = req.params;
   const { is_active } = req.body;
@@ -834,20 +754,24 @@ exports.updateOneOnOneApplicationStatus = async (req, res) => {
     );
   }
 
+  const client = await pool.connect();
+
   try {
-    // Check application exists
-    const application = await pool.query(
+    await client.query("BEGIN");
+
+    // Get selected application
+    const applicationResult = await client.query(
       `
-      SELECT
-        application_id,
-        is_active
+      SELECT *
       FROM tbl_one_on_one_applications
-      WHERE application_id = $1;
+      WHERE application_id = $1
       `,
       [id]
     );
 
-    if (application.rowCount === 0) {
+    if (applicationResult.rowCount === 0) {
+      await client.query("ROLLBACK");
+
       return sendErrorResponse(
         res,
         404,
@@ -855,37 +779,168 @@ exports.updateOneOnOneApplicationStatus = async (req, res) => {
       );
     }
 
-    // Check if already in requested status
-    if (application.rows[0].is_active === is_active) {
-      return sendErrorResponse(
+    const application = applicationResult.rows[0];
+
+    // ===========================
+    // DEACTIVATE
+    // ===========================
+    if (!is_active) {
+
+      if (!application.is_active) {
+        await client.query("ROLLBACK");
+
+        return sendErrorResponse(
+          res,
+          409,
+          "Application is already inactive."
+        );
+      }
+
+      const updateResult = await client.query(
+        `
+        UPDATE tbl_one_on_one_applications
+        SET
+          is_active = FALSE,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE application_id = $1
+        RETURNING *;
+        `,
+        [id]
+      );
+
+      await client.query("COMMIT");
+
+      return sendSuccessResponse(
         res,
-        409,
-        `Application is already ${is_active ? "active" : "inactive"
-        }.`
+        200,
+        "Application deactivated successfully.",
+        updateResult.rows[0]
       );
     }
 
-    // Update status
-    const result = await pool.query(
+    // ===========================
+    // ACTIVATE
+    // ===========================
+
+    const currentMonthApplication = await client.query(
       `
-      UPDATE tbl_one_on_one_applications
-      SET
-        is_active = $1
-      WHERE application_id = $2
+      SELECT *
+      FROM tbl_one_on_one_applications
+      WHERE
+        player_id = $1
+        AND DATE_TRUNC('month', application_date) =
+            DATE_TRUNC('month', CURRENT_DATE)
+      ORDER BY application_id DESC
+      LIMIT 1
+      `,
+      [application.player_id]
+    );
+
+    // ----------------------------------------------------
+    // Current month record already exists
+    // ----------------------------------------------------
+    if (currentMonthApplication.rowCount > 0) {
+
+      const currentRecord = currentMonthApplication.rows[0];
+
+      if (currentRecord.is_active) {
+        await client.query("ROLLBACK");
+
+        return sendErrorResponse(
+          res,
+          409,
+          "Current month application is already active."
+        );
+      }
+
+      const updateResult = await client.query(
+        `
+        UPDATE tbl_one_on_one_applications
+        SET
+          is_active = TRUE,
+          payment_status = 'Pending',
+          updated_at = CURRENT_TIMESTAMP
+        WHERE application_id = $1
+        RETURNING *;
+        `,
+        [currentRecord.application_id]
+      );
+
+      await client.query("COMMIT");
+
+      return sendSuccessResponse(
+        res,
+        200,
+        "Application activated successfully.",
+        updateResult.rows[0]
+      );
+    }
+
+    // ----------------------------------------------------
+    // Create new current month record
+    // ----------------------------------------------------
+
+    const insertResult = await client.query(
+      `
+      INSERT INTO tbl_one_on_one_applications
+      (
+        player_id,
+        coach_id,
+        focus_area,
+        payment_type,
+        fee_amount,
+        preferred_slot,
+        application_date,
+        remarks,
+        application_type,
+        monthly_performance_review,
+        payment_status,
+        renewal_status,
+        is_active
+      )
+      VALUES
+      (
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        $6,
+        CURRENT_DATE,
+        $7,
+        'Renew',
+        $8,
+        'Pending',
+        'Active',
+        TRUE
+      )
       RETURNING *;
       `,
-      [is_active, id]
+      [
+        application.player_id,
+        application.coach_id,
+        application.focus_area,
+        application.payment_type,
+        application.fee_amount,
+        application.preferred_slot,
+        application.remarks,
+        application.monthly_performance_review
+      ]
     );
+
+    await client.query("COMMIT");
 
     return sendSuccessResponse(
       res,
-      200,
-      `Application ${is_active ? "activated" : "deactivated"
-      } successfully.`,
-      result.rows[0]
+      201,
+      "New application created successfully.",
+      insertResult.rows[0]
     );
 
   } catch (error) {
+
+    await client.query("ROLLBACK");
+
     console.error(error);
 
     return sendErrorResponse(
@@ -893,6 +948,11 @@ exports.updateOneOnOneApplicationStatus = async (req, res) => {
       500,
       error.message || "Internal Server Error"
     );
+
+  } finally {
+
+    client.release();
+
   }
 };
 
