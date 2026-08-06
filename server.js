@@ -21,6 +21,8 @@ const apiLogger = require("./src/middlewares/apiLogger");
 const employeeSalaryRouter = require("./src/routes/employeeSalaryRoutes");
 const playerFeeRouter = require("./src/routes/playerFeeRoutes");
 const reportsRouter = require("./src/routes/reportsRoutes");
+const attendanceRouter = require("./src/routes/attendanceRoutes");
+const { startAttendanceCron } = require("./src/jobs/attendance.cron");
 
 const app = express();
 
@@ -47,6 +49,7 @@ app.use("/events", eventRouter)
 app.use("/equipments", equipmentRouter);
 app.use("/employee-salaries", employeeSalaryRouter);
 app.use("/users", userRouter);
+app.use("/attendance", attendanceRouter);
 app.use("/expenditures", expenditureRouter);
 app.use("/notifications", notificationLogRouter);
 app.use("/reports", reportsRouter);
@@ -54,6 +57,8 @@ app.use("/reports", reportsRouter);
 
 app.use(notFoundHandler);
 app.use(globalErrorHandler)
+
+startAttendanceCron();
 
 app.listen(5000, async () => {
   try {
