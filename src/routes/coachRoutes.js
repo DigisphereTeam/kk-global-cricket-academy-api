@@ -1,6 +1,6 @@
 const express = require("express");
 const validateRequestBody = require("../middlewares/validateRequestBody");
-const { addCoach, getAllCoaches, searchCoaches, getCoachById, updateCoach, deleteCoach } = require("../controllers/coachController");
+const { addCoach, getAllCoaches, searchCoaches, getCoachById, updateCoach, deleteCoach, updateCoachStatus } = require("../controllers/coachController");
 const verifyToken = require("../middlewares/verifyToken");
 const { checkRole } = require("../middlewares/checkRole");
 
@@ -18,6 +18,8 @@ coachRouter.get("/:id", getCoachById);
 
 coachRouter.patch("/:id", validateRequestBody, updateCoach);
 
-coachRouter.delete("/:id", checkRole("ADMIN"), deleteCoach);
+coachRouter.patch("/:id/status", validateRequestBody, updateCoachStatus);
+
+// coachRouter.delete("/:id", checkRole("ADMIN"), deleteCoach);
 
 module.exports = coachRouter;

@@ -527,6 +527,7 @@ exports.getEmployeeSalaries = async (req, res) => {
       SELECT
         es.salary_id,
         c.coach_id AS employee_id,
+        c.coach_code AS employee_code,
         c.full_name AS employee_name,
         'Coach' AS employee_type,
 
@@ -543,6 +544,7 @@ exports.getEmployeeSalaries = async (req, res) => {
 
         es.payment_status,
         es.payment_date,
+        es.payment_type,
         es.remarks
 
       FROM tbl_coach c
@@ -572,6 +574,7 @@ exports.getEmployeeSalaries = async (req, res) => {
       SELECT
         es.salary_id,
         s.staff_id AS employee_id,
+        s.staff_code AS employee_code,
         s.full_name AS employee_name,
         'Staff' AS employee_type,
 
@@ -588,6 +591,7 @@ exports.getEmployeeSalaries = async (req, res) => {
 
         es.payment_status,
         es.payment_date,
+        es.payment_type,
         es.remarks
 
       FROM tbl_staff s
@@ -780,14 +784,15 @@ exports.getEligibleEmployees = async (req, res) => {
           coach_id AS employee_id,
           full_name AS employee_name
         FROM tbl_coach c
-        WHERE NOT EXISTS (
-          SELECT 1
-          FROM tbl_employee_salary es
-          WHERE es.coach_id = c.coach_id
-            AND es.salary_month = $1
-            AND es.salary_year = $2
-            AND es.payment_status = 'Paid'
-        )
+        WHERE c.is_active = TRUE
+          AND NOT EXISTS (
+            SELECT 1
+            FROM tbl_employee_salary es
+            WHERE es.coach_id = c.coach_id
+              AND es.salary_month = $1
+              AND es.salary_year = $2
+              AND es.payment_status = 'Paid'
+          )
         ORDER BY full_name;
       `;
     } else {
@@ -923,10 +928,7 @@ exports.getEmployeeSalaryById = async (req, res) => {
 };
 
 exports.getEmployeeSalaryHistory = async (req, res) => {
-  const {
-    staff_id,
-    coach_id,
-  } = req.query;
+  const { staff_id, coach_id } = req.query;
 
   try {
     // Validate employee
@@ -947,8 +949,10 @@ exports.getEmployeeSalaryHistory = async (req, res) => {
     }
 
     if (
-      (staff_id && (isNaN(staff_id) || Number(staff_id) <= 0)) ||
-      (coach_id && (isNaN(coach_id) || Number(coach_id) <= 0))
+      (staff_id &&
+        (!Number.isInteger(Number(staff_id)) || Number(staff_id) <= 0)) ||
+      (coach_id &&
+        (!Number.isInteger(Number(coach_id)) || Number(coach_id) <= 0))
     ) {
       return sendErrorResponse(
         res,
@@ -957,109 +961,116 @@ exports.getEmployeeSalaryHistory = async (req, res) => {
       );
     }
 
-
-    let query;
+    let profileQuery;
+    let historyQuery;
     let params;
 
-
-    // Staff salary history
     if (staff_id) {
-      query = `
-        SELECT
-          es.salary_id,
-
-          s.staff_id AS employee_id,
-          s.full_name AS employee_name,
-          'Staff' AS employee_type,
-
-          es.salary_month,
-          es.salary_year,
-
-          es.basic_salary,
-          es.bonus,
-          es.deduction,
-          es.net_salary,
-
-          es.payment_status,
-          es.payment_date,
-          es.remarks,
-
-          es.created_at
-
-        FROM tbl_employee_salary es
-
-        INNER JOIN tbl_staff s
-          ON es.staff_id = s.staff_id
-
-        WHERE es.staff_id = $1
-
-        ORDER BY
-          es.salary_year DESC,
-          es.salary_month DESC,
-          es.created_at DESC;
-      `;
-
       params = [Number(staff_id)];
-    }
 
-
-    // Coach salary history
-    else {
-      query = `
+      // Staff Profile
+      profileQuery = `
         SELECT
-          es.salary_id,
-
-          c.coach_id AS employee_id,
-          c.full_name AS employee_name,
-          'Coach' AS employee_type,
-
-          es.salary_month,
-          es.salary_year,
-
-          es.basic_salary,
-          es.bonus,
-          es.deduction,
-          es.net_salary,
-
-          es.payment_status,
-          es.payment_date,
-          es.remarks,
-
-          es.created_at
-
-        FROM tbl_employee_salary es
-
-        INNER JOIN tbl_coach c
-          ON es.coach_id = c.coach_id
-
-        WHERE es.coach_id = $1
-
-        ORDER BY
-          es.salary_year DESC,
-          es.salary_month DESC,
-          es.created_at DESC;
+          staff_id AS employee_id,
+          staff_code,
+          full_name,
+          phone_number,
+          designation,
+          salary,
+          join_date,
+          'Staff' AS employee_type
+        FROM tbl_staff
+        WHERE staff_id = $1;
       `;
 
+      // Staff Salary History
+      historyQuery = `
+        SELECT
+          salary_id,
+          salary_month,
+          salary_year,
+          basic_salary,
+          bonus,
+          deduction,
+          net_salary,
+          payment_status,
+          payment_date,
+          remarks,
+          created_at
+        FROM tbl_employee_salary
+        WHERE staff_id = $1
+        ORDER BY
+          salary_year DESC,
+          salary_month DESC,
+          created_at DESC;
+      `;
+    } else {
       params = [Number(coach_id)];
+
+      // Coach Profile
+      profileQuery = `
+        SELECT
+          coach_id AS employee_id,
+          coach_code,
+          full_name,
+          phone_number,
+          specialization,
+          experience,
+          rating,
+          salary,
+          join_date,
+          is_active,
+          'Coach' AS employee_type
+        FROM tbl_coach
+        WHERE coach_id = $1;
+      `;
+
+      // Coach Salary History
+      historyQuery = `
+        SELECT
+          salary_id,
+          salary_month,
+          salary_year,
+          basic_salary,
+          bonus,
+          deduction,
+          net_salary,
+          payment_status,
+          payment_date,
+          remarks,
+          created_at
+        FROM tbl_employee_salary
+        WHERE coach_id = $1
+        ORDER BY
+          salary_year DESC,
+          salary_month DESC,
+          created_at DESC;
+      `;
     }
 
+    const [profileResult, historyResult] = await Promise.all([
+      pool.query(profileQuery, params),
+      pool.query(historyQuery, params),
+    ]);
 
-    const result = await pool.query(
-      query,
-      params
-    );
-
+    if (profileResult.rowCount === 0) {
+      return sendErrorResponse(
+        res,
+        404,
+        "Employee not found."
+      );
+    }
 
     return sendSuccessResponse(
       res,
       200,
       "Salary history fetched successfully.",
-      result.rows
+      {
+        profile: profileResult.rows[0],
+        salary_history: historyResult.rows,
+      }
     );
-
-
   } catch (error) {
-
     console.error(error);
 
     return sendErrorResponse(

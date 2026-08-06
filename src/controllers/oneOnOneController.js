@@ -410,77 +410,93 @@ exports.getAllApplications = async (req, res) => {
       return sendErrorResponse(res, 400, "Invalid year.");
     }
 
-    const applications = await pool.query(
-      `
-      WITH latest_applications AS (
-          SELECT
-              oa.*,
-              ROW_NUMBER() OVER (
-                  PARTITION BY oa.player_id
-                  ORDER BY
-                      CASE
-                          WHEN date_trunc('month', oa.application_date) =
-                               make_date($2, $1, 1)
-                          THEN 0
-                          ELSE 1
-                      END,
-                      oa.application_date DESC,
-                      oa.application_id DESC
-              ) AS rn
-          FROM tbl_one_on_one_applications oa
-          WHERE
-              oa.renewal_status = 'Active'
-              AND date_trunc('month', oa.application_date) IN (
-                  make_date($2, $1, 1),
-                  make_date($2, $1, 1) - interval '1 month'
-              )
-      )
+    const [applications, totalApplications] = await Promise.all([
+      pool.query(
+        `
+    WITH ranked_applications AS (
+        SELECT
+            oa.*,
+            ROW_NUMBER() OVER (
+                PARTITION BY oa.player_id
+                ORDER BY
+                    CASE
+                        WHEN date_trunc('month', oa.application_date) =
+                             make_date($2, $1, 1)
+                        THEN 0
 
-      SELECT
-          la.application_id,
+                        WHEN date_trunc('month', oa.application_date) =
+                             make_date($2, $1, 1) - interval '1 month'
+                        THEN 1
 
-          p.player_id,
-          p.admission_id,
-          p.full_name AS student_name,
+                        WHEN oa.is_active = FALSE
+                        THEN 2
 
-          la.coach_id,
-          c.full_name AS coach_name,
+                        ELSE 3
+                    END,
+                    oa.application_date DESC,
+                    oa.application_id DESC
+            ) AS rn
+        FROM tbl_one_on_one_applications oa
+        WHERE oa.renewal_status = 'Active'
+    )
 
-          la.focus_area,
-          la.payment_type,
-          la.payment_status,
-          la.fee_amount,
-          la.preferred_slot,
-          la.application_type,
-          la.application_date,
-          la.monthly_performance_review,
-          la.remarks,
-          la.created_at,
-          la.updated_at,
+    SELECT
+        ra.application_id,
 
-          EXTRACT(MONTH FROM la.application_date)::INT AS application_month,
-          EXTRACT(YEAR FROM la.application_date)::INT AS application_year
+        p.player_id,
+        p.admission_id,
+        p.full_name AS student_name,
 
-      FROM latest_applications la
+        ra.coach_id,
+        c.full_name AS coach_name,
 
-      JOIN tbl_players p
-        ON p.player_id = la.player_id
+        ra.focus_area,
+        ra.payment_type,
+        ra.payment_status,
+        ra.fee_amount,
+        ra.preferred_slot,
+        ra.application_type,
+        ra.application_date,
+        ra.monthly_performance_review,
+        ra.remarks,
+        ra.is_active,
+        ra.created_at,
+        ra.updated_at,
 
-      LEFT JOIN tbl_coach c
-        ON c.coach_id = la.coach_id
+        EXTRACT(MONTH FROM ra.application_date)::INT AS application_month,
+        EXTRACT(YEAR FROM ra.application_date)::INT AS application_year
 
-      WHERE la.rn = 1
+    FROM ranked_applications ra
 
-      ORDER BY la.application_date DESC;
-      `,
-      [month, year]
-    );
+    JOIN tbl_players p
+      ON p.player_id = ra.player_id
 
-    const totalApplications = await pool.query(`
-      SELECT COUNT(DISTINCT player_id)::INT AS total_applications
-      FROM tbl_one_on_one_applications
-      WHERE renewal_status='Active'
-    `);
+    LEFT JOIN tbl_coach c
+      ON c.coach_id = ra.coach_id
+
+    WHERE
+        ra.rn = 1
+        AND (
+            date_trunc('month', ra.application_date) IN (
+                make_date($2, $1, 1),
+                make_date($2, $1, 1) - interval '1 month'
+            )
+            OR ra.is_active = FALSE
+        )
+
+    ORDER BY
+        ra.application_date DESC,
+        ra.application_id DESC;
+    `,
+        [month, year]
+      ),
+
+      pool.query(`
+    SELECT COUNT(DISTINCT player_id)::INT AS total_applications
+    FROM tbl_one_on_one_applications
+    WHERE renewal_status = 'Active'
+  `),
+    ]);
 
     const data = applications.rows.map((row) => {
       const isCurrentMonth =
@@ -489,11 +505,13 @@ exports.getAllApplications = async (req, res) => {
 
       return {
         ...row,
-        status: "Active",
+        status: row.is_active ? "Active" : "Inactive",
         sessions: 1,
         payment_status: isCurrentMonth
           ? row.payment_status
-          : "Pending",
+          : row.is_active
+            ? "Pending"
+            : row.payment_status,
       };
     });
 
@@ -775,6 +793,106 @@ exports.cancelRenewal = async (req, res) => {
       error.message || "Internal Server Error"
     );
 
+  }
+};
+
+exports.updateOneOnOneApplicationStatus = async (req, res) => {
+  const { id } = req.params;
+  const { is_active } = req.body;
+
+  // Validate Application ID
+  if (!id) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Application ID is required."
+    );
+  }
+
+  if (!Number.isInteger(Number(id)) || Number(id) <= 0) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Invalid Application ID."
+    );
+  }
+
+  // Validate is_active
+  if (is_active === undefined) {
+    return sendErrorResponse(
+      res,
+      400,
+      "is_active is required."
+    );
+  }
+
+  if (typeof is_active !== "boolean") {
+    return sendErrorResponse(
+      res,
+      400,
+      "is_active must be a boolean value."
+    );
+  }
+
+  try {
+    // Check application exists
+    const application = await pool.query(
+      `
+      SELECT
+        application_id,
+        is_active
+      FROM tbl_one_on_one_applications
+      WHERE application_id = $1;
+      `,
+      [id]
+    );
+
+    if (application.rowCount === 0) {
+      return sendErrorResponse(
+        res,
+        404,
+        "One-on-one application not found."
+      );
+    }
+
+    // Check if already in requested status
+    if (application.rows[0].is_active === is_active) {
+      return sendErrorResponse(
+        res,
+        409,
+        `Application is already ${is_active ? "active" : "inactive"
+        }.`
+      );
+    }
+
+    // Update status
+    const result = await pool.query(
+      `
+      UPDATE tbl_one_on_one_applications
+      SET
+        is_active = $1
+      WHERE application_id = $2
+      RETURNING *;
+      `,
+      [is_active, id]
+    );
+
+    return sendSuccessResponse(
+      res,
+      200,
+      `Application ${is_active ? "activated" : "deactivated"
+      } successfully.`,
+      result.rows[0]
+    );
+
+  } catch (error) {
+    console.error(error);
+
+    return sendErrorResponse(
+      res,
+      500,
+      error.message || "Internal Server Error"
+    );
   }
 };
 

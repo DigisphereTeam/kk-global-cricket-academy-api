@@ -840,18 +840,17 @@ exports.getPlayersAndCoaches = async (req, res) => {
         ORDER BY player_id DESC
       `),
 
-
-      // Coaches
+      // Active Coaches
       pool.query(`
         SELECT
           coach_id AS id,
           full_name
         FROM tbl_coach
+        WHERE is_active = TRUE
         ORDER BY coach_id DESC
       `),
 
     ]);
-
 
     return sendSuccessResponse(
       res,
@@ -863,14 +862,11 @@ exports.getPlayersAndCoaches = async (req, res) => {
       }
     );
 
-
   } catch (error) {
-
     return sendErrorResponse(
       res,
       500,
       error.message || "Internal Server Error"
     );
-
   }
 };
