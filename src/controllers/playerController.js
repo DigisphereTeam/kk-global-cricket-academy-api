@@ -1049,6 +1049,7 @@ exports.getPlayersAndCoaches = async (req, res) => {
           player_id AS id,
           full_name
         FROM tbl_players
+        WHERE is_active = TRUE
         ORDER BY player_id DESC
       `),
 

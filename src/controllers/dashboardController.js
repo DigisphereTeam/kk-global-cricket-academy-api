@@ -634,6 +634,10 @@ exports.getDashboardRevenueAndActivities = async (req, res) => {
           performed_by,
           created_at
         FROM tbl_notification_logs
+        WHERE NOT (
+          module_name = 'Ground Booking'
+          AND action IN ('Confirmed', 'Cancelled')
+        )
         ORDER BY created_at DESC
         LIMIT 4;
       `)
