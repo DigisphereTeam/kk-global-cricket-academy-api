@@ -1,7 +1,7 @@
 const axios = require("axios");
 const { sendErrorResponse, sendSuccessResponse } = require("../utils/apiResponse");
 const pool = require("../config/dbConfig");
-const tokenStore = require("../utils/petpoojaToken");
+const { getTokenExpiry, getAccessToken, setAccessToken, setTokenExpiry } = require("../utils/petpoojaToken");
 
 exports.getAttendance = async (req, res) => {
   const now = new Date();
@@ -26,6 +26,14 @@ exports.getAttendance = async (req, res) => {
       );
     }
 
+    // Sync latest attendance from PetPooja
+    try {
+      await syncAttendanceData(date);
+    } catch (error) {
+      console.error("Attendance sync failed:", error.message);
+      // Continue fetching attendance from DB
+    }
+
     let query = "";
 
     if (employee_type === "Player") {
@@ -35,7 +43,7 @@ exports.getAttendance = async (req, res) => {
           p.admission_id AS code,
           p.full_name AS name,
 
-          a.attendance_id AS attendance_id,
+          a.attendance_id,
           a.payroll_date,
 
           l.punch_type,
@@ -52,9 +60,7 @@ exports.getAttendance = async (req, res) => {
         LEFT JOIN tbl_attendance_logs l
           ON l.attendance_id = a.attendance_id
 
-        ORDER BY
-          p.full_name,
-          l.punch_time;
+        ORDER BY p.full_name, l.punch_time;
       `;
     }
 
@@ -65,7 +71,7 @@ exports.getAttendance = async (req, res) => {
           c.coach_code AS code,
           c.full_name AS name,
 
-          a.attendance_id AS attendance_id,
+          a.attendance_id,
           a.payroll_date,
 
           l.punch_type,
@@ -82,9 +88,7 @@ exports.getAttendance = async (req, res) => {
         LEFT JOIN tbl_attendance_logs l
           ON l.attendance_id = a.attendance_id
 
-        ORDER BY
-          c.full_name,
-          l.punch_time;
+        ORDER BY c.full_name, l.punch_time;
       `;
     }
 
@@ -95,7 +99,7 @@ exports.getAttendance = async (req, res) => {
           s.staff_code AS code,
           s.full_name AS name,
 
-          a.attendance_id AS attendance_id,
+          a.attendance_id,
           a.payroll_date,
 
           l.punch_type,
@@ -112,9 +116,7 @@ exports.getAttendance = async (req, res) => {
         LEFT JOIN tbl_attendance_logs l
           ON l.attendance_id = a.attendance_id
 
-        ORDER BY
-          s.full_name,
-          l.punch_time;
+        ORDER BY s.full_name, l.punch_time;
       `;
     }
 
@@ -130,7 +132,7 @@ exports.getAttendance = async (req, res) => {
           code: row.code,
           name: row.name,
           date,
-          batch: "Morning",          // Static value
+          batch: "Morning",
           session: "Morning",
           attendance_status: row.attendance_id
             ? "Present"
@@ -158,8 +160,8 @@ exports.getAttendance = async (req, res) => {
       absent_today: data.filter(
         (item) => item.attendance_status === "Absent"
       ).length,
-      late_today: 0,     // Update when late logic is available
-      on_leave: 0,       // Update when leave module is available
+      late_today: 0,
+      on_leave: 0,
     };
 
     return sendSuccessResponse(
@@ -171,7 +173,6 @@ exports.getAttendance = async (req, res) => {
         attendance: data,
       }
     );
-
   } catch (error) {
     console.error(error);
 
@@ -347,69 +348,15 @@ exports.getMonthlyAttendanceSummary = async (req, res) => {
 
 exports.syncAttendance = async (req, res) => {
   try {
-
-    // Get Access Token
-
-
-    let accessToken = tokenStore.getAccessToken();
-
-    if (
-      !accessToken ||
-      !tokenStore.getTokenExpiry() ||
-      new Date() >= tokenStore.getTokenExpiry()
-    ) {
-      const tokenResponse = await axios.post(
-        process.env.PETPOOJA_TOKEN_URL,
-        {
-          client_id: process.env.PETPOOJA_CLIENT_ID,
-          client_secret: process.env.PETPOOJA_CLIENT_SECRET,
-        }
-      );
-
-      accessToken =
-        tokenResponse.data?.data?.access_token ||
-        tokenResponse.data?.access_token;
-
-      const expiresIn =
-        tokenResponse.data?.data?.access_token_expire_in || 900;
-
-      tokenStore.setAccessToken(accessToken);
-      tokenStore.setTokenExpiry(
-        new Date(Date.now() + (expiresIn - 30) * 1000)
-      );
-    }
-
-    if (!accessToken) {
-      return sendErrorResponse(
-        res,
-        400,
-        "Failed to retrieve access token."
-      );
-    }
-
-    // Today's date
     const today = req.query.date
       ? req.query.date
       : new Date().toLocaleDateString("en-CA", {
         timeZone: "Asia/Kolkata",
       });
-    // Fetch Punches
-    const punchesResponse = await axios({
-      method: "GET",
-      url: process.env.PETPOOJA_PUNCHES_URL,
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      data: {
-        payroll_date: today,
-      },
-    });
 
-    const punchData =
-      punchesResponse.data?.data?.punch_data || [];
+    const syncedCount = await syncAttendanceData(today);
 
-    if (punchData.length === 0) {
+    if (syncedCount === 0) {
       return sendSuccessResponse(
         res,
         200,
@@ -418,17 +365,13 @@ exports.syncAttendance = async (req, res) => {
       );
     }
 
-    const result = await syncPetpoojaAttendance(punchData);
-
     return sendSuccessResponse(
       res,
       200,
       "Attendance synced successfully.",
-      result
+      { synced_records: syncedCount }
     );
-
   } catch (error) {
-
     console.error(error.response?.data || error.message);
 
     return sendErrorResponse(
@@ -550,3 +493,58 @@ const syncPetpoojaAttendance = async (punchData) => {
     client.release();
   }
 };
+
+const syncAttendanceData = async (date) => {
+  let accessToken = getAccessToken();
+
+  if (
+    !accessToken ||
+    !getTokenExpiry() ||
+    new Date() >= getTokenExpiry()
+  ) {
+    const tokenResponse = await axios.post(
+      process.env.PETPOOJA_TOKEN_URL,
+      {
+        client_id: process.env.PETPOOJA_CLIENT_ID,
+        client_secret: process.env.PETPOOJA_CLIENT_SECRET,
+      }
+    );
+
+    accessToken =
+      tokenResponse.data?.data?.access_token ||
+      tokenResponse.data?.access_token;
+
+    const expiresIn =
+      tokenResponse.data?.data?.access_token_expire_in || 900;
+
+    setAccessToken(accessToken);
+    setTokenExpiry(
+      new Date(Date.now() + (expiresIn - 30) * 1000)
+    );
+  }
+
+  if (!accessToken) {
+    throw new Error("Failed to retrieve access token.");
+  }
+
+  const punchesResponse = await axios({
+    method: "GET",
+    url: process.env.PETPOOJA_PUNCHES_URL,
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    data: {
+      payroll_date: date,
+    },
+  });
+
+  const punchData = punchesResponse.data?.data?.punch_data || [];
+
+  if (punchData.length > 0) {
+    await syncPetpoojaAttendance(punchData);
+  }
+
+  return punchData.length;
+};
+
