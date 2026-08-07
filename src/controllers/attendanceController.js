@@ -34,7 +34,7 @@ exports.getAttendance = async (req, res) => {
           p.admission_id AS code,
           p.full_name AS name,
 
-          a.attendance_id,
+          a.attendance_id AS attendance_id,
           a.payroll_date,
 
           l.punch_type,
@@ -64,7 +64,7 @@ exports.getAttendance = async (req, res) => {
           c.coach_code AS code,
           c.full_name AS name,
 
-          a.attendance_id,
+          a.attendance_id AS attendance_id,
           a.payroll_date,
 
           l.punch_type,
@@ -94,7 +94,7 @@ exports.getAttendance = async (req, res) => {
           s.staff_code AS code,
           s.full_name AS name,
 
-          a.attendance_id,
+          a.attendance_id AS attendance_id,
           a.payroll_date,
 
           l.punch_type,
@@ -124,6 +124,7 @@ exports.getAttendance = async (req, res) => {
     for (const row of result.rows) {
       if (!attendanceMap.has(row.id)) {
         attendanceMap.set(row.id, {
+          id: row.attendance_id,
           attendance_id: row.id,
           code: row.code,
           name: row.name,
@@ -166,6 +167,132 @@ exports.getAttendance = async (req, res) => {
   }
 };
 
+exports.getMonthlyAttendanceSummary = async (req, res) => {
+  const now = new Date();
+
+  const year = req.query.year
+    ? Number(req.query.year)
+    : now.getFullYear();
+
+  const { employee_type, employee_id } = req.query;
+
+  try {
+    if (
+      !employee_type ||
+      !["Player", "Coach", "Staff"].includes(employee_type)
+    ) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Employee type must be Player, Coach or Staff."
+      );
+    }
+
+    if (!employee_id) {
+      return sendErrorResponse(res, 400, "Employee ID is required.");
+    }
+
+    let employeeCodeQuery = "";
+
+    if (employee_type === "Player") {
+      employeeCodeQuery = `
+        SELECT admission_id AS employee_code
+        FROM tbl_players
+        WHERE player_id = $1
+      `;
+    }
+
+    if (employee_type === "Coach") {
+      employeeCodeQuery = `
+        SELECT coach_code AS employee_code
+        FROM tbl_coach
+        WHERE coach_id = $1
+      `;
+    }
+
+    if (employee_type === "Staff") {
+      employeeCodeQuery = `
+        SELECT staff_code AS employee_code
+        FROM tbl_staff
+        WHERE staff_id = $1
+      `;
+    }
+
+    const employeeResult = await pool.query(employeeCodeQuery, [employee_id]);
+
+    if (employeeResult.rowCount === 0) {
+      return sendErrorResponse(res, 404, "Employee not found.");
+    }
+
+    const employeeCode = employeeResult.rows[0].employee_code;
+
+    // Show months from January to current month if current year,
+    // otherwise show all 12 months.
+    const currentYear = now.getFullYear();
+    const lastMonth =
+      year === currentYear ? now.getMonth() + 1 : 12;
+
+    const attendanceResult = await pool.query(
+      `
+      WITH months AS (
+          SELECT generate_series(1, $3::int) AS month_number
+      ),
+      attendance AS (
+          SELECT
+              EXTRACT(MONTH FROM payroll_date)::int AS month_number,
+              COUNT(DISTINCT payroll_date) AS working_days,
+              COUNT(DISTINCT payroll_date) AS present
+          FROM tbl_attendance
+          WHERE employee_code = $1
+            AND EXTRACT(YEAR FROM payroll_date) = $2
+          GROUP BY EXTRACT(MONTH FROM payroll_date)
+      )
+
+      SELECT
+          m.month_number,
+          TRIM(
+            TO_CHAR(
+              TO_DATE(m.month_number::text, 'MM'),
+              'Month'
+            )
+          ) AS month,
+          COALESCE(a.working_days, 0) AS working_days,
+          COALESCE(a.present, 0) AS present,
+          0 AS absent,
+          0 AS leave,
+          0 AS late,
+          CASE
+            WHEN COALESCE(a.working_days, 0) = 0 THEN 0
+            ELSE ROUND(
+              (a.present::numeric / a.working_days) * 100,
+              0
+            )
+          END AS attendance_percentage
+      FROM months m
+      LEFT JOIN attendance a
+        ON m.month_number = a.month_number
+      ORDER BY m.month_number;
+      `,
+      [employeeCode, year, lastMonth]
+    );
+
+    return sendSuccessResponse(
+      res,
+      200,
+      "Monthly attendance fetched successfully.",
+      attendanceResult.rows
+    );
+  } catch (error) {
+    console.error(error);
+
+    return sendErrorResponse(
+      res,
+      500,
+      error.message || "Failed to fetch monthly attendance."
+    );
+  }
+};
+
 exports.syncAttendance = async (req, res) => {
   try {
 
@@ -192,10 +319,11 @@ exports.syncAttendance = async (req, res) => {
     }
 
     // Today's date
-    const today = new Date().toLocaleDateString("en-CA", {
-      timeZone: "Asia/Kolkata",
-    });
-
+    const today = req.query.date
+      ? req.query.date
+      : new Date().toLocaleDateString("en-CA", {
+        timeZone: "Asia/Kolkata",
+      });
     // Fetch Punches
     const punchesResponse = await axios({
       method: "GET",
