@@ -1,6 +1,7 @@
 const axios = require("axios");
 const { sendErrorResponse, sendSuccessResponse } = require("../utils/apiResponse");
 const pool = require("../config/dbConfig");
+const tokenStore = require("../utils/petpoojaToken");
 
 exports.getAttendance = async (req, res) => {
   const now = new Date();
@@ -150,12 +151,27 @@ exports.getAttendance = async (req, res) => {
 
     const data = Array.from(attendanceMap.values());
 
+    const statistics = {
+      present_today: data.filter(
+        (item) => item.attendance_status === "Present"
+      ).length,
+      absent_today: data.filter(
+        (item) => item.attendance_status === "Absent"
+      ).length,
+      late_today: 0,     // Update when late logic is available
+      on_leave: 0,       // Update when leave module is available
+    };
+
     return sendSuccessResponse(
       res,
       200,
       "Attendance fetched successfully.",
-      data
+      {
+        statistics,
+        attendance: data,
+      }
     );
+
   } catch (error) {
     console.error(error);
 
@@ -276,12 +292,48 @@ exports.getMonthlyAttendanceSummary = async (req, res) => {
       [employeeCode, year, lastMonth]
     );
 
+    const monthlyData = attendanceResult.rows;
+
+    const statistics = monthlyData.reduce(
+      (acc, month) => {
+        acc.present += Number(month.present);
+        acc.absent += Number(month.absent);
+        acc.late += Number(month.late);
+
+        acc.totalWorkingDays += Number(month.working_days);
+
+        return acc;
+      },
+      {
+        present: 0,
+        absent: 0,
+        late: 0,
+        totalWorkingDays: 0,
+      }
+    );
+
+    statistics.attendance_percentage =
+      statistics.totalWorkingDays > 0
+        ? Math.round(
+          (statistics.present / statistics.totalWorkingDays) * 100
+        )
+        : 0;
+
     return sendSuccessResponse(
       res,
       200,
       "Monthly attendance fetched successfully.",
-      attendanceResult.rows
+      {
+        statistics: {
+          present: statistics.present,
+          absent: statistics.absent,
+          late: statistics.late,
+          attendance_percentage: `${statistics.attendance_percentage}%`,
+        },
+        monthly_attendance: monthlyData,
+      }
     );
+
   } catch (error) {
     console.error(error);
 
@@ -298,17 +350,34 @@ exports.syncAttendance = async (req, res) => {
 
     // Get Access Token
 
-    const tokenResponse = await axios.post(
-      process.env.PETPOOJA_TOKEN_URL,
-      {
-        client_id: process.env.PETPOOJA_CLIENT_ID,
-        client_secret: process.env.PETPOOJA_CLIENT_SECRET,
-      }
-    );
 
-    const accessToken =
-      tokenResponse.data?.data?.access_token ||
-      tokenResponse.data?.access_token;
+    let accessToken = tokenStore.getAccessToken();
+
+    if (
+      !accessToken ||
+      !tokenStore.getTokenExpiry() ||
+      new Date() >= tokenStore.getTokenExpiry()
+    ) {
+      const tokenResponse = await axios.post(
+        process.env.PETPOOJA_TOKEN_URL,
+        {
+          client_id: process.env.PETPOOJA_CLIENT_ID,
+          client_secret: process.env.PETPOOJA_CLIENT_SECRET,
+        }
+      );
+
+      accessToken =
+        tokenResponse.data?.data?.access_token ||
+        tokenResponse.data?.access_token;
+
+      const expiresIn =
+        tokenResponse.data?.data?.access_token_expire_in || 900;
+
+      tokenStore.setAccessToken(accessToken);
+      tokenStore.setTokenExpiry(
+        new Date(Date.now() + (expiresIn - 30) * 1000)
+      );
+    }
 
     if (!accessToken) {
       return sendErrorResponse(
