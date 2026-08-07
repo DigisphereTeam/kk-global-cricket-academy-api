@@ -902,7 +902,7 @@ exports.updatePlayerStatus = async (req, res) => {
       await client.query(
         `
         UPDATE tbl_player_fees
-        SET is_active = 'Inactive'
+        SET is_active = FALSE
         WHERE player_id = $1;
         `,
         [player_id]
@@ -911,7 +911,7 @@ exports.updatePlayerStatus = async (req, res) => {
       await client.query(
         `
         UPDATE tbl_one_on_one_applications
-        SET is_active = 'Inactive'
+        SET is_active = FALSE
         WHERE player_id = $1;
         `,
         [player_id]
