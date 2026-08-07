@@ -26,7 +26,7 @@ playerRouter.get("/search", searchPlayers);
 
 playerRouter.get("/:player_id", getPlayerById);
 
-playerRouter.patch("/:player_id", fileUpload.single("document_url"), validateRequestBody, updatePlayer);
+playerRouter.patch("/:player_id", fileUpload.array("document_urls", 5), validateRequestBody, updatePlayer);
 
 playerRouter.patch("/:player_id/status", validateRequestBody, updatePlayerStatus);
 
