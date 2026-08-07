@@ -1,6 +1,7 @@
 const axios = require("axios");
 const { sendErrorResponse, sendSuccessResponse } = require("../utils/apiResponse");
 const pool = require("../config/dbConfig");
+const tokenStore = require("../utils/petpoojaToken");
 
 exports.getAttendance = async (req, res) => {
   const now = new Date();
@@ -34,7 +35,7 @@ exports.getAttendance = async (req, res) => {
           p.admission_id AS code,
           p.full_name AS name,
 
-          a.attendance_id,
+          a.attendance_id AS attendance_id,
           a.payroll_date,
 
           l.punch_type,
@@ -64,7 +65,7 @@ exports.getAttendance = async (req, res) => {
           c.coach_code AS code,
           c.full_name AS name,
 
-          a.attendance_id,
+          a.attendance_id AS attendance_id,
           a.payroll_date,
 
           l.punch_type,
@@ -94,7 +95,7 @@ exports.getAttendance = async (req, res) => {
           s.staff_code AS code,
           s.full_name AS name,
 
-          a.attendance_id,
+          a.attendance_id AS attendance_id,
           a.payroll_date,
 
           l.punch_type,
@@ -124,6 +125,7 @@ exports.getAttendance = async (req, res) => {
     for (const row of result.rows) {
       if (!attendanceMap.has(row.id)) {
         attendanceMap.set(row.id, {
+          id: row.attendance_id,
           attendance_id: row.id,
           code: row.code,
           name: row.name,
@@ -149,12 +151,27 @@ exports.getAttendance = async (req, res) => {
 
     const data = Array.from(attendanceMap.values());
 
+    const statistics = {
+      present_today: data.filter(
+        (item) => item.attendance_status === "Present"
+      ).length,
+      absent_today: data.filter(
+        (item) => item.attendance_status === "Absent"
+      ).length,
+      late_today: 0,     // Update when late logic is available
+      on_leave: 0,       // Update when leave module is available
+    };
+
     return sendSuccessResponse(
       res,
       200,
       "Attendance fetched successfully.",
-      data
+      {
+        statistics,
+        attendance: data,
+      }
     );
+
   } catch (error) {
     console.error(error);
 
@@ -166,22 +183,201 @@ exports.getAttendance = async (req, res) => {
   }
 };
 
+exports.getMonthlyAttendanceSummary = async (req, res) => {
+  const now = new Date();
+
+  const year = req.query.year
+    ? Number(req.query.year)
+    : now.getFullYear();
+
+  const { employee_type, employee_id } = req.query;
+
+  try {
+    if (
+      !employee_type ||
+      !["Player", "Coach", "Staff"].includes(employee_type)
+    ) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Employee type must be Player, Coach or Staff."
+      );
+    }
+
+    if (!employee_id) {
+      return sendErrorResponse(res, 400, "Employee ID is required.");
+    }
+
+    let employeeCodeQuery = "";
+
+    if (employee_type === "Player") {
+      employeeCodeQuery = `
+        SELECT admission_id AS employee_code
+        FROM tbl_players
+        WHERE player_id = $1
+      `;
+    }
+
+    if (employee_type === "Coach") {
+      employeeCodeQuery = `
+        SELECT coach_code AS employee_code
+        FROM tbl_coach
+        WHERE coach_id = $1
+      `;
+    }
+
+    if (employee_type === "Staff") {
+      employeeCodeQuery = `
+        SELECT staff_code AS employee_code
+        FROM tbl_staff
+        WHERE staff_id = $1
+      `;
+    }
+
+    const employeeResult = await pool.query(employeeCodeQuery, [employee_id]);
+
+    if (employeeResult.rowCount === 0) {
+      return sendErrorResponse(res, 404, "Employee not found.");
+    }
+
+    const employeeCode = employeeResult.rows[0].employee_code;
+
+    // Show months from January to current month if current year,
+    // otherwise show all 12 months.
+    const currentYear = now.getFullYear();
+    const lastMonth =
+      year === currentYear ? now.getMonth() + 1 : 12;
+
+    const attendanceResult = await pool.query(
+      `
+      WITH months AS (
+          SELECT generate_series(1, $3::int) AS month_number
+      ),
+      attendance AS (
+          SELECT
+              EXTRACT(MONTH FROM payroll_date)::int AS month_number,
+              COUNT(DISTINCT payroll_date) AS working_days,
+              COUNT(DISTINCT payroll_date) AS present
+          FROM tbl_attendance
+          WHERE employee_code = $1
+            AND EXTRACT(YEAR FROM payroll_date) = $2
+          GROUP BY EXTRACT(MONTH FROM payroll_date)
+      )
+
+      SELECT
+          m.month_number,
+          TRIM(
+            TO_CHAR(
+              TO_DATE(m.month_number::text, 'MM'),
+              'Month'
+            )
+          ) AS month,
+          COALESCE(a.working_days, 0) AS working_days,
+          COALESCE(a.present, 0) AS present,
+          0 AS absent,
+          0 AS leave,
+          0 AS late,
+          CASE
+            WHEN COALESCE(a.working_days, 0) = 0 THEN 0
+            ELSE ROUND(
+              (a.present::numeric / a.working_days) * 100,
+              0
+            )
+          END AS attendance_percentage
+      FROM months m
+      LEFT JOIN attendance a
+        ON m.month_number = a.month_number
+      ORDER BY m.month_number;
+      `,
+      [employeeCode, year, lastMonth]
+    );
+
+    const monthlyData = attendanceResult.rows;
+
+    const statistics = monthlyData.reduce(
+      (acc, month) => {
+        acc.present += Number(month.present);
+        acc.absent += Number(month.absent);
+        acc.late += Number(month.late);
+
+        acc.totalWorkingDays += Number(month.working_days);
+
+        return acc;
+      },
+      {
+        present: 0,
+        absent: 0,
+        late: 0,
+        totalWorkingDays: 0,
+      }
+    );
+
+    statistics.attendance_percentage =
+      statistics.totalWorkingDays > 0
+        ? Math.round(
+          (statistics.present / statistics.totalWorkingDays) * 100
+        )
+        : 0;
+
+    return sendSuccessResponse(
+      res,
+      200,
+      "Monthly attendance fetched successfully.",
+      {
+        statistics: {
+          present: statistics.present,
+          absent: statistics.absent,
+          late: statistics.late,
+          attendance_percentage: `${statistics.attendance_percentage}%`,
+        },
+        monthly_attendance: monthlyData,
+      }
+    );
+
+  } catch (error) {
+    console.error(error);
+
+    return sendErrorResponse(
+      res,
+      500,
+      error.message || "Failed to fetch monthly attendance."
+    );
+  }
+};
+
 exports.syncAttendance = async (req, res) => {
   try {
 
     // Get Access Token
 
-    const tokenResponse = await axios.post(
-      process.env.PETPOOJA_TOKEN_URL,
-      {
-        client_id: process.env.PETPOOJA_CLIENT_ID,
-        client_secret: process.env.PETPOOJA_CLIENT_SECRET,
-      }
-    );
 
-    const accessToken =
-      tokenResponse.data?.data?.access_token ||
-      tokenResponse.data?.access_token;
+    let accessToken = tokenStore.getAccessToken();
+
+    if (
+      !accessToken ||
+      !tokenStore.getTokenExpiry() ||
+      new Date() >= tokenStore.getTokenExpiry()
+    ) {
+      const tokenResponse = await axios.post(
+        process.env.PETPOOJA_TOKEN_URL,
+        {
+          client_id: process.env.PETPOOJA_CLIENT_ID,
+          client_secret: process.env.PETPOOJA_CLIENT_SECRET,
+        }
+      );
+
+      accessToken =
+        tokenResponse.data?.data?.access_token ||
+        tokenResponse.data?.access_token;
+
+      const expiresIn =
+        tokenResponse.data?.data?.access_token_expire_in || 900;
+
+      tokenStore.setAccessToken(accessToken);
+      tokenStore.setTokenExpiry(
+        new Date(Date.now() + (expiresIn - 30) * 1000)
+      );
+    }
 
     if (!accessToken) {
       return sendErrorResponse(
@@ -192,10 +388,11 @@ exports.syncAttendance = async (req, res) => {
     }
 
     // Today's date
-    const today = new Date().toLocaleDateString("en-CA", {
-      timeZone: "Asia/Kolkata",
-    });
-
+    const today = req.query.date
+      ? req.query.date
+      : new Date().toLocaleDateString("en-CA", {
+        timeZone: "Asia/Kolkata",
+      });
     // Fetch Punches
     const punchesResponse = await axios({
       method: "GET",
