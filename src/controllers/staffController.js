@@ -389,6 +389,98 @@ exports.updateStaff = async (req, res) => {
 };
 
 
+exports.updateStaffStatus = async (req, res) => {
+  const { staff_id } = req.params;
+  const { is_active } = req.body;
+
+  // Validate Staff ID
+  if (!staff_id) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Staff ID is required."
+    );
+  }
+
+  if (!Number.isInteger(Number(staff_id)) || Number(staff_id) <= 0) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Invalid Staff ID."
+    );
+  }
+
+  // Validate is_active
+  if (is_active === undefined) {
+    return sendErrorResponse(
+      res,
+      400,
+      "is_active is required."
+    );
+  }
+
+  if (typeof is_active !== "boolean") {
+    return sendErrorResponse(
+      res,
+      400,
+      "is_active must be a boolean value."
+    );
+  }
+
+  try {
+    // Check staff exists
+    const staff = await pool.query(
+      `
+      SELECT staff_id, is_active
+      FROM tbl_staff
+      WHERE staff_id = $1;
+      `,
+      [staff_id]
+    );
+
+    if (staff.rowCount === 0) {
+      return sendErrorResponse(
+        res,
+        404,
+        "Staff not found."
+      );
+    }
+
+    // Check if status is already the same
+    if (staff.rows[0].is_active === is_active) {
+      return sendErrorResponse(
+        res,
+        409,
+        `Staff is already ${is_active ? "active" : "inactive"}.`
+      );
+    }
+
+    const result = await pool.query(
+      `
+      UPDATE tbl_staff
+      SET is_active = $1
+      WHERE staff_id = $2
+      RETURNING *;
+      `,
+      [is_active, staff_id]
+    );
+
+    return sendSuccessResponse(
+      res,
+      200,
+      `Staff ${is_active ? "activated" : "deactivated"} successfully.`,
+      result.rows[0]
+    );
+  } catch (error) {
+    return sendErrorResponse(
+      res,
+      500,
+      error.message || "Internal Server Error"
+    );
+  }
+};
+
+
 
 exports.deleteStaff = async (req, res) => {
   const { id } = req.params;

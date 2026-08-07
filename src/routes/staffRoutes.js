@@ -2,7 +2,7 @@ const express = require("express");
 
 const staffRouter = express.Router();
 
-const { addStaff, getAllStaff, searchStaff, getStaffById, updateStaff, deleteStaff } = require("../controllers/staffController");
+const { addStaff, getAllStaff, searchStaff, getStaffById, updateStaff, deleteStaff,updateStaffStatus } = require("../controllers/staffController");
 const validateRequestBody = require("../middlewares/validateRequestBody");
 const verifyToken = require("../middlewares/verifyToken");
 const { checkRole } = require("../middlewares/checkRole");
@@ -19,6 +19,8 @@ staffRouter.get("/:id", getStaffById);
 
 staffRouter.patch("/:id", validateRequestBody, updateStaff);
 
-staffRouter.delete("/:id", checkRole("ADMIN"), deleteStaff);
+staffRouter.patch("/:staff_id/status", validateRequestBody, updateStaffStatus);
+
+// staffRouter.delete("/:id", checkRole("ADMIN"), deleteStaff);
 
 module.exports = staffRouter;

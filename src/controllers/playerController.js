@@ -756,6 +756,166 @@ exports.updatePlayer = async (req, res) => {
   }
 };
 
+
+exports.updatePlayerStatus = async (req, res) => {
+  const { player_id } = req.params;
+  const { is_active } = req.body;
+
+  // Validate Player ID
+  if (!player_id) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Player ID is required."
+    );
+  }
+
+  if (!Number.isInteger(Number(player_id)) || Number(player_id) <= 0) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Invalid Player ID."
+    );
+  }
+
+  // Validate is_active
+  if (is_active === undefined) {
+    return sendErrorResponse(
+      res,
+      400,
+      "is_active is required."
+    );
+  }
+
+  if (typeof is_active !== "boolean") {
+    return sendErrorResponse(
+      res,
+      400,
+      "is_active must be a boolean value."
+    );
+  }
+
+  let client;
+
+  try {
+    client = await pool.connect();
+
+    await client.query("BEGIN");
+
+    // Check player exists
+    const player = await client.query(
+      `
+      SELECT player_id, full_name, is_active
+      FROM tbl_players
+      WHERE player_id = $1;
+      `,
+      [player_id]
+    );
+
+    if (player.rowCount === 0) {
+      await client.query("ROLLBACK");
+
+      return sendErrorResponse(
+        res,
+        404,
+        "Player not found."
+      );
+    }
+
+    // Check if status is already same
+    if (player.rows[0].is_active === is_active) {
+      await client.query("ROLLBACK");
+
+      return sendErrorResponse(
+        res,
+        409,
+        `Player is already ${is_active ? "active" : "inactive"}.`
+      );
+    }
+
+    // Update status
+    const result = await client.query(
+      `
+      UPDATE tbl_players
+      SET is_active = $1
+      WHERE player_id = $2
+      RETURNING *;
+      `,
+      [is_active, player_id]
+    );
+
+    // Logged-in user details
+    const reqUserDetails = await client.query(
+      `
+      SELECT full_name
+      FROM tbl_users
+      WHERE user_id = $1
+      `,
+      [req.user.user_id]
+    );
+
+    const reqUser = reqUserDetails.rows[0];
+
+    if (!reqUser) {
+      await client.query("ROLLBACK");
+
+      return sendErrorResponse(
+        res,
+        404,
+        "Logged-in user not found."
+      );
+    }
+
+    // Notification log
+    await client.query(
+      `
+      INSERT INTO tbl_notification_logs
+      (
+        module_name,
+        action,
+        description,
+        performed_by
+      )
+      VALUES
+      ($1, $2, $3, $4)
+      `,
+      [
+        "Player",
+        is_active ? "Activated" : "Deactivated",
+        `Player ${result.rows[0].full_name} was ${
+          is_active ? "activated" : "deactivated"
+        }.`,
+        reqUser.full_name,
+      ]
+    );
+
+    await client.query("COMMIT");
+
+    return sendSuccessResponse(
+      res,
+      200,
+      `Player ${
+        is_active ? "activated" : "deactivated"
+      } successfully.`,
+      result.rows[0]
+    );
+  } catch (error) {
+    if (client) {
+      await client.query("ROLLBACK");
+    }
+
+    return sendErrorResponse(
+      res,
+      500,
+      error.message || "Internal Server Error"
+    );
+  } finally {
+    if (client) {
+      client.release();
+    }
+  }
+};
+
 exports.deletePlayer = async (req, res) => {
   const { player_id } = req.params;
 
