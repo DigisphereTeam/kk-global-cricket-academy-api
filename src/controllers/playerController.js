@@ -462,21 +462,43 @@ exports.getPlayerById = async (req, res) => {
         p.*,
         a.attendance_id,
         a.payroll_date,
+
         CASE
           WHEN a.attendance_id IS NOT NULL THEN 'Present'
           ELSE 'Absent'
-        END AS attendance_status
+        END AS attendance_status,
+
+        COALESCE(
+          json_agg(
+            json_build_object(
+              'document_id', d.document_id,
+              'document_url', d.document_url
+            )
+            ORDER BY d.document_id
+          ) FILTER (WHERE d.document_id IS NOT NULL),
+          '[]'
+        ) AS documents
+
       FROM tbl_players p
 
       LEFT JOIN tbl_attendance a
         ON a.employee_code = p.admission_id
         AND a.payroll_date = $2
 
+      LEFT JOIN tbl_player_documents d
+        ON d.player_id = p.player_id
+
       WHERE p.player_id = $1
         AND p.is_active = TRUE
+
+      GROUP BY
+        p.player_id,
+        a.attendance_id,
+        a.payroll_date
       `,
       [player_id, today]
     );
+
     if (result.rowCount === 0) {
       return sendErrorResponse(
         res,
