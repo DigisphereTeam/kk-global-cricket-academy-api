@@ -886,7 +886,7 @@ exports.updatePlayerStatus = async (req, res) => {
       );
     }
 
-    // Update status
+    // Update player status
     const result = await client.query(
       `
       UPDATE tbl_players
@@ -896,6 +896,27 @@ exports.updatePlayerStatus = async (req, res) => {
       `,
       [is_active, player_id]
     );
+
+    // If player is deactivated, deactivate fees and one-on-one applications
+    if (!is_active) {
+      await client.query(
+        `
+        UPDATE tbl_player_fees
+        SET status = 'Inactive'
+        WHERE player_id = $1;
+        `,
+        [player_id]
+      );
+
+      await client.query(
+        `
+        UPDATE tbl_one_on_one_applications
+        SET status = 'Inactive'
+        WHERE player_id = $1;
+        `,
+        [player_id]
+      );
+    };
 
     // Logged-in user details
     const reqUserDetails = await client.query(
