@@ -176,7 +176,6 @@ exports.addStaff = async (req, res) => {
 };
 
 exports.getAllStaff = async (req, res) => {
-
   try {
     const [result, statistics] = await Promise.all([
       pool.query(`
@@ -188,7 +187,8 @@ exports.getAllStaff = async (req, res) => {
       pool.query(`
         SELECT
           COUNT(*) AS total_staff,
-          COUNT(*) AS active_staff,
+          COUNT(*) FILTER (WHERE is_active = TRUE) AS active_staff,
+          COUNT(*) FILTER (WHERE is_active = FALSE) AS inactive_staff,
           COUNT(DISTINCT department) AS total_departments,
           0 AS leave_staff
         FROM tbl_staff
@@ -203,6 +203,7 @@ exports.getAllStaff = async (req, res) => {
         statistics: {
           total_staff: Number(statistics.rows[0].total_staff),
           active_staff: Number(statistics.rows[0].active_staff),
+          inactive_staff: Number(statistics.rows[0].inactive_staff),
           total_departments: Number(statistics.rows[0].total_departments),
           leave_staff: Number(statistics.rows[0].leave_staff),
         },
@@ -226,7 +227,7 @@ exports.getStaffById = async (req, res) => {
     return sendErrorResponse(
       res,
       400,
-      "Staff ID is required"
+      "Staff ID is required."
     );
   }
 
@@ -234,7 +235,7 @@ exports.getStaffById = async (req, res) => {
     return sendErrorResponse(
       res,
       400,
-      "Invalid Staff ID"
+      "Invalid Staff ID."
     );
   }
 
@@ -244,6 +245,7 @@ exports.getStaffById = async (req, res) => {
       SELECT *
       FROM tbl_staff
       WHERE staff_id = $1
+        AND is_active = TRUE
       `,
       [id]
     );
@@ -252,7 +254,7 @@ exports.getStaffById = async (req, res) => {
       return sendErrorResponse(
         res,
         404,
-        "Staff not found."
+        "Active staff not found."
       );
     }
 
@@ -279,7 +281,7 @@ exports.updateStaff = async (req, res) => {
     return sendErrorResponse(
       res,
       400,
-      "Staff ID is required"
+      "Staff ID is required."
     );
   }
 
@@ -287,17 +289,18 @@ exports.updateStaff = async (req, res) => {
     return sendErrorResponse(
       res,
       400,
-      "Invalid Staff ID"
+      "Invalid Staff ID."
     );
   }
 
   try {
-    // Check staff exists
+    // Check active staff exists
     const existingStaff = await pool.query(
       `
       SELECT *
       FROM tbl_staff
       WHERE staff_id = $1
+        AND is_active = TRUE
       `,
       [id]
     );
@@ -306,11 +309,11 @@ exports.updateStaff = async (req, res) => {
       return sendErrorResponse(
         res,
         404,
-        "Staff not found."
+        "Active staff not found."
       );
     }
 
-    // Check duplicate phone number
+    // Duplicate phone number validation
     if (req.body.phone_number) {
       const phoneExists = await pool.query(
         `
@@ -327,7 +330,7 @@ exports.updateStaff = async (req, res) => {
         return sendErrorResponse(
           res,
           409,
-          "Phone number already exists"
+          "Phone number already exists."
         );
       }
     }
@@ -357,7 +360,7 @@ exports.updateStaff = async (req, res) => {
       return sendErrorResponse(
         res,
         400,
-        "No fields provided for update"
+        "No fields provided for update."
       );
     }
 
@@ -368,7 +371,7 @@ exports.updateStaff = async (req, res) => {
       UPDATE tbl_staff
       SET ${updates.join(", ")}
       WHERE staff_id = $${index}
-      RETURNING *
+      RETURNING *;
       `,
       values
     );

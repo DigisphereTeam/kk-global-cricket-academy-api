@@ -352,7 +352,9 @@ exports.getAllPlayers = async (req, res) => {
       // Player Statistics
       pool.query(`
         SELECT
-          COUNT(*) AS total_players
+          COUNT(*) AS total_players,
+          COUNT(*) FILTER (WHERE is_active = TRUE) AS active_players,
+          COUNT(*) FILTER (WHERE is_active = FALSE) AS inactive_players
         FROM tbl_players
       `),
     ]);
@@ -363,18 +365,14 @@ exports.getAllPlayers = async (req, res) => {
       "Players fetched successfully.",
       {
         statistics: {
-          total_players: Number(
-            statistics.rows[0].total_players
-          ),
-          active_players: 0,
-          inactive_players: 0,
+          total_players: Number(statistics.rows[0].total_players),
+          active_players: Number(statistics.rows[0].active_players),
+          inactive_players: Number(statistics.rows[0].inactive_players),
           pending_fees: 0,
         },
-
         players: players.rows,
       }
     );
-
   } catch (error) {
     return sendErrorResponse(
       res,
@@ -388,10 +386,19 @@ exports.getPlayerById = async (req, res) => {
   const { player_id } = req.params;
 
   if (!player_id) {
-    return sendErrorResponse(res, 400, "Player ID is required");
+    return sendErrorResponse(
+      res,
+      400,
+      "Player ID is required."
+    );
   }
-  if (!player_id || isNaN(player_id)) {
-    return sendErrorResponse(res, 400, "Invalid player ID");
+
+  if (isNaN(player_id)) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Invalid Player ID."
+    );
   }
 
   try {
@@ -399,26 +406,31 @@ exports.getPlayerById = async (req, res) => {
       `
       SELECT *
       FROM tbl_players
-      WHERE player_id=$1
+      WHERE player_id = $1
+        AND is_active = TRUE
       `,
-      [player_id],
+      [player_id]
     );
 
     if (result.rowCount === 0) {
-      return sendErrorResponse(res, 404, "Player not found.");
+      return sendErrorResponse(
+        res,
+        404,
+        "Active player not found."
+      );
     }
 
     return sendSuccessResponse(
       res,
       200,
-      "Player fetched successfully.",
-      result.rows[0],
+      "Player retrieved successfully.",
+      result.rows[0]
     );
   } catch (error) {
     return sendErrorResponse(
       res,
       500,
-      error.message || "Internal Server Error",
+      error.message || "Internal Server Error"
     );
   }
 };
@@ -438,7 +450,7 @@ exports.updatePlayer = async (req, res) => {
     return sendErrorResponse(
       res,
       400,
-      "Invalid player ID."
+      "Invalid Player ID."
     );
   }
 
@@ -526,11 +538,13 @@ exports.updatePlayer = async (req, res) => {
 
     await client.query("BEGIN");
 
+    // Check player exists and is active
     const existingPlayer = await client.query(
       `
       SELECT *
       FROM tbl_players
       WHERE player_id = $1
+        AND is_active = TRUE
       `,
       [player_id]
     );
@@ -541,10 +555,11 @@ exports.updatePlayer = async (req, res) => {
       return sendErrorResponse(
         res,
         404,
-        "Player not found."
+        "Active player not found."
       );
     }
 
+    // Check duplicate phone number
     if (req.body.phone_number) {
       const phoneExists = await client.query(
         `
@@ -571,6 +586,7 @@ exports.updatePlayer = async (req, res) => {
       }
     }
 
+    // Check duplicate email
     if (req.body.email) {
       const emailExists = await client.query(
         `
@@ -595,7 +611,9 @@ exports.updatePlayer = async (req, res) => {
           "Email already exists."
         );
       }
-    } const allowedFields = [
+    }
+
+    const allowedFields = [
       "full_name",
       "gender",
       "age",
@@ -652,7 +670,7 @@ exports.updatePlayer = async (req, res) => {
       }
     }
 
-    // Update document if a new file is uploaded
+    // Update document if uploaded
     if (req.file) {
       updates.push(`document_url = $${index}`);
       values.push(`/uploads/${req.file.filename}`);
@@ -674,8 +692,7 @@ exports.updatePlayer = async (req, res) => {
     const result = await client.query(
       `
       UPDATE tbl_players
-      SET
-        ${updates.join(", ")}
+      SET ${updates.join(", ")}
       WHERE player_id = $${index}
       RETURNING *;
       `,
@@ -688,14 +705,17 @@ exports.updatePlayer = async (req, res) => {
       return sendErrorResponse(
         res,
         404,
-        "Player not found."
+        "Active player not found."
       );
-    } const reqUserDetails = await client.query(
+    }
+
+    // Logged-in user
+    const reqUserDetails = await client.query(
       `
       SELECT full_name
       FROM tbl_users
       WHERE user_id = $1
-        `,
+      `,
       [req.user.user_id]
     );
 
@@ -711,17 +731,18 @@ exports.updatePlayer = async (req, res) => {
       );
     }
 
+    // Notification Log
     await client.query(
       `
       INSERT INTO tbl_notification_logs
-        (
-          module_name,
-          action,
-          description,
-          performed_by
-        )
+      (
+        module_name,
+        action,
+        description,
+        performed_by
+      )
       VALUES
-        ($1, $2, $3, $4)
+      ($1, $2, $3, $4)
       `,
       [
         "Player",
@@ -739,6 +760,7 @@ exports.updatePlayer = async (req, res) => {
       "Player updated successfully.",
       result.rows[0]
     );
+
   } catch (error) {
     if (client) {
       await client.query("ROLLBACK");
@@ -749,6 +771,7 @@ exports.updatePlayer = async (req, res) => {
       500,
       error.message || "Internal Server Error"
     );
+
   } finally {
     if (client) {
       client.release();
