@@ -341,15 +341,30 @@ exports.createPlayerAdmission = async (req, res) => {
 
 exports.getAllPlayers = async (req, res) => {
   try {
-    const [players, statistics] = await Promise.all([
-      // Player List
-      pool.query(`
-        SELECT *
-        FROM tbl_players
-        ORDER BY player_id DESC
-      `),
+    const today = new Date().toLocaleDateString("en-CA", {
+      timeZone: "Asia/Kolkata",
+    });
 
-      // Player Statistics
+    const [players, statistics] = await Promise.all([
+      pool.query(
+        `
+        SELECT
+          p.*,
+          CASE
+            WHEN a.attendance_id IS NOT NULL THEN 'Present'
+            ELSE 'Absent'
+          END AS attendance_status
+        FROM tbl_players p
+
+        LEFT JOIN tbl_attendance a
+          ON a.employee_code = p.admission_id
+          AND a.payroll_date = $1
+
+        ORDER BY p.player_id DESC
+        `,
+        [today]
+      ),
+
       pool.query(`
         SELECT
           COUNT(*) AS total_players,
@@ -402,16 +417,31 @@ exports.getPlayerById = async (req, res) => {
   }
 
   try {
+    const today = new Date().toLocaleDateString("en-CA", {
+      timeZone: "Asia/Kolkata",
+    });
+
     const result = await pool.query(
       `
-      SELECT *
-      FROM tbl_players
-      WHERE player_id = $1
-        AND is_active = TRUE
-      `,
-      [player_id]
-    );
+      SELECT
+        p.*,
+        a.attendance_id,
+        a.payroll_date,
+        CASE
+          WHEN a.attendance_id IS NOT NULL THEN 'Present'
+          ELSE 'Absent'
+        END AS attendance_status
+      FROM tbl_players p
 
+      LEFT JOIN tbl_attendance a
+        ON a.employee_code = p.admission_id
+        AND a.payroll_date = $2
+
+      WHERE p.player_id = $1
+        AND p.is_active = TRUE
+      `,
+      [player_id, today]
+    );
     if (result.rowCount === 0) {
       return sendErrorResponse(
         res,
@@ -905,8 +935,7 @@ exports.updatePlayerStatus = async (req, res) => {
       [
         "Player",
         is_active ? "Activated" : "Deactivated",
-        `Player ${result.rows[0].full_name} was ${
-          is_active ? "activated" : "deactivated"
+        `Player ${result.rows[0].full_name} was ${is_active ? "activated" : "deactivated"
         }.`,
         reqUser.full_name,
       ]
@@ -917,8 +946,7 @@ exports.updatePlayerStatus = async (req, res) => {
     return sendSuccessResponse(
       res,
       200,
-      `Player ${
-        is_active ? "activated" : "deactivated"
+      `Player ${is_active ? "activated" : "deactivated"
       } successfully.`,
       result.rows[0]
     );

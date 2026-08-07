@@ -177,12 +177,31 @@ exports.addStaff = async (req, res) => {
 
 exports.getAllStaff = async (req, res) => {
   try {
+    const today = new Date().toLocaleDateString("en-CA", {
+      timeZone: "Asia/Kolkata",
+    });
+
     const [result, statistics] = await Promise.all([
-      pool.query(`
-        SELECT *
-        FROM tbl_staff
-        ORDER BY staff_id DESC
-      `),
+      pool.query(
+        `
+        SELECT
+          s.*,
+          a.attendance_id,
+          a.payroll_date,
+          CASE
+            WHEN a.attendance_id IS NOT NULL THEN 'Present'
+            ELSE 'Absent'
+          END AS attendance_status
+        FROM tbl_staff s
+
+        LEFT JOIN tbl_attendance a
+          ON a.employee_code = s.staff_code
+          AND a.payroll_date = $1
+
+        ORDER BY s.staff_id DESC
+        `,
+        [today]
+      ),
 
       pool.query(`
         SELECT
@@ -240,14 +259,30 @@ exports.getStaffById = async (req, res) => {
   }
 
   try {
+    const today = new Date().toLocaleDateString("en-CA", {
+      timeZone: "Asia/Kolkata",
+    });
+
     const result = await pool.query(
       `
-      SELECT *
-      FROM tbl_staff
-      WHERE staff_id = $1
-        AND is_active = TRUE
+      SELECT
+        s.*,
+        a.attendance_id,
+        a.payroll_date,
+        CASE
+          WHEN a.attendance_id IS NOT NULL THEN 'Present'
+          ELSE 'Absent'
+        END AS attendance_status
+      FROM tbl_staff s
+
+      LEFT JOIN tbl_attendance a
+        ON a.employee_code = s.staff_code
+        AND a.payroll_date = $2
+
+      WHERE s.staff_id = $1
+        AND s.is_active = TRUE
       `,
-      [id]
+      [id, today]
     );
 
     if (result.rowCount === 0) {
