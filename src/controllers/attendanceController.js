@@ -124,9 +124,12 @@ exports.getAttendance = async (req, res) => {
     for (const row of result.rows) {
       if (!attendanceMap.has(row.id)) {
         attendanceMap.set(row.id, {
-          id: row.id,
+          attendance_id: row.id,
           code: row.code,
           name: row.name,
+          date,
+          batch: "Morning",          // Static value
+          session: "Morning",
           attendance_status: row.attendance_id
             ? "Present"
             : "Absent",
