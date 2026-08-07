@@ -205,49 +205,43 @@ exports.createPlayerAdmission = async (req, res) => {
       );
     }
 
-    const document_url = req.file
-      ? `/uploads/${req.file.filename}`
-      : null;
-
     const result = await client.query(
       `
-  INSERT INTO tbl_players (
-    admission_id,
-    full_name,
-    gender,
-    age,
-    date_of_birth,
-    admission_date,
-    phone_number,
-    email,
-    address,
-    school,
-    admission_fee,
-    payment_type,
-    remarks,
-    father_name,
-    father_phone,
-    father_occupation,
-    mother_name,
-    mother_phone,
-    contact_name,
-    relation,
-    contact_phone,
-    blood_group,
-    allergies,
-    height,
-    weight,
-    document_url,
-    id_increment
-  )
-  VALUES (
-    $1,$2,$3,$4,$5,COALESCE($6::date, CURRENT_DATE),$7,$8,$9,$10,
-    $11,$12,$13,$14,$15,$16,$17,$18,
-    $19,$20,$21,$22,$23,$24,$25,$26,
-    $27
-  )
-  RETURNING *;
-  `,
+          INSERT INTO tbl_players (
+            admission_id,
+            full_name,
+            gender,
+            age,
+            date_of_birth,
+            admission_date,
+            phone_number,
+            email,
+            address,
+            school,
+            admission_fee,
+            payment_type,
+            remarks,
+            father_name,
+            father_phone,
+            father_occupation,
+            mother_name,
+            mother_phone,
+            contact_name,
+            relation,
+            contact_phone,
+            blood_group,
+            allergies,
+            height,
+            weight,
+            id_increment
+          )
+          VALUES (
+            $1,$2,$3,$4,$5,COALESCE($6::date, CURRENT_DATE),$7,$8,$9,$10,
+            $11,$12,$13,$14,$15,$16,$17,$18,
+            $19,$20,$21,$22,$23,$24,$25,$26
+          )
+          RETURNING *;
+          `,
       [
         admission_id,
         full_name.trim(),
@@ -274,10 +268,31 @@ exports.createPlayerAdmission = async (req, res) => {
         allergies?.trim() || null,
         height != null ? Number(height) : null,
         weight != null ? Number(weight) : null,
-        document_url,
         nextNumber,
       ]
     );
+
+    const playerId = result.rows[0].player_id;
+    if (req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        await client.query(
+          `
+          INSERT INTO tbl_player_documents
+          (
+            player_id,
+            document_url
+          )
+          VALUES
+          ($1, $2)
+          `,
+          [
+            playerId,
+            `/uploads/${file.filename}`,
+          ]
+        );
+      }
+    }
+
     const reqUserDetails = await client.query(
       `
       SELECT full_name
@@ -350,17 +365,37 @@ exports.getAllPlayers = async (req, res) => {
         `
         SELECT
           p.*,
+
           CASE
             WHEN a.attendance_id IS NOT NULL THEN 'Present'
             ELSE 'Absent'
-          END AS attendance_status
+          END AS attendance_status,
+
+          COALESCE(
+            json_agg(
+              json_build_object(
+                'document_id', d.document_id,
+                'document_url', d.document_url
+              )
+              ORDER BY d.document_id
+            ) FILTER (WHERE d.document_id IS NOT NULL),
+            '[]'
+          ) AS documents
+
         FROM tbl_players p
 
         LEFT JOIN tbl_attendance a
           ON a.employee_code = p.admission_id
           AND a.payroll_date = $1
 
-        ORDER BY p.player_id DESC
+        LEFT JOIN tbl_player_documents d
+          ON d.player_id = p.player_id
+
+        GROUP BY
+          p.player_id,
+          a.attendance_id
+
+        ORDER BY p.player_id DESC;
         `,
         [today]
       ),
@@ -816,28 +851,16 @@ exports.updatePlayerStatus = async (req, res) => {
 
   // Validate Player ID
   if (!player_id) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Player ID is required."
-    );
+    return sendErrorResponse(res, 400, "Player ID is required.");
   }
 
   if (!Number.isInteger(Number(player_id)) || Number(player_id) <= 0) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Invalid Player ID."
-    );
+    return sendErrorResponse(res, 400, "Invalid Player ID.");
   }
 
   // Validate is_active
   if (is_active === undefined) {
-    return sendErrorResponse(
-      res,
-      400,
-      "is_active is required."
-    );
+    return sendErrorResponse(res, 400, "is_active is required.");
   }
 
   if (typeof is_active !== "boolean") {
@@ -868,11 +891,7 @@ exports.updatePlayerStatus = async (req, res) => {
     if (player.rowCount === 0) {
       await client.query("ROLLBACK");
 
-      return sendErrorResponse(
-        res,
-        404,
-        "Player not found."
-      );
+      return sendErrorResponse(res, 404, "Player not found.");
     }
 
     // Check if status is already same
@@ -897,8 +916,8 @@ exports.updatePlayerStatus = async (req, res) => {
       [is_active, player_id]
     );
 
-    // If player is deactivated, deactivate fees and one-on-one applications
     if (!is_active) {
+      // Deactivate player fees
       await client.query(
         `
         UPDATE tbl_player_fees
@@ -908,6 +927,7 @@ exports.updatePlayerStatus = async (req, res) => {
         [player_id]
       );
 
+      // Deactivate one-on-one applications
       await client.query(
         `
         UPDATE tbl_one_on_one_applications
@@ -916,14 +936,24 @@ exports.updatePlayerStatus = async (req, res) => {
         `,
         [player_id]
       );
-    };
+    } else {
+      // Activate only player fees
+      await client.query(
+        `
+        UPDATE tbl_player_fees
+        SET is_active = TRUE
+        WHERE player_id = $1;
+        `,
+        [player_id]
+      );
+    }
 
     // Logged-in user details
     const reqUserDetails = await client.query(
       `
       SELECT full_name
       FROM tbl_users
-      WHERE user_id = $1
+      WHERE user_id = $1;
       `,
       [req.user.user_id]
     );
@@ -951,7 +981,7 @@ exports.updatePlayerStatus = async (req, res) => {
         performed_by
       )
       VALUES
-      ($1, $2, $3, $4)
+      ($1, $2, $3, $4);
       `,
       [
         "Player",
@@ -967,8 +997,7 @@ exports.updatePlayerStatus = async (req, res) => {
     return sendSuccessResponse(
       res,
       200,
-      `Player ${is_active ? "activated" : "deactivated"
-      } successfully.`,
+      `Player ${is_active ? "activated" : "deactivated"} successfully.`,
       result.rows[0]
     );
   } catch (error) {

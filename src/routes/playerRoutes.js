@@ -5,14 +5,19 @@ const playerRouter = express.Router();
 const validateRequestBody = require("../middlewares/validateRequestBody");
 const verifyToken = require("../middlewares/verifyToken");
 const { checkRole } = require("../middlewares/checkRole");
-const { createPlayerAdmission, getAllPlayers, searchPlayers, getPlayerById, updatePlayer, deletePlayer, getPlayersAndCoaches, generateDues,updatePlayerStatus } = require("../controllers/playerController");
+const { createPlayerAdmission, getAllPlayers, searchPlayers, getPlayerById, updatePlayer, deletePlayer, getPlayersAndCoaches, generateDues, updatePlayerStatus } = require("../controllers/playerController");
 const fileUpload = require("../middlewares/uploadMiddleware");
 const { generateMonthlyDues } = require("../jobs/generateMonthlyDues");
 
 playerRouter.use(verifyToken);
 
-playerRouter.post("/", fileUpload.single("document_url"), validateRequestBody, checkRole("PRIMARY"), createPlayerAdmission);
-
+playerRouter.post(
+  "/",
+  fileUpload.array("document_urls", 5), // Max 5 files
+  validateRequestBody,
+  checkRole("PRIMARY"),
+  createPlayerAdmission
+);
 playerRouter.get("/", getAllPlayers);
 
 playerRouter.get("/players-coaches", getPlayersAndCoaches);
