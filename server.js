@@ -60,11 +60,13 @@ app.use(globalErrorHandler)
 
 startAttendanceCron();
 
-app.listen(5000, async () => {
+const port = process.env.PORT;
+
+app.listen(port, async () => {
   try {
     await pool.query("SELECT 1");
     console.log("DB connected successfully");
-    console.log(`Server is running on http://localhost:${5000}`);
+    console.log(`Server is running on http://localhost:${port}`);
   } catch (error) {
     console.error("Database connection failed:", error.message);
     process.exit(1);
