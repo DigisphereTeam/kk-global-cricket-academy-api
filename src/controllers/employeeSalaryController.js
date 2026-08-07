@@ -801,14 +801,15 @@ exports.getEligibleEmployees = async (req, res) => {
           staff_id AS employee_id,
           full_name AS employee_name
         FROM tbl_staff s
-        WHERE NOT EXISTS (
-          SELECT 1
-          FROM tbl_employee_salary es
-          WHERE es.staff_id = s.staff_id
-            AND es.salary_month = $1
-            AND es.salary_year = $2
-            AND es.payment_status = 'Paid'
-        )
+        WHERE s.is_active = TRUE
+          AND NOT EXISTS (
+            SELECT 1
+            FROM tbl_employee_salary es
+            WHERE es.staff_id = s.staff_id
+              AND es.salary_month = $1
+              AND es.salary_year = $2
+              AND es.payment_status = 'Paid'
+          )
         ORDER BY full_name;
       `;
     }

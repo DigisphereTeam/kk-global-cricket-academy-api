@@ -4,233 +4,300 @@ const { sendSuccessResponse, sendErrorResponse } = require("../utils/apiResponse
 exports.getDashboardStatistics = async (req, res) => {
   try {
 
-    const [
-      players,
-      activePlayers,
-      trainers,
-      pendingFees,
-      groundBookings,
-      approvals,
-    ] = await Promise.all([
+    const statisticsQuery = `
+      SELECT
 
-      // Total Players
-      pool.query(`
-        SELECT COUNT(*) AS total_players
-        FROM tbl_players
-      `),
+        (SELECT COUNT(*)
+         FROM tbl_players) AS total_players,
 
 
-      // Active Players
-      pool.query(`
-        SELECT COUNT(*) AS active_players
-        FROM tbl_players
-        WHERE status = 'Active'
-      `),
+        (SELECT COUNT(*)
+         FROM tbl_players
+         WHERE status = 'Active') AS active_players,
 
 
-      // Total Trainers
-      pool.query(`
-        SELECT COUNT(*) AS total_trainers
-        FROM tbl_coach
-      `),
+        (SELECT COUNT(*)
+         FROM tbl_coach) AS total_trainers,
 
 
-      // Pending Fees Amount This Month
-      pool.query(`
-        SELECT
-          COALESCE(player_fee.pending_amount, 0) +
-          COALESCE(one_on_one.pending_amount, 0) AS pending_fees
+        (SELECT COUNT(*)
+         FROM tbl_ground_booking) AS ground_bookings,
 
-        FROM
+
+        (SELECT COUNT(*)
+         FROM tbl_ground_booking
+         WHERE status = 'Pending') AS approvals;
+    `;
+
+
+
+    const revenueQuery = `
+
+      SELECT
+
+
+      (
 
         (
-          -- Regular Player Pending Fees
           SELECT
-            COALESCE(SUM(latest_fee.amount), 0) AS pending_amount
+            COALESCE(SUM(latest_fee.amount),0)
 
           FROM tbl_players p
 
-          LEFT JOIN LATERAL (
+          LEFT JOIN LATERAL
+          (
             SELECT
-              pf.amount
+              amount
+
             FROM tbl_player_fees pf
+
             WHERE pf.player_id = p.player_id
-            ORDER BY
-              pf.created_at DESC
+
+            ORDER BY pf.created_at DESC
+
             LIMIT 1
+
           ) latest_fee ON TRUE
 
-          WHERE NOT EXISTS (
+
+          WHERE NOT EXISTS
+          (
 
             SELECT 1
+
             FROM tbl_player_fees pf2
 
             WHERE pf2.player_id = p.player_id
-              AND pf2.status = 'Paid'
-              AND pf2.payment_date >= DATE_TRUNC('month', CURRENT_DATE)
-              AND pf2.payment_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+
+            AND pf2.status = 'Paid'
+
+            AND pf2.payment_date >= DATE_TRUNC('month',CURRENT_DATE)
+
+            AND pf2.payment_date <
+            DATE_TRUNC('month',CURRENT_DATE)
+            + INTERVAL '1 month'
 
           )
 
-        ) player_fee,
+        )
+
+
+        +
+
 
         (
-          -- One-On-One Pending Fees
+
           SELECT
-            COALESCE(SUM(latest_application.fee_amount), 0) AS pending_amount
+            COALESCE(SUM(latest_application.fee_amount),0)
 
-          FROM (
 
-            SELECT DISTINCT ON (player_id)
+          FROM
+          (
+
+            SELECT DISTINCT ON(player_id)
 
               player_id,
               fee_amount,
               application_date
 
+
             FROM tbl_one_on_one_applications
 
+
             WHERE is_active = TRUE
+
 
             ORDER BY
               player_id,
               application_date DESC,
               application_id DESC
 
+
           ) latest_application
 
-          WHERE DATE_TRUNC('month', latest_application.application_date)
-                < DATE_TRUNC('month', CURRENT_DATE)
 
-        ) one_on_one;
-      `),
+          WHERE DATE_TRUNC(
+            'month',
+            latest_application.application_date
+          )
+          <
+          DATE_TRUNC('month',CURRENT_DATE)
+
+        )
 
 
-      // Total Ground Bookings
-      pool.query(`
-        SELECT COUNT(*) AS ground_bookings
+      ) AS pending_fees,
+
+
+
+      (
+        SELECT
+          COALESCE(SUM(amount),0)
+
+        FROM tbl_player_fees
+
+        WHERE status = 'Paid'
+
+        AND DATE_TRUNC('month',payment_date)
+        =
+        DATE_TRUNC('month',CURRENT_DATE)
+
+      ) AS regular_revenue,
+
+
+
+      (
+        SELECT
+          COALESCE(SUM(fee_amount),0)
+
+        FROM tbl_one_on_one_applications
+
+        WHERE DATE_TRUNC('month',application_date)
+        =
+        DATE_TRUNC('month',CURRENT_DATE)
+
+      ) AS one_on_one_revenue,
+
+
+
+      (
+        SELECT
+          COALESCE(SUM(total_amount),0)
+
         FROM tbl_ground_booking
-      `),
+
+        WHERE status='Confirmed'
+
+        AND DATE_TRUNC('month',booking_date)
+        =
+        DATE_TRUNC('month',CURRENT_DATE)
+
+      ) AS ground_revenue,
 
 
-      // Pending Approvals
-      pool.query(`
-        SELECT COUNT(*) AS approvals
-        FROM tbl_ground_booking
-        WHERE status = 'Pending'
-      `),
 
-    ]);
+      (
+        SELECT
+          COALESCE(SUM(net_salary),0)
+
+        FROM tbl_employee_salary
+
+        WHERE DATE_TRUNC('month',payment_date)
+        =
+        DATE_TRUNC('month',CURRENT_DATE)
+
+      ) AS salary_expense,
+
+
+
+      (
+        SELECT
+          COALESCE(SUM(amount),0)
+
+        FROM tbl_expenditure
+
+        WHERE DATE_TRUNC('month',expenditure_date)
+        =
+        DATE_TRUNC('month',CURRENT_DATE)
+
+      ) AS total_expenditure,
+
+
+
+      (
+        SELECT
+          COALESCE(SUM(amount),0)
+
+        FROM
+        (
+
+          SELECT
+            amount,
+            payment_date AS revenue_date
+
+          FROM tbl_player_fees
+
+          WHERE status='Paid'
+
+
+
+          UNION ALL
+
+
+
+          SELECT
+            fee_amount,
+            application_date
+
+          FROM tbl_one_on_one_applications
+
+
+
+          UNION ALL
+
+
+
+          SELECT
+            total_amount,
+            booking_date
+
+          FROM tbl_ground_booking
+
+          WHERE status='Confirmed'
+
+
+
+          UNION ALL
+
+
+
+          SELECT
+            -net_salary,
+            payment_date
+
+          FROM tbl_employee_salary
+
+
+
+          UNION ALL
+
+
+
+          SELECT
+            -amount,
+            expenditure_date
+
+          FROM tbl_expenditure
+
+
+        ) revenue
+
+
+        WHERE DATE_TRUNC('month',revenue_date)
+        =
+        DATE_TRUNC('month',CURRENT_DATE)
+
+
+      ) AS monthly_revenue;
+
+    `;
+
 
 
     const [
-      monthlyRevenue,
-      regularRevenue,
-      oneOnOneRevenue,
-      groundRevenue,
-      salaryExpense,
-      totalExpenditure,
+      statisticsResult,
+      revenueResult
     ] = await Promise.all([
-
-      // Net Monthly Revenue
-      pool.query(`
-          SELECT
-            COALESCE(SUM(amount), 0) AS monthly_revenue
-          FROM (
-
-            -- Regular Player Fee Revenue
-            SELECT
-              amount,
-              payment_date AS revenue_date
-            FROM tbl_player_fees
-            WHERE status = 'Paid'
-
-            UNION ALL
-
-            -- One-On-One Revenue
-            SELECT
-              fee_amount AS amount,
-              application_date AS revenue_date
-            FROM tbl_one_on_one_applications
-
-            UNION ALL
-
-            -- Ground Booking Revenue
-            SELECT
-              total_amount AS amount,
-              booking_date AS revenue_date
-            FROM tbl_ground_booking
-            WHERE status = 'Confirmed'
-
-            UNION ALL
-
-            -- Salary Expense
-            SELECT
-              -net_salary AS amount,
-              payment_date AS revenue_date
-            FROM tbl_employee_salary
-
-            UNION ALL
-
-            -- Other Expenditure
-            SELECT
-              -amount AS amount,
-              expenditure_date AS revenue_date
-            FROM tbl_expenditure
-
-          ) revenue
-
-          WHERE DATE_TRUNC('month', revenue_date) =
-                DATE_TRUNC('month', CURRENT_DATE)
-        `),
-
-      // Current Month Regular Revenue (Player Fees)
-      pool.query(`
-        SELECT
-          COALESCE(SUM(amount), 0) AS regular_revenue
-        FROM tbl_player_fees
-        WHERE status = 'Paid'
-          AND DATE_TRUNC('month', payment_date) =
-              DATE_TRUNC('month', CURRENT_DATE)
-      `),
-
-      // Current Month One-On-One Revenue
-      pool.query(`
-        SELECT
-          COALESCE(SUM(fee_amount), 0) AS one_on_one_revenue
-        FROM tbl_one_on_one_applications
-        WHERE DATE_TRUNC('month', application_date) =
-              DATE_TRUNC('month', CURRENT_DATE)
-      `),
-
-      // Current Month Ground Revenue
-      pool.query(`
-        SELECT
-          COALESCE(SUM(total_amount), 0) AS ground_revenue
-        FROM tbl_ground_booking
-        WHERE status = 'Confirmed'
-          AND DATE_TRUNC('month', booking_date) =
-              DATE_TRUNC('month', CURRENT_DATE)
-      `),
-
-      // Current Month Salary Expense
-      pool.query(`
-          SELECT
-            COALESCE(SUM(net_salary), 0) AS salary_expense
-          FROM tbl_employee_salary
-          WHERE DATE_TRUNC('month', payment_date) =
-                DATE_TRUNC('month', CURRENT_DATE)
-        `),
-
-      // Current Month Other Expenditure
-      pool.query(`
-        SELECT
-          COALESCE(SUM(amount), 0) AS total_expenditure
-        FROM tbl_expenditure
-        WHERE DATE_TRUNC('month', expenditure_date) =
-              DATE_TRUNC('month', CURRENT_DATE)
-      `),
-
+      pool.query(statisticsQuery),
+      pool.query(revenueQuery)
     ]);
+
+
+
+    const stats = statisticsResult.rows[0];
+    const revenue = revenueResult.rows[0];
+
+
 
     return sendSuccessResponse(
       res,
@@ -239,51 +306,51 @@ exports.getDashboardStatistics = async (req, res) => {
       {
 
         total_players:
-          Number(players.rows[0].total_players),
+          Number(stats.total_players),
 
 
         active_players:
-          Number(activePlayers.rows[0].active_players),
+          Number(stats.active_players),
 
 
         trainers:
-          Number(trainers.rows[0].total_trainers),
+          Number(stats.total_trainers),
 
 
         pending_fees:
-          Number(pendingFees.rows[0].pending_fees),
+          Number(revenue.pending_fees),
 
 
         ground_bookings:
-          Number(groundBookings.rows[0].ground_bookings),
+          Number(stats.ground_bookings),
 
 
         approvals:
-          Number(approvals.rows[0].approvals),
+          Number(stats.approvals),
 
 
         monthly_revenue:
-          Number(monthlyRevenue.rows[0].monthly_revenue),
+          Number(revenue.monthly_revenue),
 
 
         regular_revenue:
-          Number(regularRevenue.rows[0].regular_revenue),
+          Number(revenue.regular_revenue),
 
 
         one_on_one_revenue:
-          Number(oneOnOneRevenue.rows[0].one_on_one_revenue),
+          Number(revenue.one_on_one_revenue),
 
 
         ground_revenue:
-          Number(groundRevenue.rows[0].ground_revenue),
+          Number(revenue.ground_revenue),
 
 
         salary_expense:
-          Number(salaryExpense.rows[0].salary_expense),
+          Number(revenue.salary_expense),
 
 
         total_expenditure:
-          Number(totalExpenditure.rows[0].total_expenditure)
+          Number(revenue.total_expenditure)
 
       }
     );
@@ -291,7 +358,8 @@ exports.getDashboardStatistics = async (req, res) => {
 
   } catch (error) {
 
-    console.error(error);
+    console.error("Dashboard Error:", error);
+
 
     return sendErrorResponse(
       res,
@@ -566,6 +634,10 @@ exports.getDashboardRevenueAndActivities = async (req, res) => {
           performed_by,
           created_at
         FROM tbl_notification_logs
+        WHERE NOT (
+          module_name = 'Ground Booking'
+          AND action IN ('Confirmed', 'Cancelled')
+        )
         ORDER BY created_at DESC
         LIMIT 4;
       `)

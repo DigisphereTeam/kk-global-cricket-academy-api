@@ -204,25 +204,40 @@ exports.addCoach = async (req, res) => {
 
 exports.getAllCoaches = async (req, res) => {
   try {
+    const today = new Date().toLocaleDateString("en-CA", {
+      timeZone: "Asia/Kolkata",
+    });
+
     const [result, statistics] = await Promise.all([
       pool.query(
         `
-        SELECT *
-        FROM tbl_coach
-        ORDER BY coach_id DESC
-        `
+        SELECT
+          c.*,
+          a.attendance_id,
+          a.payroll_date,
+          CASE
+            WHEN a.attendance_id IS NOT NULL THEN 'Present'
+            ELSE 'Absent'
+          END AS attendance_status
+        FROM tbl_coach c
+
+        LEFT JOIN tbl_attendance a
+          ON a.employee_code = c.coach_code
+          AND a.payroll_date = $1
+
+        ORDER BY c.coach_id DESC
+        `,
+        [today]
       ),
 
-      pool.query(
-        `
-      SELECT
-        COUNT(*) AS total_trainers,
-        COUNT(*) FILTER (WHERE is_active = TRUE) AS active_trainers,
-        COUNT(*) FILTER (WHERE is_active = FALSE) AS inactive_trainers,
-        COALESCE(ROUND(AVG(experience::NUMERIC), 1), 0) AS average_experience
-      FROM tbl_coach
-      `
-      ),
+      pool.query(`
+        SELECT
+          COUNT(*) AS total_trainers,
+          COUNT(*) FILTER (WHERE is_active = TRUE) AS active_trainers,
+          COUNT(*) FILTER (WHERE is_active = FALSE) AS inactive_trainers,
+          COALESCE(ROUND(AVG(experience::NUMERIC), 1), 0) AS average_experience
+        FROM tbl_coach
+      `),
     ]);
 
     return sendSuccessResponse(
@@ -269,14 +284,30 @@ exports.getCoachById = async (req, res) => {
   }
 
   try {
+    const today = new Date().toLocaleDateString("en-CA", {
+      timeZone: "Asia/Kolkata",
+    });
+
     const result = await pool.query(
       `
-      SELECT *
-      FROM tbl_coach
-      WHERE coach_id = $1
-        AND is_active = TRUE
+      SELECT
+        c.*,
+        a.attendance_id,
+        a.payroll_date,
+        CASE
+          WHEN a.attendance_id IS NOT NULL THEN 'Present'
+          ELSE 'Absent'
+        END AS attendance_status
+      FROM tbl_coach c
+
+      LEFT JOIN tbl_attendance a
+        ON a.employee_code = c.coach_code
+        AND a.payroll_date = $2
+
+      WHERE c.coach_id = $1
+        AND c.is_active = TRUE
       `,
-      [id]
+      [id, today]
     );
 
     if (result.rowCount === 0) {
