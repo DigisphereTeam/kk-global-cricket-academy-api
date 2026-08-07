@@ -129,6 +129,7 @@ exports.getAttendance = async (req, res) => {
         attendanceMap.set(row.id, {
           id: row.attendance_id,
           attendance_id: row.id,
+          employee_type,
           code: row.code,
           name: row.name,
           date,
@@ -136,17 +137,7 @@ exports.getAttendance = async (req, res) => {
           session: "Morning",
           attendance_status: row.attendance_id
             ? "Present"
-            : "Absent",
-          punch_details: [],
-        });
-      }
-
-      if (row.punch_time) {
-        attendanceMap.get(row.id).punch_details.push({
-          punch_type: row.punch_type,
-          punch_time: row.punch_time,
-          branch_name: row.branch_name,
-          device_id: row.device_id,
+            : "Absent"
         });
       }
     }
@@ -380,6 +371,187 @@ exports.syncAttendance = async (req, res) => {
       error.response?.data?.message ||
       error.message ||
       "Failed to sync attendance."
+    );
+  }
+};
+
+exports.getAttendanceTimeline = async (req, res) => {
+  const now = new Date();
+
+  const month = req.query.month
+    ? Number(req.query.month)
+    : now.getMonth() + 1;
+
+  const year = req.query.year
+    ? Number(req.query.year)
+    : now.getFullYear();
+
+  const { employee_type, employee_id } = req.query;
+
+  try {
+    if (
+      !employee_type ||
+      !["Player", "Coach", "Staff"].includes(employee_type)
+    ) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Employee type must be Player, Coach or Staff."
+      );
+    }
+
+    if (!employee_id) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Employee ID is required."
+      );
+    }
+
+    let employeeCodeQuery = "";
+
+    if (employee_type === "Player") {
+      employeeCodeQuery = `
+        SELECT admission_id AS employee_code
+        FROM tbl_players
+        WHERE player_id = $1
+      `;
+    }
+
+    if (employee_type === "Coach") {
+      employeeCodeQuery = `
+        SELECT coach_code AS employee_code
+        FROM tbl_coach
+        WHERE coach_id = $1
+      `;
+    }
+
+    if (employee_type === "Staff") {
+      employeeCodeQuery = `
+        SELECT staff_code AS employee_code
+        FROM tbl_staff
+        WHERE staff_id = $1
+      `;
+    }
+
+    const employee = await pool.query(employeeCodeQuery, [employee_id]);
+
+    if (employee.rowCount === 0) {
+      return sendErrorResponse(
+        res,
+        404,
+        "Employee not found."
+      );
+    }
+
+    const employeeCode = employee.rows[0].employee_code;
+
+    const result = await pool.query(
+      `
+      WITH dates AS (
+        SELECT generate_series(
+          make_date($3::int, $2::int, 1),
+          (
+            make_date($3::int, $2::int, 1)
+            + interval '1 month'
+            - interval '1 day'
+          )::date,
+          interval '1 day'
+        )::date AS attendance_date
+      )
+
+      SELECT
+        d.attendance_date AS payroll_date,
+        a.attendance_id,
+
+        MIN(
+          CASE
+            WHEN LOWER(l.punch_type) = 'in'
+            THEN l.punch_time
+          END
+        ) AS time_in,
+
+        MAX(
+          CASE
+            WHEN LOWER(l.punch_type) = 'out'
+            THEN l.punch_time
+          END
+        ) AS time_out
+
+      FROM dates d
+
+      LEFT JOIN tbl_attendance a
+        ON a.employee_code = $1
+       AND a.payroll_date = d.attendance_date
+
+      LEFT JOIN tbl_attendance_logs l
+        ON l.attendance_id = a.attendance_id
+
+      GROUP BY
+        d.attendance_date,
+        a.attendance_id
+
+      ORDER BY
+        d.attendance_date;
+      `,
+      [employeeCode, month, year]
+    );
+
+    const today = new Date().toLocaleDateString("en-CA", {
+      timeZone: "Asia/Kolkata",
+    });
+
+    const attendance = result.rows.map((row) => {
+      let status;
+      let remarks;
+      let marked_by = "-";
+
+      if (row.attendance_id) {
+        status = "Present";
+        remarks = "On Time";
+        marked_by = "Coach";
+
+        if (row.time_in && row.time_in > "09:00:00") {
+          status = "Late";
+          remarks = "Late Entry";
+        }
+      } else if (row.payroll_date > today) {
+        status = "Upcoming";
+        remarks = "Attendance Not Due";
+      } else if (row.payroll_date === today) {
+        status = "Pending";
+        remarks = "Attendance Yet to be Marked";
+      } else {
+        status = "Absent";
+        remarks = "Not Attended";
+      }
+
+      return {
+        attendance_id: row.attendance_id,
+        date: row.payroll_date,
+        session: "Morning",
+        status,
+        time_in: row.time_in || "-",
+        time_out: row.time_out || "-",
+        marked_by,
+        remarks,
+      };
+    });
+
+    return sendSuccessResponse(
+      res,
+      200,
+      "Attendance timeline fetched successfully.",
+      attendance
+    );
+
+  } catch (error) {
+    console.error(error);
+
+    return sendErrorResponse(
+      res,
+      500,
+      error.message || "Failed to fetch attendance timeline."
     );
   }
 };
