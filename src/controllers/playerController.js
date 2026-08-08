@@ -33,104 +33,117 @@ exports.createPlayerAdmission = async (req, res) => {
     weight,
   } = req.body;
 
+if (
+  !full_name?.trim() ||
+  !gender ||
+  age == null ||
+  !phone_number?.trim() ||
+  !address?.trim() ||
+  admission_fee === undefined ||
+  admission_fee === null ||
+  admission_fee === "" ||
+  !payment_type?.trim()
+) {
+  return sendErrorResponse(
+    res,
+    400,
+    "All required fields must be provided."
+  );
+}
 
-  if (
-    !full_name ||
-    !gender ||
-    age == null ||
-    !phone_number ||
-    !address ||
-    admission_fee == null ||
-    !payment_type
-  ) {
-    return sendErrorResponse(
-      res,
-      400,
-      "All required fields must be provided."
-    );
-  }
 
-  if (!/^[6-9]\d{9}$/.test(phone_number)) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Invalid player phone number."
-    );
-  }
+if (!/^[6-9]\d{9}$/.test(phone_number.trim())) {
+  return sendErrorResponse(
+    res,
+    400,
+    "Invalid player phone number."
+  );
+}
 
-  if (father_phone && !/^[6-9]\d{9}$/.test(father_phone)) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Invalid father phone number."
-    );
-  }
+if (father_phone && !/^[6-9]\d{9}$/.test(father_phone.trim())) {
+  return sendErrorResponse(
+    res,
+    400,
+    "Invalid father phone number."
+  );
+}
 
-  if (mother_phone && !/^[6-9]\d{9}$/.test(mother_phone)) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Invalid mother phone number."
-    );
-  }
+if (mother_phone && !/^[6-9]\d{9}$/.test(mother_phone.trim())) {
+  return sendErrorResponse(
+    res,
+    400,
+    "Invalid mother phone number."
+  );
+}
 
-  if (contact_phone && !/^[6-9]\d{9}$/.test(contact_phone)) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Invalid emergency contact phone number."
-    );
-  }
+if (contact_phone && !/^[6-9]\d{9}$/.test(contact_phone.trim())) {
+  return sendErrorResponse(
+    res,
+    400,
+    "Invalid emergency contact phone number."
+  );
+}
 
-  if (email && !/^\S+@\S+\.\S+$/.test(email)) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Invalid email address."
-    );
-  }
 
-  if (Number(age) <= 0) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Age must be greater than 0."
-    );
-  }
+if (
+  email &&
+  !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
+) {
+  return sendErrorResponse(
+    res,
+    400,
+    "Invalid email address."
+  );
+}
 
-  if (Number(admission_fee) < 0) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Admission fee cannot be negative."
-    );
-  }
 
-  if (
-    weight !== undefined &&
-    weight !== null &&
-    weight.toString().trim() !== "" &&
-    Number(weight) <= 0
-  ) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Weight must be greater than 0."
-    );
-  }
+if (isNaN(Number(age)) || Number(age) <= 0) {
+  return sendErrorResponse(
+    res,
+    400,
+    "Age must be greater than 0."
+  );
+}
 
-  if (
-    height !== undefined &&
-    height !== null &&
-    height.toString().trim() !== "" &&
-    Number(height) <= 0
-  ) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Height must be greater than 0."
-    );
-  }
+
+if (
+  isNaN(Number(admission_fee)) ||
+  Number(admission_fee) <= 0
+) {
+  return sendErrorResponse(
+    res,
+    400,
+    "Admission fee required or must be greater than 0."
+  );
+}
+
+
+if (
+  weight !== undefined &&
+  weight !== null &&
+  weight.toString().trim() !== "" &&
+  (isNaN(Number(weight)) || Number(weight) <= 0)
+) {
+  return sendErrorResponse(
+    res,
+    400,
+    "Weight must be greater than 0."
+  );
+}
+
+
+if (
+  height !== undefined &&
+  height !== null &&
+  height.toString().trim() !== "" &&
+  (isNaN(Number(height)) || Number(height) <= 0)
+) {
+  return sendErrorResponse(
+    res,
+    400,
+    "Height must be greater than 0."
+  );
+}
 
   let client;
 

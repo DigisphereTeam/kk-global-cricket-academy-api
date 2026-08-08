@@ -3,286 +3,185 @@ const { sendSuccessResponse, sendErrorResponse } = require("../utils/apiResponse
 
 exports.getDashboardStatistics = async (req, res) => {
   try {
-
     const statisticsQuery = `
       SELECT
 
-        (SELECT COUNT(*)
-         FROM tbl_players) AS total_players,
+        (
+          SELECT COUNT(*)
+          FROM tbl_players
+        ) AS total_players,
 
+        (
+          SELECT COUNT(*)
+          FROM tbl_players
+          WHERE is_active = true
+        ) AS active_players,
 
-        (SELECT COUNT(*)
-         FROM tbl_players
-         WHERE status = 'Active') AS active_players,
+        (
+          SELECT COUNT(*)
+          FROM tbl_coach
+        ) AS total_trainers,
 
+        (
+          SELECT COUNT(*)
+          FROM tbl_ground_booking
+        ) AS ground_bookings,
 
-        (SELECT COUNT(*)
-         FROM tbl_coach) AS total_trainers,
-
-
-        (SELECT COUNT(*)
-         FROM tbl_ground_booking) AS ground_bookings,
-
-
-        (SELECT COUNT(*)
-         FROM tbl_ground_booking
-         WHERE status = 'Pending') AS approvals;
+        (
+          SELECT COUNT(*)
+          FROM tbl_ground_booking
+          WHERE status = 'Pending'
+        ) AS approvals;
     `;
 
-
-
     const revenueQuery = `
-
       SELECT
 
 
-      (
-
         (
-          SELECT
-            COALESCE(SUM(latest_fee.amount),0)
-
-          FROM tbl_players p
-
-          LEFT JOIN LATERAL
           (
-            SELECT
-              amount
+            SELECT COUNT(*)
+            FROM tbl_players p
+            WHERE p.is_active = TRUE
 
-            FROM tbl_player_fees pf
+              /* Only after the 4th */
+              AND CURRENT_DATE >
+                  DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '3 day'
 
-            WHERE pf.player_id = p.player_id
-
-            ORDER BY pf.created_at DESC
-
-            LIMIT 1
-
-          ) latest_fee ON TRUE
-
-
-          WHERE NOT EXISTS
-          (
-
-            SELECT 1
-
-            FROM tbl_player_fees pf2
-
-            WHERE pf2.player_id = p.player_id
-
-            AND pf2.status = 'Paid'
-
-            AND pf2.payment_date >= DATE_TRUNC('month',CURRENT_DATE)
-
-            AND pf2.payment_date <
-            DATE_TRUNC('month',CURRENT_DATE)
-            + INTERVAL '1 month'
-
+              /* Player has NOT paid this month */
+              AND NOT EXISTS (
+                SELECT 1
+                FROM tbl_player_fees pf
+                WHERE pf.player_id = p.player_id
+                  AND pf.status = 'Paid'
+                  AND pf.payment_date >=
+                      DATE_TRUNC('month', CURRENT_DATE)
+                  AND pf.payment_date <
+                      DATE_TRUNC('month', CURRENT_DATE)
+                      + INTERVAL '1 month'
+              )
           )
 
-        )
+          +
 
+          (
+            SELECT COUNT(*)
+            FROM tbl_one_on_one_applications o
+            WHERE o.is_active = TRUE
 
-        +
+              /* Only after the 4th */
+              AND CURRENT_DATE >
+                  DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '3 day'
+
+              /* Player has NOT paid this month */
+              AND NOT EXISTS (
+                SELECT 1
+                FROM tbl_player_fees pf
+                WHERE pf.player_id = o.player_id
+                  AND pf.status = 'Paid'
+                  AND pf.payment_date >=
+                      DATE_TRUNC('month', CURRENT_DATE)
+                  AND pf.payment_date <
+                      DATE_TRUNC('month', CURRENT_DATE)
+                      + INTERVAL '1 month'
+              )
+          )
+
+        ) AS pending_fees,
 
 
         (
+          SELECT COALESCE(SUM(amount), 0)
+          FROM tbl_player_fees
+          WHERE status = 'Paid'
+            AND DATE_TRUNC('month', payment_date)
+                = DATE_TRUNC('month', CURRENT_DATE)
+        ) AS regular_revenue,
 
-          SELECT
-            COALESCE(SUM(latest_application.fee_amount),0)
+
+        (
+          SELECT COALESCE(SUM(fee_amount), 0)
+          FROM tbl_one_on_one_applications
+          WHERE DATE_TRUNC('month', application_date)
+                = DATE_TRUNC('month', CURRENT_DATE)
+        ) AS one_on_one_revenue,
 
 
-          FROM
-          (
 
-            SELECT DISTINCT ON(player_id)
+        (
+          SELECT COALESCE(SUM(total_amount), 0)
+          FROM tbl_ground_booking
+          WHERE status = 'Confirmed'
+            AND DATE_TRUNC('month', booking_date)
+                = DATE_TRUNC('month', CURRENT_DATE)
+        ) AS ground_revenue,
 
-              player_id,
+
+
+        (
+          SELECT COALESCE(SUM(net_salary), 0)
+          FROM tbl_employee_salary
+          WHERE DATE_TRUNC('month', payment_date)
+                = DATE_TRUNC('month', CURRENT_DATE)
+        ) AS salary_expense,
+
+
+
+        (
+          SELECT COALESCE(SUM(amount), 0)
+          FROM tbl_expenditure
+          WHERE DATE_TRUNC('month', expenditure_date)
+                = DATE_TRUNC('month', CURRENT_DATE)
+        ) AS total_expenditure,
+
+
+        (
+          SELECT COALESCE(SUM(amount), 0)
+          FROM (
+
+            SELECT
+              amount,
+              payment_date AS revenue_date
+            FROM tbl_player_fees
+            WHERE status = 'Paid'
+
+            UNION ALL
+
+            SELECT
               fee_amount,
               application_date
-
-
             FROM tbl_one_on_one_applications
 
+            UNION ALL
 
-            WHERE is_active = TRUE
+            SELECT
+              total_amount,
+              booking_date
+            FROM tbl_ground_booking
+            WHERE status = 'Confirmed'
 
+            UNION ALL
 
-            ORDER BY
-              player_id,
-              application_date DESC,
-              application_id DESC
+            SELECT
+              -net_salary,
+              payment_date
+            FROM tbl_employee_salary
 
+            UNION ALL
 
-          ) latest_application
+            SELECT
+              -amount,
+              expenditure_date
+            FROM tbl_expenditure
 
+          ) revenue
 
-          WHERE DATE_TRUNC(
-            'month',
-            latest_application.application_date
-          )
-          <
-          DATE_TRUNC('month',CURRENT_DATE)
+          WHERE DATE_TRUNC('month', revenue_date)
+                = DATE_TRUNC('month', CURRENT_DATE)
 
-        )
-
-
-      ) AS pending_fees,
-
-
-
-      (
-        SELECT
-          COALESCE(SUM(amount),0)
-
-        FROM tbl_player_fees
-
-        WHERE status = 'Paid'
-
-        AND DATE_TRUNC('month',payment_date)
-        =
-        DATE_TRUNC('month',CURRENT_DATE)
-
-      ) AS regular_revenue,
-
-
-
-      (
-        SELECT
-          COALESCE(SUM(fee_amount),0)
-
-        FROM tbl_one_on_one_applications
-
-        WHERE DATE_TRUNC('month',application_date)
-        =
-        DATE_TRUNC('month',CURRENT_DATE)
-
-      ) AS one_on_one_revenue,
-
-
-
-      (
-        SELECT
-          COALESCE(SUM(total_amount),0)
-
-        FROM tbl_ground_booking
-
-        WHERE status='Confirmed'
-
-        AND DATE_TRUNC('month',booking_date)
-        =
-        DATE_TRUNC('month',CURRENT_DATE)
-
-      ) AS ground_revenue,
-
-
-
-      (
-        SELECT
-          COALESCE(SUM(net_salary),0)
-
-        FROM tbl_employee_salary
-
-        WHERE DATE_TRUNC('month',payment_date)
-        =
-        DATE_TRUNC('month',CURRENT_DATE)
-
-      ) AS salary_expense,
-
-
-
-      (
-        SELECT
-          COALESCE(SUM(amount),0)
-
-        FROM tbl_expenditure
-
-        WHERE DATE_TRUNC('month',expenditure_date)
-        =
-        DATE_TRUNC('month',CURRENT_DATE)
-
-      ) AS total_expenditure,
-
-
-
-      (
-        SELECT
-          COALESCE(SUM(amount),0)
-
-        FROM
-        (
-
-          SELECT
-            amount,
-            payment_date AS revenue_date
-
-          FROM tbl_player_fees
-
-          WHERE status='Paid'
-
-
-
-          UNION ALL
-
-
-
-          SELECT
-            fee_amount,
-            application_date
-
-          FROM tbl_one_on_one_applications
-
-
-
-          UNION ALL
-
-
-
-          SELECT
-            total_amount,
-            booking_date
-
-          FROM tbl_ground_booking
-
-          WHERE status='Confirmed'
-
-
-
-          UNION ALL
-
-
-
-          SELECT
-            -net_salary,
-            payment_date
-
-          FROM tbl_employee_salary
-
-
-
-          UNION ALL
-
-
-
-          SELECT
-            -amount,
-            expenditure_date
-
-          FROM tbl_expenditure
-
-
-        ) revenue
-
-
-        WHERE DATE_TRUNC('month',revenue_date)
-        =
-        DATE_TRUNC('month',CURRENT_DATE)
-
-
-      ) AS monthly_revenue;
+        ) AS monthly_revenue;
 
     `;
-
-
 
     const [
       statisticsResult,
@@ -292,81 +191,61 @@ exports.getDashboardStatistics = async (req, res) => {
       pool.query(revenueQuery)
     ]);
 
-
-
     const stats = statisticsResult.rows[0];
     const revenue = revenueResult.rows[0];
-
-
 
     return sendSuccessResponse(
       res,
       200,
       "Dashboard statistics fetched successfully.",
       {
-
         total_players:
           Number(stats.total_players),
-
 
         active_players:
           Number(stats.active_players),
 
-
         trainers:
           Number(stats.total_trainers),
-
 
         pending_fees:
           Number(revenue.pending_fees),
 
-
         ground_bookings:
           Number(stats.ground_bookings),
-
 
         approvals:
           Number(stats.approvals),
 
-
         monthly_revenue:
           Number(revenue.monthly_revenue),
-
 
         regular_revenue:
           Number(revenue.regular_revenue),
 
-
         one_on_one_revenue:
           Number(revenue.one_on_one_revenue),
-
 
         ground_revenue:
           Number(revenue.ground_revenue),
 
-
         salary_expense:
           Number(revenue.salary_expense),
 
-
         total_expenditure:
           Number(revenue.total_expenditure)
-
       }
     );
-
 
   } catch (error) {
 
     console.error("Dashboard Error:", error);
-
 
     return sendErrorResponse(
       res,
       500,
       error.message || "Internal Server Error"
     );
-
   }
 };
 
