@@ -413,17 +413,12 @@ exports.syncAttendance = async (req, res) => {
 };
 
 exports.getAttendanceTimeline = async (req, res) => {
-  const now = new Date();
-
-  const month = req.query.month
-    ? Number(req.query.month)
-    : now.getMonth() + 1;
-
-  const year = req.query.year
-    ? Number(req.query.year)
-    : now.getFullYear();
-
-  const { employee_type, employee_id } = req.query;
+  const {
+    employee_type,
+    employee_id,
+    from_date,
+    to_date,
+  } = req.query;
 
   try {
     if (
@@ -445,6 +440,104 @@ exports.getAttendanceTimeline = async (req, res) => {
       );
     }
 
+    if (isNaN(employee_id)) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Invalid Employee ID."
+      );
+    }
+
+    /*
+     * ============================================================
+     * DATE RANGE
+     * ============================================================
+     *
+     * If dates are not provided:
+     * from_date = first day of current month
+     * to_date   = today
+     *
+     * If dates are provided:
+     * use the provided date range.
+     */
+
+    const now = new Date();
+
+    const today = now.toLocaleDateString("en-CA", {
+      timeZone: "Asia/Kolkata",
+    });
+
+    let fromDate;
+    let toDate;
+
+    if (!from_date && !to_date) {
+      // First day of current month
+      const currentMonthStart = new Date(
+        now.toLocaleString("en-US", {
+          timeZone: "Asia/Kolkata",
+        })
+      );
+
+      currentMonthStart.setDate(1);
+
+      fromDate = currentMonthStart.toLocaleDateString(
+        "en-CA",
+        {
+          timeZone: "Asia/Kolkata",
+        }
+      );
+
+      toDate = today;
+    } else {
+      // If one is provided, both are required
+      if (!from_date || !to_date) {
+        return sendErrorResponse(
+          res,
+          400,
+          "Both from_date and to_date are required."
+        );
+      }
+
+      // Validate date format
+      if (
+        !/^\d{4}-\d{2}-\d{2}$/.test(from_date) ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(to_date)
+      ) {
+        return sendErrorResponse(
+          res,
+          400,
+          "Invalid date format. Use YYYY-MM-DD."
+        );
+      }
+
+      fromDate = from_date;
+      toDate = to_date;
+    }
+
+    // Validate date range
+    if (fromDate > toDate) {
+      return sendErrorResponse(
+        res,
+        400,
+        "from_date cannot be greater than to_date."
+      );
+    }
+
+    // Don't allow future to_date
+    if (toDate > today) {
+      return sendErrorResponse(
+        res,
+        400,
+        "to_date cannot be a future date."
+      );
+    }
+
+    /*
+     * ============================================================
+     * GET EMPLOYEE CODE
+     * ============================================================
+     */
+
     let employeeCodeQuery = "";
 
     if (employee_type === "Player") {
@@ -452,7 +545,7 @@ exports.getAttendanceTimeline = async (req, res) => {
         SELECT admission_id AS employee_code
         FROM tbl_players
         WHERE player_id = $1
-  `;
+      `;
     }
 
     if (employee_type === "Coach") {
@@ -460,7 +553,7 @@ exports.getAttendanceTimeline = async (req, res) => {
         SELECT coach_code AS employee_code
         FROM tbl_coach
         WHERE coach_id = $1
-  `;
+      `;
     }
 
     if (employee_type === "Staff") {
@@ -468,7 +561,7 @@ exports.getAttendanceTimeline = async (req, res) => {
         SELECT staff_code AS employee_code
         FROM tbl_staff
         WHERE staff_id = $1
-  `;
+      `;
     }
 
     const employee = await pool.query(
@@ -484,66 +577,71 @@ exports.getAttendanceTimeline = async (req, res) => {
       );
     }
 
-    const employeeCode = employee.rows[0].employee_code;
+    const employeeCode =
+      employee.rows[0].employee_code;
 
-    // Current date in IST
-    const today = new Date().toLocaleDateString("en-CA", {
-      timeZone: "Asia/Kolkata",
-    });
+    /*
+     * ============================================================
+     * ATTENDANCE TIMELINE
+     * ============================================================
+     */
 
     const result = await pool.query(
       `
-      WITH dates AS(
-    SELECT generate_series(
-      make_date($3:: int, $2:: int, 1),
-      LEAST(
-        (
-          make_date($3:: int, $2:: int, 1)
-          + interval '1 month'
-      - interval '1 day'
-      ):: date,
-      $4:: date
-    ),
-    interval '1 day'
-  )::date AS attendance_date
+      WITH dates AS (
+        SELECT generate_series(
+          $2::date,
+          $3::date,
+          interval '1 day'
+        )::date AS attendance_date
       )
 
-SELECT
-d.attendance_date AS payroll_date,
-  a.attendance_id,
+      SELECT
+        d.attendance_date AS payroll_date,
+        a.attendance_id,
 
-  MIN(
-    CASE
+        MIN(
+          CASE
             WHEN LOWER(l.punch_type) = 'in'
             THEN l.punch_time
           END
-  ) AS time_in,
+        ) AS time_in,
 
-    MAX(
-      CASE
+        MAX(
+          CASE
             WHEN LOWER(l.punch_type) = 'out'
             THEN l.punch_time
           END
-    ) AS time_out
+        ) AS time_out
 
       FROM dates d
 
       LEFT JOIN tbl_attendance a
         ON a.employee_code = $1
-       AND a.payroll_date = d.attendance_date
+        AND a.payroll_date = d.attendance_date
 
       LEFT JOIN tbl_attendance_logs l
         ON l.attendance_id = a.attendance_id
 
       GROUP BY
-d.attendance_date,
-  a.attendance_id
+        d.attendance_date,
+        a.attendance_id
 
       ORDER BY
-d.attendance_date DESC;
-`,
-      [employeeCode, month, year, today]
+        d.attendance_date DESC;
+      `,
+      [
+        employeeCode,
+        fromDate,
+        toDate,
+      ]
     );
+
+    /*
+     * ============================================================
+     * FORMAT RESPONSE
+     * ============================================================
+     */
 
     const attendance = result.rows.map((row) => {
       let status;
@@ -555,7 +653,10 @@ d.attendance_date DESC;
         remarks = "On Time";
         marked_by = "Coach";
 
-        if (row.time_in && row.time_in > "09:00:00") {
+        if (
+          row.time_in &&
+          row.time_in > "09:00:00"
+        ) {
           status = "Late";
           remarks = "Late Entry";
         }
@@ -583,7 +684,13 @@ d.attendance_date DESC;
       res,
       200,
       "Attendance timeline fetched successfully.",
-      attendance
+      {
+        from_date: fromDate,
+        to_date: toDate,
+        employee_type,
+        employee_id: Number(employee_id),
+        attendance,
+      }
     );
   } catch (error) {
     console.error(error);
@@ -591,7 +698,8 @@ d.attendance_date DESC;
     return sendErrorResponse(
       res,
       500,
-      error.message || "Failed to fetch attendance timeline."
+      error.message ||
+      "Failed to fetch attendance timeline."
     );
   }
 };

@@ -23,6 +23,7 @@ const playerFeeRouter = require("./src/routes/playerFeeRoutes");
 const reportsRouter = require("./src/routes/reportsRoutes");
 const attendanceRouter = require("./src/routes/attendanceRoutes");
 const { startAttendanceCron } = require("./src/jobs/attendance.cron");
+const feeDueNotificationCron = require("./src/jobs/feeNotificationCron");
 
 const app = express();
 
@@ -59,6 +60,7 @@ app.use(notFoundHandler);
 app.use(globalErrorHandler)
 
 startAttendanceCron();
+feeDueNotificationCron();
 
 const port = process.env.PORT || 5000;
 
