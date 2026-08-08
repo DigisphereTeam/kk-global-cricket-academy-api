@@ -1,16 +1,21 @@
 const cron = require("node-cron");
-const { syncAttendance } = require("../controllers/attendanceController");
+const { syncAttendanceForCron } = require("../controllers/attendanceController");
 
 function startAttendanceCron() {
   cron.schedule(
-    "0 23 * * *", // Every day at 11:00 PM
+    "0 23 * * *",
     async () => {
       try {
-        await syncAttendance();
+        const today = new Date().toLocaleDateString("en-CA", {
+          timeZone: "Asia/Kolkata",
+        });
+
+        const syncedCount = await syncAttendanceForCron(today);
+
       } catch (error) {
         console.error(
           "Attendance sync failed:",
-          error.message
+          error.response?.data || error.message
         );
       }
     },

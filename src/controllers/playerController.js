@@ -33,117 +33,117 @@ exports.createPlayerAdmission = async (req, res) => {
     weight,
   } = req.body;
 
-if (
-  !full_name?.trim() ||
-  !gender ||
-  age == null ||
-  !phone_number?.trim() ||
-  !address?.trim() ||
-  admission_fee === undefined ||
-  admission_fee === null ||
-  admission_fee === "" ||
-  !payment_type?.trim()
-) {
-  return sendErrorResponse(
-    res,
-    400,
-    "All required fields must be provided."
-  );
-}
+  if (
+    !full_name?.trim() ||
+    !gender ||
+    age == null ||
+    !phone_number?.trim() ||
+    !address?.trim() ||
+    admission_fee === undefined ||
+    admission_fee === null ||
+    admission_fee === "" ||
+    !payment_type?.trim()
+  ) {
+    return sendErrorResponse(
+      res,
+      400,
+      "All required fields must be provided."
+    );
+  }
 
 
-if (!/^[6-9]\d{9}$/.test(phone_number.trim())) {
-  return sendErrorResponse(
-    res,
-    400,
-    "Invalid player phone number."
-  );
-}
+  if (!/^[6-9]\d{9}$/.test(phone_number.trim())) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Invalid player phone number."
+    );
+  }
 
-if (father_phone && !/^[6-9]\d{9}$/.test(father_phone.trim())) {
-  return sendErrorResponse(
-    res,
-    400,
-    "Invalid father phone number."
-  );
-}
+  if (father_phone && !/^[6-9]\d{9}$/.test(father_phone.trim())) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Invalid father phone number."
+    );
+  }
 
-if (mother_phone && !/^[6-9]\d{9}$/.test(mother_phone.trim())) {
-  return sendErrorResponse(
-    res,
-    400,
-    "Invalid mother phone number."
-  );
-}
+  if (mother_phone && !/^[6-9]\d{9}$/.test(mother_phone.trim())) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Invalid mother phone number."
+    );
+  }
 
-if (contact_phone && !/^[6-9]\d{9}$/.test(contact_phone.trim())) {
-  return sendErrorResponse(
-    res,
-    400,
-    "Invalid emergency contact phone number."
-  );
-}
-
-
-if (
-  email &&
-  !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
-) {
-  return sendErrorResponse(
-    res,
-    400,
-    "Invalid email address."
-  );
-}
+  if (contact_phone && !/^[6-9]\d{9}$/.test(contact_phone.trim())) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Invalid emergency contact phone number."
+    );
+  }
 
 
-if (isNaN(Number(age)) || Number(age) <= 0) {
-  return sendErrorResponse(
-    res,
-    400,
-    "Age must be greater than 0."
-  );
-}
+  if (
+    email &&
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
+  ) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Invalid email address."
+    );
+  }
 
 
-if (
-  isNaN(Number(admission_fee)) ||
-  Number(admission_fee) <= 0
-) {
-  return sendErrorResponse(
-    res,
-    400,
-    "Admission fee required or must be greater than 0."
-  );
-}
+  if (isNaN(Number(age)) || Number(age) <= 0) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Age must be greater than 0."
+    );
+  }
 
 
-if (
-  weight !== undefined &&
-  weight !== null &&
-  weight.toString().trim() !== "" &&
-  (isNaN(Number(weight)) || Number(weight) <= 0)
-) {
-  return sendErrorResponse(
-    res,
-    400,
-    "Weight must be greater than 0."
-  );
-}
+  if (
+    isNaN(Number(admission_fee)) ||
+    Number(admission_fee) <= 0
+  ) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Admission fee required or must be greater than 0."
+    );
+  }
 
 
-if (
-  height !== undefined &&
-  height !== null &&
-  height.toString().trim() !== "" &&
-  (isNaN(Number(height)) || Number(height) <= 0)
-) {
-  return sendErrorResponse(
-    res,
-    400,
-    "Height must be greater than 0."
-  );
-}
+  if (
+    weight !== undefined &&
+    weight !== null &&
+    weight.toString().trim() !== "" &&
+    (isNaN(Number(weight)) || Number(weight) <= 0)
+  ) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Weight must be greater than 0."
+    );
+  }
+
+
+  if (
+    height !== undefined &&
+    height !== null &&
+    height.toString().trim() !== "" &&
+    (isNaN(Number(height)) || Number(height) <= 0)
+  ) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Height must be greater than 0."
+    );
+  }
 
   let client;
 
@@ -421,6 +421,10 @@ exports.getAllPlayers = async (req, res) => {
         FROM tbl_players
       `),
     ]);
+    const playerList = players.rows.map((row) => ({
+      ...row,
+      status: row.is_active ? "Active" : "Inactive",
+    }));
 
     return sendSuccessResponse(
       res,
@@ -428,14 +432,21 @@ exports.getAllPlayers = async (req, res) => {
       "Players fetched successfully.",
       {
         statistics: {
-          total_players: Number(statistics.rows[0].total_players),
-          active_players: Number(statistics.rows[0].active_players),
-          inactive_players: Number(statistics.rows[0].inactive_players),
+          total_players: Number(
+            statistics.rows[0].total_players
+          ),
+          active_players: Number(
+            statistics.rows[0].active_players
+          ),
+          inactive_players: Number(
+            statistics.rows[0].inactive_players
+          ),
           pending_fees: 0,
         },
-        players: players.rows,
+        players: playerList,
       }
     );
+
   } catch (error) {
     return sendErrorResponse(
       res,
@@ -502,7 +513,6 @@ exports.getPlayerById = async (req, res) => {
         ON d.player_id = p.player_id
 
       WHERE p.player_id = $1
-        AND p.is_active = TRUE
 
       GROUP BY
         p.player_id,
@@ -512,19 +522,18 @@ exports.getPlayerById = async (req, res) => {
       [player_id, today]
     );
 
-    if (result.rowCount === 0) {
-      return sendErrorResponse(
-        res,
-        404,
-        "Active player not found."
-      );
-    }
+    const player = {
+      ...result.rows[0],
+      status: result.rows[0].is_active
+        ? "Active"
+        : "Inactive",
+    };
 
     return sendSuccessResponse(
       res,
       200,
       "Player retrieved successfully.",
-      result.rows[0]
+      player
     );
   } catch (error) {
     return sendErrorResponse(

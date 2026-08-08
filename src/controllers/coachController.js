@@ -305,18 +305,9 @@ exports.getCoachById = async (req, res) => {
         AND a.payroll_date = $2
 
       WHERE c.coach_id = $1
-        AND c.is_active = TRUE
       `,
       [id, today]
     );
-
-    if (result.rowCount === 0) {
-      return sendErrorResponse(
-        res,
-        404,
-        "Active coach not found."
-      );
-    }
 
     return sendSuccessResponse(
       res,

@@ -18,13 +18,18 @@ exports.getNotifications = async (req, res) => {
 
     if (role === "ADMIN") {
       query = `
-        SELECT *
-        FROM tbl_notification_logs
-        WHERE NOT (
+      SELECT *
+      FROM tbl_notification_logs
+      WHERE
+        (
           module_name = 'Ground Booking'
           AND action IN ('Confirmed', 'Cancelled')
         )
-        ORDER BY created_at DESC
+        OR
+        (
+          module_name <> 'Fee Due'
+        )
+      ORDER BY created_at DESC;
       `;
     } else if (role === "PRIMARY") {
       query = `

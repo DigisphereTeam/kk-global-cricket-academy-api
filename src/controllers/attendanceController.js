@@ -337,6 +337,43 @@ exports.getMonthlyAttendanceSummary = async (req, res) => {
   }
 };
 
+exports.syncAttendanceForCron = async (date) => {
+  try {
+    const syncDate =
+      date ||
+      new Date().toLocaleDateString("en-CA", {
+        timeZone: "Asia/Kolkata",
+      });
+
+    const syncedCount = await syncAttendanceData(syncDate);
+
+    if (syncedCount === 0) {
+      console.log(
+        `Attendance cron: No attendance records found for ${syncDate}.`
+      );
+
+      return {
+        success: true,
+        synced_records: 0,
+        date: syncDate,
+      };
+    }
+
+    return {
+      success: true,
+      synced_records: syncedCount,
+      date: syncDate,
+    };
+  } catch (error) {
+    console.error(
+      "Attendance cron sync failed:",
+      error.response?.data || error.message
+    );
+
+    throw error;
+  }
+};
+
 exports.syncAttendance = async (req, res) => {
   try {
     const today = req.query.date
@@ -415,7 +452,7 @@ exports.getAttendanceTimeline = async (req, res) => {
         SELECT admission_id AS employee_code
         FROM tbl_players
         WHERE player_id = $1
-      `;
+  `;
     }
 
     if (employee_type === "Coach") {
@@ -423,7 +460,7 @@ exports.getAttendanceTimeline = async (req, res) => {
         SELECT coach_code AS employee_code
         FROM tbl_coach
         WHERE coach_id = $1
-      `;
+  `;
     }
 
     if (employee_type === "Staff") {
@@ -431,10 +468,13 @@ exports.getAttendanceTimeline = async (req, res) => {
         SELECT staff_code AS employee_code
         FROM tbl_staff
         WHERE staff_id = $1
-      `;
+  `;
     }
 
-    const employee = await pool.query(employeeCodeQuery, [employee_id]);
+    const employee = await pool.query(
+      employeeCodeQuery,
+      [employee_id]
+    );
 
     if (employee.rowCount === 0) {
       return sendErrorResponse(
@@ -446,37 +486,45 @@ exports.getAttendanceTimeline = async (req, res) => {
 
     const employeeCode = employee.rows[0].employee_code;
 
+    // Current date in IST
+    const today = new Date().toLocaleDateString("en-CA", {
+      timeZone: "Asia/Kolkata",
+    });
+
     const result = await pool.query(
       `
-      WITH dates AS (
-        SELECT generate_series(
-          make_date($3::int, $2::int, 1),
-          (
-            make_date($3::int, $2::int, 1)
-            + interval '1 month'
-            - interval '1 day'
-          )::date,
-          interval '1 day'
-        )::date AS attendance_date
+      WITH dates AS(
+    SELECT generate_series(
+      make_date($3:: int, $2:: int, 1),
+      LEAST(
+        (
+          make_date($3:: int, $2:: int, 1)
+          + interval '1 month'
+      - interval '1 day'
+      ):: date,
+      $4:: date
+    ),
+    interval '1 day'
+  )::date AS attendance_date
       )
 
-      SELECT
-        d.attendance_date AS payroll_date,
-        a.attendance_id,
+SELECT
+d.attendance_date AS payroll_date,
+  a.attendance_id,
 
-        MIN(
-          CASE
+  MIN(
+    CASE
             WHEN LOWER(l.punch_type) = 'in'
             THEN l.punch_time
           END
-        ) AS time_in,
+  ) AS time_in,
 
-        MAX(
-          CASE
+    MAX(
+      CASE
             WHEN LOWER(l.punch_type) = 'out'
             THEN l.punch_time
           END
-        ) AS time_out
+    ) AS time_out
 
       FROM dates d
 
@@ -488,18 +536,14 @@ exports.getAttendanceTimeline = async (req, res) => {
         ON l.attendance_id = a.attendance_id
 
       GROUP BY
-        d.attendance_date,
-        a.attendance_id
+d.attendance_date,
+  a.attendance_id
 
       ORDER BY
-        d.attendance_date;
-      `,
-      [employeeCode, month, year]
+d.attendance_date DESC;
+`,
+      [employeeCode, month, year, today]
     );
-
-    const today = new Date().toLocaleDateString("en-CA", {
-      timeZone: "Asia/Kolkata",
-    });
 
     const attendance = result.rows.map((row) => {
       let status;
@@ -515,9 +559,6 @@ exports.getAttendanceTimeline = async (req, res) => {
           status = "Late";
           remarks = "Late Entry";
         }
-      } else if (row.payroll_date > today) {
-        status = "Upcoming";
-        remarks = "Attendance Not Due";
       } else if (row.payroll_date === today) {
         status = "Pending";
         remarks = "Attendance Yet to be Marked";
@@ -544,7 +585,6 @@ exports.getAttendanceTimeline = async (req, res) => {
       "Attendance timeline fetched successfully.",
       attendance
     );
-
   } catch (error) {
     console.error(error);
 
@@ -555,6 +595,7 @@ exports.getAttendanceTimeline = async (req, res) => {
     );
   }
 };
+
 
 const syncPetpoojaAttendance = async (punchData) => {
   const client = await pool.connect();
@@ -570,28 +611,28 @@ const syncPetpoojaAttendance = async (punchData) => {
       const attendanceResult = await client.query(
         `
         INSERT INTO tbl_attendance
-        (
-          employee_code,
-          employee_name,
-          payroll_date
-        )
-        VALUES
-        (
-          $1,
-          $2,
-          $3
-        )
+  (
+    employee_code,
+    employee_name,
+    payroll_date
+  )
+VALUES
+  (
+    $1,
+    $2,
+    $3
+  )
         ON CONFLICT
-        (
-          employee_code,
-          payroll_date
-        )
+  (
+    employee_code,
+    payroll_date
+  )
         DO UPDATE
-        SET
-          employee_name = EXCLUDED.employee_name,
-          updated_at = CURRENT_TIMESTAMP
+SET
+employee_name = EXCLUDED.employee_name,
+  updated_at = CURRENT_TIMESTAMP
         RETURNING attendance_id;
-        `,
+`,
         [
           employee.emp_id,
           employee.name,
@@ -609,30 +650,30 @@ const syncPetpoojaAttendance = async (punchData) => {
         const logResult = await client.query(
           `
           INSERT INTO tbl_attendance_logs
-          (
-            attendance_id,
-            punch_type,
-            punch_time,
-            branch_name,
-            device_id
-          )
-          VALUES
-          (
-            $1,
-            $2,
-            $3,
-            $4,
-            $5
-          )
+  (
+    attendance_id,
+    punch_type,
+    punch_time,
+    branch_name,
+    device_id
+  )
+VALUES
+  (
+    $1,
+    $2,
+    $3,
+    $4,
+    $5
+  )
           ON CONFLICT
-          (
-            attendance_id,
-            punch_time,
-            punch_type
-          )
+  (
+    attendance_id,
+    punch_time,
+    punch_type
+  )
           DO NOTHING
           RETURNING log_id;
-          `,
+`,
           [
             attendanceId,
             punch.op,
@@ -668,7 +709,6 @@ const syncPetpoojaAttendance = async (punchData) => {
 
 const syncAttendanceData = async (date) => {
   let accessToken = getAccessToken();
-
   if (
     !accessToken ||
     !getTokenExpiry() ||
@@ -703,7 +743,7 @@ const syncAttendanceData = async (date) => {
     method: "GET",
     url: process.env.PETPOOJA_PUNCHES_URL,
     headers: {
-      Authorization: `Bearer ${accessToken}`,
+      Authorization: `Bearer ${accessToken} `,
       "Content-Type": "application/json",
     },
     data: {

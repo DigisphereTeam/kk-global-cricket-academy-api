@@ -280,18 +280,9 @@ exports.getStaffById = async (req, res) => {
         AND a.payroll_date = $2
 
       WHERE s.staff_id = $1
-        AND s.is_active = TRUE
       `,
       [id, today]
     );
-
-    if (result.rowCount === 0) {
-      return sendErrorResponse(
-        res,
-        404,
-        "Active staff not found."
-      );
-    }
 
     return sendSuccessResponse(
       res,
