@@ -21,14 +21,11 @@ exports.getNotifications = async (req, res) => {
       SELECT *
       FROM tbl_notification_logs
       WHERE
-        (
+        NOT (
           module_name = 'Ground Booking'
           AND action IN ('Confirmed', 'Cancelled')
         )
-        OR
-        (
-          module_name NOT IN ('Regular Fee', 'One-to-One Fee')
-        )
+        AND action NOT IN ('Regular Fee Due', 'One-to-One Fee Due')
       ORDER BY created_at DESC;
       `;
 
@@ -36,7 +33,7 @@ exports.getNotifications = async (req, res) => {
       query = `
         SELECT *
         FROM tbl_notification_logs
-        WHERE
+        WHERE NOT (
           (
             module_name = 'Ground Booking'
             AND action IN ('Confirmed', 'Cancelled')
@@ -45,7 +42,8 @@ exports.getNotifications = async (req, res) => {
           (
             module_name IN ('Regular Fee', 'One-to-One Fee')
           )
-        ORDER BY created_at DESC
+        )
+        ORDER BY created_at DESC;
       `;
     } else {
       return sendErrorResponse(
