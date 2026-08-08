@@ -8,7 +8,6 @@ exports.getPlayerWiseReport = async (req, res) => {
   const { search, player_id, from_date, to_date } = req.query;
 
   try {
-
     let query = `
       SELECT
         p.player_id,
@@ -70,58 +69,82 @@ exports.getPlayerWiseReport = async (req, res) => {
       res,
       200,
       "Player report fetched successfully.",
-      result.rows
+      result.rows,
     );
-
   } catch (error) {
     return sendErrorResponse(
       res,
       500,
-      error.message || "Internal Server Error"
+      error.message || "Internal Server Error",
     );
   }
 };
 
 exports.getPlayerMonthlyReport = async (req, res) => {
-  const {
-    search,
-    player_id,
-    from_date,
-    to_date,
-  } = req.query;
+  const { search, player_id, from_date, to_date } = req.query;
 
   try {
-
     let query = `
-  SELECT
-    p.admission_id,
-    p.player_id,
-    p.full_name AS player_name,
-    p.batch,
+      SELECT
+        p.admission_id,
+        p.player_id,
+        p.full_name AS player_name,
+        p.batch,
 
-    TO_CHAR(f.payment_date, 'FMMonth') AS month,
-    EXTRACT(YEAR FROM f.payment_date)::INT AS year,
+        TRIM(TO_CHAR(f.payment_date, 'Month')) AS month,
+        EXTRACT(YEAR FROM f.payment_date)::INT AS year,
 
-    p.phone_number AS contact_number,
-    p.email,
+        p.phone_number AS contact_number,
+        p.email,
 
-    f.amount,
-    f.payment_date,
+        f.amount,
+        f.payment_date,
 
-    24 AS days_present,
-    2 AS days_absent
+        COALESCE(att.days_present, 0) AS days_present,
 
-  FROM tbl_players p
+        (
+          EXTRACT(
+            DAY FROM (
+              date_trunc('month', f.payment_date)
+              + interval '1 month - 1 day'
+            )
+          )::INT
+          - COALESCE(att.days_present, 0)
+        ) AS days_absent
 
-  LEFT JOIN tbl_player_fees f
-    ON p.player_id = f.player_id
+      FROM tbl_players p
 
-  WHERE 1=1
-`;
+      LEFT JOIN tbl_player_fees f
+      ON p.player_id = f.player_id
+
+      LEFT JOIN
+      (
+        SELECT
+          employee_code,
+          EXTRACT(YEAR FROM payroll_date)::INT AS attendance_year,
+          EXTRACT(MONTH FROM payroll_date)::INT AS attendance_month,
+          COUNT(*) AS days_present
+
+        FROM tbl_attendance
+
+        GROUP BY
+          employee_code,
+          EXTRACT(YEAR FROM payroll_date),
+          EXTRACT(MONTH FROM payroll_date)
+
+      ) att
+
+      ON att.employee_code = p.admission_id
+      AND att.attendance_year = EXTRACT(YEAR FROM f.payment_date)
+      AND att.attendance_month = EXTRACT(MONTH FROM f.payment_date)
+
+      WHERE 1=1
+    `;
 
     const values = [];
     let index = 1;
 
+    // Search
     if (search) {
       query += `
         AND (
@@ -133,28 +156,37 @@ exports.getPlayerMonthlyReport = async (req, res) => {
       index++;
     }
 
+    // Player Filter
     if (player_id) {
-      query += ` AND p.player_id = $${index}`;
+      query += `
+        AND p.player_id = $${index}
+      `;
       values.push(player_id);
       index++;
     }
 
+    // From Date
     if (from_date) {
-      query += ` AND p.admission_date >= $${index}`;
+      query += `
+        AND f.payment_date >= $${index}
+      `;
       values.push(from_date);
       index++;
     }
 
+    // To Date
     if (to_date) {
-      query += ` AND p.admission_date <= $${index}`;
+      query += `
+        AND f.payment_date <= $${index}
+      `;
       values.push(to_date);
       index++;
     }
 
     query += `
       ORDER BY
-      p.admission_date DESC,
-      p.full_name ASC
+        f.payment_date DESC,
+        p.full_name ASC;
     `;
 
     const result = await pool.query(query, values);
@@ -163,25 +195,19 @@ exports.getPlayerMonthlyReport = async (req, res) => {
       res,
       200,
       "Monthly player report fetched successfully.",
-      result.rows
+      result.rows,
     );
-
   } catch (error) {
     return sendErrorResponse(
       res,
       500,
-      error.message || "Internal Server Error"
+      error.message || "Internal Server Error",
     );
   }
 };
 
 exports.getTrainerWiseReport = async (req, res) => {
-  const {
-    search,
-    coach_id,
-    from_date,
-    to_date,
-  } = req.query;
+  const { search, coach_id, from_date, to_date } = req.query;
 
   try {
     let query = `
@@ -201,7 +227,6 @@ exports.getTrainerWiseReport = async (req, res) => {
     const values = [];
     let index = 1;
 
-    
     if (search) {
       query += `
         AND (
@@ -250,53 +275,79 @@ exports.getTrainerWiseReport = async (req, res) => {
       res,
       200,
       "Trainer-wise report fetched successfully.",
-      result.rows
+      result.rows,
     );
-
   } catch (error) {
     return sendErrorResponse(
       res,
       500,
-      error.message || "Internal Server Error"
+      error.message || "Internal Server Error",
     );
   }
 };
 
 exports.getTrainerMonthlyReport = async (req, res) => {
-  const {
-    search,
-    coach_id,
-    from_date,
-    to_date,
-  } = req.query;
+  const { search, coach_id, from_date, to_date } = req.query;
 
   try {
-
     let query = `
-      SELECT
-        c.coach_code AS trainer_id,
-        c.full_name AS trainer_name,
-        c.specialization,
+     SELECT
+    c.coach_code AS trainer_id,
+    c.full_name AS trainer_name,
+    c.specialization,
 
+    TRIM(
         TO_CHAR(
-          TO_DATE(s.salary_month::text, 'MM'),
-          'Month'
-        ) AS month,
+            TO_DATE(s.salary_month::text, 'MM'),
+            'Month'
+        )
+    ) AS month,
 
-        s.salary_year AS year,
+    s.salary_year AS year,
 
-        24 AS days_present,
-        2 AS days_absent,
+    COALESCE(att.days_present, 0) AS days_present,
 
-        s.net_salary AS salary_paid,
-        s.payment_date AS salary_paid_date
+    (
+        EXTRACT(
+            DAY FROM (
+                make_date(s.salary_year, s.salary_month, 1)
+                + interval '1 month - 1 day'
+            )
+        )::INT
+        - COALESCE(att.days_present, 0)
+    ) AS days_absent,
 
-      FROM tbl_employee_salary s
-      INNER JOIN tbl_coach c
-        ON c.coach_id = s.coach_id
+    s.net_salary AS salary_paid,
+    s.payment_date AS salary_paid_date
 
-      WHERE 1=1
-    `;
+     FROM tbl_employee_salary s
+
+     INNER JOIN tbl_coach c
+       ON c.coach_id = s.coach_id
+
+       LEFT JOIN
+        (
+         SELECT
+        employee_code,
+        EXTRACT(YEAR FROM payroll_date)::INT AS attendance_year,
+        EXTRACT(MONTH FROM payroll_date)::INT AS attendance_month,
+        COUNT(*) AS days_present
+
+    FROM tbl_attendance
+
+    GROUP BY
+        employee_code,
+        EXTRACT(YEAR FROM payroll_date),
+        EXTRACT(MONTH FROM payroll_date)
+
+       ) att
+
+        ON att.employee_code = c.coach_code
+        AND att.attendance_year = s.salary_year
+        AND att.attendance_month = s.salary_month
+
+        WHERE 1=1
+         `;
 
     const values = [];
     let index = 1;
@@ -361,28 +412,21 @@ exports.getTrainerMonthlyReport = async (req, res) => {
       res,
       200,
       "Trainer monthly report fetched successfully.",
-      result.rows
+      result.rows,
     );
-
   } catch (error) {
     return sendErrorResponse(
       res,
       500,
-      error.message || "Internal Server Error"
+      error.message || "Internal Server Error",
     );
   }
 };
 
 exports.getStaffWiseReport = async (req, res) => {
-  const {
-    search,
-    staff_id,
-    from_date,
-    to_date,
-  } = req.query;
+  const { search, staff_id, from_date, to_date } = req.query;
 
   try {
-
     let query = `
       SELECT
         s.staff_code,
@@ -451,14 +495,13 @@ exports.getStaffWiseReport = async (req, res) => {
       res,
       200,
       "Staff report fetched successfully.",
-      result.rows
+      result.rows,
     );
-
   } catch (error) {
     return sendErrorResponse(
       res,
       500,
-      error.message || "Internal Server Error"
+      error.message || "Internal Server Error",
     );
   }
 };
@@ -488,8 +531,17 @@ exports.getStaffMonthlyReport = async (req, res) => {
 
         es.salary_year AS year,
 
-        23 AS present,
-        3 AS absent,
+        COALESCE(att.days_present, 0) AS present,
+
+        (
+          EXTRACT(
+            DAY FROM (
+              make_date(es.salary_year, es.salary_month, 1)
+              + interval '1 month - 1 day'
+            )
+          )::INT
+          - COALESCE(att.days_present, 0)
+        ) AS absent,
 
         es.net_salary AS salary_paid,
         es.payment_date AS salary_paid_date
@@ -498,6 +550,27 @@ exports.getStaffMonthlyReport = async (req, res) => {
 
       INNER JOIN tbl_staff s
       ON s.staff_id = es.staff_id
+
+      LEFT JOIN
+      (
+        SELECT
+          employee_code,
+          EXTRACT(YEAR FROM payroll_date)::INT AS attendance_year,
+          EXTRACT(MONTH FROM payroll_date)::INT AS attendance_month,
+          COUNT(*) AS days_present
+
+        FROM tbl_attendance
+
+        GROUP BY
+          employee_code,
+          EXTRACT(YEAR FROM payroll_date),
+          EXTRACT(MONTH FROM payroll_date)
+
+      ) att
+
+      ON att.employee_code = s.staff_code
+      AND att.attendance_year = es.salary_year
+      AND att.attendance_month = es.salary_month
 
       WHERE 1=1
     `;
@@ -511,7 +584,7 @@ exports.getStaffMonthlyReport = async (req, res) => {
         AND (
           s.full_name ILIKE $${index}
           OR s.staff_code ILIKE $${index}
-          OR s.role ILIKE $${index}
+          OR s.designation ILIKE $${index}
         )
       `;
       values.push(`%${search}%`);
