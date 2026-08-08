@@ -440,7 +440,10 @@ exports.updateStaffStatus = async (req, res) => {
     );
   }
 
-  if (!Number.isInteger(Number(staff_id)) || Number(staff_id) <= 0) {
+  if (
+    !Number.isInteger(Number(staff_id)) ||
+    Number(staff_id) <= 0
+  ) {
     return sendErrorResponse(
       res,
       400,
@@ -469,13 +472,17 @@ exports.updateStaffStatus = async (req, res) => {
     // Check staff exists
     const staff = await pool.query(
       `
-      SELECT staff_id, is_active
+      SELECT
+        staff_id,
+        is_active,
+        status
       FROM tbl_staff
       WHERE staff_id = $1;
       `,
       [staff_id]
     );
 
+    // Staff not found
     if (staff.rowCount === 0) {
       return sendErrorResponse(
         res,
@@ -489,14 +496,22 @@ exports.updateStaffStatus = async (req, res) => {
       return sendErrorResponse(
         res,
         409,
-        `Staff is already ${is_active ? "active" : "inactive"}.`
+        `Staff is already ${
+          is_active ? "active" : "inactive"
+        }.`
       );
     }
 
+    // Update is_active and status
     const result = await pool.query(
       `
       UPDATE tbl_staff
-      SET is_active = $1
+      SET
+        is_active = $1,
+        status = CASE
+          WHEN $1 = TRUE THEN 'Active'
+          ELSE 'Inactive'
+        END
       WHERE staff_id = $2
       RETURNING *;
       `,
@@ -506,10 +521,15 @@ exports.updateStaffStatus = async (req, res) => {
     return sendSuccessResponse(
       res,
       200,
-      `Staff ${is_active ? "activated" : "deactivated"} successfully.`,
+      `Staff ${
+        is_active ? "activated" : "deactivated"
+      } successfully.`,
       result.rows[0]
     );
+
   } catch (error) {
+    console.error("Update Staff Status Error:", error);
+
     return sendErrorResponse(
       res,
       500,
