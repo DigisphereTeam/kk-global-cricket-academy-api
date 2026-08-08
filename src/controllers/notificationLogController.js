@@ -27,10 +27,11 @@ exports.getNotifications = async (req, res) => {
         )
         OR
         (
-          module_name <> 'Fee Due'
+          module_name NOT IN ('Regular Fee', 'One-to-One Fee')
         )
       ORDER BY created_at DESC;
       `;
+
     } else if (role === "PRIMARY") {
       query = `
         SELECT *
@@ -42,7 +43,7 @@ exports.getNotifications = async (req, res) => {
           )
           OR
           (
-            module_name = 'Fee Due'
+            module_name IN ('Regular Fee', 'One-to-One Fee')
           )
         ORDER BY created_at DESC
       `;
