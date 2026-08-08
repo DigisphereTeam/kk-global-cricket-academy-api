@@ -279,13 +279,8 @@ exports.getMonthlyAttendanceSummary = async (req, res) => {
       FROM months m
       LEFT JOIN attendance a
         ON m.month_number = a.month_number
-<<<<<<< HEAD
       ORDER BY m.month_number DESC;
 `,
-=======
-      ORDER BY m.month_number;
-      `,
->>>>>>> develop
       [employeeCode, year, lastMonth]
     );
 
@@ -673,7 +668,6 @@ exports.getAttendanceTimeline = async (req, res) => {
         remarks = "Not Attended";
       }
 
-<<<<<<< HEAD
       /*
        * ----------------------------------------------------------
        * BATCH / SESSION
@@ -761,8 +755,6 @@ exports.getAttendanceTimeline = async (req, res) => {
         session = inPunches.length;
       }
 
-=======
->>>>>>> a6386bbf654d465fc7d2596f8dd5c56a5a74191b
       return {
         attendance_id: row.attendance_id,
         date: row.payroll_date,
