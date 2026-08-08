@@ -279,8 +279,8 @@ exports.getMonthlyAttendanceSummary = async (req, res) => {
       FROM months m
       LEFT JOIN attendance a
         ON m.month_number = a.month_number
-      ORDER BY m.month_number;
-      `,
+      ORDER BY m.month_number DESC;
+`,
       [employeeCode, year, lastMonth]
     );
 
@@ -666,6 +666,93 @@ exports.getAttendanceTimeline = async (req, res) => {
       } else {
         status = "Absent";
         remarks = "Not Attended";
+      }
+
+      /*
+       * ----------------------------------------------------------
+       * BATCH / SESSION
+       * ----------------------------------------------------------
+       */
+
+      let batch = "One-to-One";
+      let session = 0;
+
+      let regularSession = null;
+
+      const inPunches = row.in_punches || [];
+
+      /*
+       * Check every IN punch.
+       *
+       * PetPooja gives UTC timestamps, so convert each
+       * punch to IST before checking the time.
+       */
+
+      for (const punchTime of inPunches) {
+        if (!punchTime) continue;
+
+        const punchDate = new Date(punchTime);
+
+        const istTime = punchDate.toLocaleTimeString(
+          "en-GB",
+          {
+            timeZone: "Asia/Kolkata",
+            hour12: false,
+          }
+        );
+
+        const [
+          hours,
+          minutes,
+          seconds = 0,
+        ] = istTime.split(":").map(Number);
+
+        const punchMinutes =
+          hours * 60 +
+          minutes +
+          seconds / 60;
+
+        /*
+         * Regular Morning
+         */
+
+        if (
+          punchMinutes >= regularMorningStart &&
+          punchMinutes <= regularMorningEnd
+        ) {
+          regularSession = "Morning";
+          break;
+        }
+
+        /*
+         * Regular Evening
+         */
+
+        if (
+          punchMinutes >= regularEveningStart &&
+          punchMinutes <= regularEveningEnd
+        ) {
+          regularSession = "Evening";
+          break;
+        }
+      }
+
+      /*
+       * If a regular punch was found:
+       *
+       * Regular + Morning/Evening
+       *
+       * Otherwise:
+       *
+       * One-to-One + number of IN punches
+       */
+
+      if (regularSession) {
+        batch = "Regular";
+        session = regularSession;
+      } else {
+        batch = "One-on-One";
+        session = inPunches.length;
       }
 
       return {
