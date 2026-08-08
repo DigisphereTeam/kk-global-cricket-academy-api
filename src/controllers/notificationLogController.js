@@ -28,7 +28,6 @@ exports.getNotifications = async (req, res) => {
 
     if (role === "ADMIN") {
       query = `
-<<<<<<< HEAD
         SELECT *
         FROM tbl_notification_logs
         WHERE
@@ -67,29 +66,6 @@ exports.getNotifications = async (req, res) => {
     }
 
     else {
-=======
-      SELECT *
-      FROM tbl_notification_logs
-      WHERE
-        NOT (
-          module_name = 'Ground Booking'
-          AND action IN ('Confirmed', 'Cancelled')
-        )
-        AND action NOT IN ('Regular Fee Due', 'One-to-One Fee Due')
-      ORDER BY created_at DESC;
-      `;
-
-    } else if (role === "PRIMARY") {
-      query = `
-    SELECT *
-    FROM tbl_notification_logs
-    WHERE
-      module_name <> 'Ground Booking'
-      AND module_name NOT IN ('Regular Fee', 'One-to-One Fee')
-    ORDER BY created_at DESC;
-  `;
-    } else {
->>>>>>> 5389f2c0d7339edebdf776104410c03e0ee47115
       return sendErrorResponse(
         res,
         403,
