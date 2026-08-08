@@ -310,14 +310,6 @@ exports.getCoachById = async (req, res) => {
       [id, today]
     );
 
-    if (result.rowCount === 0) {
-      return sendErrorResponse(
-        res,
-        404,
-        "Active coach not found."
-      );
-    }
-
     return sendSuccessResponse(
       res,
       200,
