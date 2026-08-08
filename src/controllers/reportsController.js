@@ -451,14 +451,32 @@ exports.getTrainerMonthlyReport = async (req, res) => {
 
   try {
     let query = `
-      WITH attendance_summary AS (
+      WITH report_months AS (
+
+        SELECT
+          generate_series(
+            DATE_TRUNC(
+              'month',
+              COALESCE($1::date, CURRENT_DATE)
+            ),
+            DATE_TRUNC(
+              'month',
+              COALESCE($2::date, CURRENT_DATE)
+            ),
+            INTERVAL '1 month'
+          )::date AS month_start
+
+      ),
+
+      attendance_summary AS (
+
         SELECT
           employee_code,
 
           DATE_TRUNC(
             'month',
             payroll_date
-          ) AS month_start,
+          )::date AS month_start,
 
           COUNT(
             DISTINCT payroll_date
@@ -471,208 +489,198 @@ exports.getTrainerMonthlyReport = async (req, res) => {
           DATE_TRUNC(
             'month',
             payroll_date
-          )
+          )::date
+
       )
 
       SELECT
 
+        /* Trainer ID */
         c.coach_code AS trainer_id,
 
+        /* Trainer Primary Key */
         c.coach_id,
 
+        /* Trainer Name */
         c.full_name AS trainer_name,
 
+        /* Specialization */
         c.specialization,
 
-
-        TRIM(
-          TO_CHAR(
-            make_date(
-              s.salary_year,
-              s.salary_month,
-              1
-            ),
-            'Month'
-          )
+        /* Month */
+        TO_CHAR(
+          rm.month_start,
+          'FMMonth'
         ) AS month,
 
+        /* Year */
+        EXTRACT(
+          YEAR FROM rm.month_start
+        )::INTEGER AS year,
 
-        s.salary_year AS year,
-
-
+        /* Present */
         COALESCE(
           att.days_present,
           0
-        ) AS days_present,
+        ) AS present,
 
-
+        /* Absent */
         GREATEST(
 
-          (
-            CASE
+          CASE
 
-              /* Current month */
-              WHEN make_date(
-                     s.salary_year,
-                     s.salary_month,
-                     1
-                   )
-                   =
-                   DATE_TRUNC(
-                     'month',
-                     CURRENT_DATE
-                   )::date
+            /* Current Month */
+            WHEN rm.month_start =
+                 DATE_TRUNC(
+                   'month',
+                   CURRENT_DATE
+                 )::date
 
-              THEN
+            THEN
+              (
                 CURRENT_DATE
-                -
-                make_date(
-                  s.salary_year,
-                  s.salary_month,
-                  1
-                )
+                - rm.month_start
                 + 1
+              )
 
-
-              /* Previous months */
-              ELSE
+            /* Previous Month */
+            ELSE
+              (
                 (
-                  make_date(
-                    s.salary_year,
-                    s.salary_month,
-                    1
-                  )
+                  rm.month_start
                   + INTERVAL '1 month'
                   - INTERVAL '1 day'
                 )::date
-
-                -
-                make_date(
-                  s.salary_year,
-                  s.salary_month,
-                  1
-                )
+                - rm.month_start
                 + 1
+              )
 
-            END
+          END
 
-            -
-            COALESCE(
-              att.days_present,
-              0
-            )
-
+          -
+          COALESCE(
+            att.days_present,
+            0
           ),
+
           0
 
-        ) AS days_absent,
+        ) AS absent,
 
+        /* Salary Paid */
+        salary.net_salary AS salary_paid,
 
-        s.net_salary AS salary_paid,
+        /* Salary Paid Date */
+        salary.payment_date AS salary_paid_date
 
+      FROM tbl_coach c
 
-    
-        s.payment_date AS salary_paid_date
+      CROSS JOIN report_months rm
 
-
-      FROM tbl_employee_salary s
-
-
-      INNER JOIN tbl_coach c
-        ON c.coach_id = s.coach_id
-
-
+      /* Attendance */
       LEFT JOIN attendance_summary att
 
         ON att.employee_code =
            c.coach_code
 
         AND att.month_start =
-            make_date(
-              s.salary_year,
-              s.salary_month,
-              1
-            )
+            rm.month_start
 
+      /* Salary */
+      LEFT JOIN LATERAL (
+
+        SELECT
+          es.net_salary,
+          es.payment_date
+
+        FROM tbl_employee_salary es
+
+        WHERE
+          es.coach_id = c.coach_id
+
+          AND es.salary_year =
+              EXTRACT(
+                YEAR FROM rm.month_start
+              )::INTEGER
+
+          AND es.salary_month =
+              EXTRACT(
+                MONTH FROM rm.month_start
+              )::INTEGER
+
+        ORDER BY
+          es.payment_date DESC NULLS LAST
+
+        LIMIT 1
+
+      ) salary ON TRUE
 
       WHERE 1 = 1
     `;
 
-    const values = [];
-    let index = 1;
+    const values = [
+      from_date || null,
+      to_date || null,
+    ];
 
+    let index = 3;
 
-    if (search) {
+    /* =========================
+       SEARCH
+    ========================= */
+
+    if (search && search.trim() !== "") {
+
       query += `
         AND (
           c.full_name ILIKE $${index}
           OR c.coach_code ILIKE $${index}
+          OR c.specialization ILIKE $${index}
         )
       `;
 
-      values.push(`%${search}%`);
+      values.push(
+        `%${search.trim()}%`
+      );
+
       index++;
     }
 
+    /* =========================
+       TRAINER FILTER
+    ========================= */
 
-    if (coach_id) {
+    if (
+      coach_id &&
+      coach_id !== "undefined" &&
+      coach_id !== "null"
+    ) {
+
       query += `
         AND c.coach_id = $${index}
       `;
 
-      values.push(coach_id);
+      values.push(
+        Number(coach_id)
+      );
+
       index++;
     }
 
-
-    if (from_date) {
-      query += `
-        AND make_date(
-          s.salary_year,
-          s.salary_month,
-          1
-        ) >= DATE_TRUNC(
-          'month',
-          $${index}::date
-        )
-      `;
-
-      values.push(from_date);
-      index++;
-    }
-
-
-    if (to_date) {
-      query += `
-        AND make_date(
-          s.salary_year,
-          s.salary_month,
-          1
-        ) <= DATE_TRUNC(
-          'month',
-          $${index}::date
-        )
-      `;
-
-      values.push(to_date);
-      index++;
-    }
-
-
+    /* =========================
+       ORDER
+    ========================= */
 
     query += `
       ORDER BY
-        s.salary_year DESC,
-        s.salary_month DESC,
+        rm.month_start DESC,
         c.full_name ASC;
     `;
-
 
     const result = await pool.query(
       query,
       values
     );
-
 
     return sendSuccessResponse(
       res,
@@ -790,14 +798,32 @@ exports.getStaffMonthlyReport = async (req, res) => {
 
   try {
     let query = `
-      WITH attendance_summary AS (
+      WITH report_months AS (
+
+        SELECT
+          generate_series(
+            DATE_TRUNC(
+              'month',
+              COALESCE($1::date, CURRENT_DATE)
+            ),
+            DATE_TRUNC(
+              'month',
+              COALESCE($2::date, CURRENT_DATE)
+            ),
+            INTERVAL '1 month'
+          )::date AS month_start
+
+      ),
+
+      attendance_summary AS (
+
         SELECT
           employee_code,
 
           DATE_TRUNC(
             'month',
             payroll_date
-          ) AS month_start,
+          )::date AS month_start,
 
           COUNT(
             DISTINCT payroll_date
@@ -810,143 +836,150 @@ exports.getStaffMonthlyReport = async (req, res) => {
           DATE_TRUNC(
             'month',
             payroll_date
-          )
+          )::date
+
       )
 
       SELECT
 
-        s.staff_code,
+        /* Staff ID */
+        s.staff_code AS staff_id,
 
-        s.staff_id,
+        /* Staff Primary Key */
+        s.staff_id AS staff_primary_id,
 
+        /* Staff Name */
         s.full_name AS staff_name,
 
+        /* Designation */
         s.designation,
 
-
-        TRIM(
-          TO_CHAR(
-            make_date(
-              es.salary_year,
-              es.salary_month,
-              1
-            ),
-            'Month'
-          )
+        /* Month */
+        TO_CHAR(
+          rm.month_start,
+          'FMMonth'
         ) AS month,
 
+        /* Year */
+        EXTRACT(
+          YEAR FROM rm.month_start
+        )::INTEGER AS year,
 
-        es.salary_year AS year,
-
-
+        /* Present */
         COALESCE(
           att.days_present,
           0
         ) AS present,
 
-
-
+        /* Absent */
         GREATEST(
 
-          (
-            CASE
+          CASE
 
-              /* Current month */
-              WHEN make_date(
-                     es.salary_year,
-                     es.salary_month,
-                     1
-                   )
-                   =
-                   DATE_TRUNC(
-                     'month',
-                     CURRENT_DATE
-                   )::date
+            /* Current Month */
+            WHEN rm.month_start =
+                 DATE_TRUNC(
+                   'month',
+                   CURRENT_DATE
+                 )::date
 
-              THEN
+            THEN
+              (
                 CURRENT_DATE
-                -
-                make_date(
-                  es.salary_year,
-                  es.salary_month,
-                  1
-                )
+                - rm.month_start
                 + 1
+              )
 
-
-              /* Previous months */
-              ELSE
+            /* Previous Months */
+            ELSE
+              (
                 (
-                  make_date(
-                    es.salary_year,
-                    es.salary_month,
-                    1
-                  )
+                  rm.month_start
                   + INTERVAL '1 month'
                   - INTERVAL '1 day'
                 )::date
-
-                -
-                make_date(
-                  es.salary_year,
-                  es.salary_month,
-                  1
-                )
+                - rm.month_start
                 + 1
+              )
 
-            END
+          END
 
-            -
-            COALESCE(
-              att.days_present,
-              0
-            )
-
+          -
+          COALESCE(
+            att.days_present,
+            0
           ),
+
           0
 
         ) AS absent,
 
+        /* Salary Paid */
+        salary.net_salary AS salary_paid,
 
-        
+        /* Salary Paid Date */
+        salary.payment_date AS salary_paid_date
 
-        es.net_salary AS salary_paid,
+      FROM tbl_staff s
 
+      CROSS JOIN report_months rm
 
-      
-
-        es.payment_date AS salary_paid_date
-
-
-      FROM tbl_employee_salary es
-
-
-
-      INNER JOIN tbl_staff s
-        ON s.staff_id = es.staff_id
-
-
-
+      /* Attendance */
       LEFT JOIN attendance_summary att
 
         ON att.employee_code =
            s.staff_code
 
         AND att.month_start =
-            make_date(
-              es.salary_year,
-              es.salary_month,
-              1
-            )
+            rm.month_start
 
+      /* Salary */
+      LEFT JOIN LATERAL (
+
+        SELECT
+          es.net_salary,
+          es.payment_date
+
+        FROM tbl_employee_salary es
+
+        WHERE
+          es.staff_id = s.staff_id
+
+          AND es.salary_year =
+              EXTRACT(
+                YEAR FROM rm.month_start
+              )::INTEGER
+
+          AND es.salary_month =
+              EXTRACT(
+                MONTH FROM rm.month_start
+              )::INTEGER
+
+        ORDER BY
+          es.payment_date DESC NULLS LAST
+
+        LIMIT 1
+
+      ) salary ON TRUE
 
       WHERE 1 = 1
     `;
 
-    const values = [];
-    let index = 1;
+    const values = [
+      from_date || null,
+      to_date || null,
+    ];
 
-    if (search) {
+    let index = 3;
+
+    /* =========================
+       SEARCH
+    ========================= */
+
+    if (
+      search &&
+      search.trim() !== ""
+    ) {
       query += `
         AND (
           s.full_name ILIKE $${index}
@@ -955,67 +988,47 @@ exports.getStaffMonthlyReport = async (req, res) => {
         )
       `;
 
-      values.push(`%${search}%`);
+      values.push(
+        `%${search.trim()}%`
+      );
+
       index++;
     }
 
-    if (staff_id) {
+    /* =========================
+       STAFF FILTER
+    ========================= */
+
+    if (
+      staff_id &&
+      staff_id !== "undefined" &&
+      staff_id !== "null"
+    ) {
       query += `
         AND s.staff_id = $${index}
       `;
 
-      values.push(staff_id);
+      values.push(
+        Number(staff_id)
+      );
+
       index++;
     }
 
-
-    if (from_date) {
-      query += `
-        AND make_date(
-          es.salary_year,
-          es.salary_month,
-          1
-        ) >= DATE_TRUNC(
-          'month',
-          $${index}::date
-        )
-      `;
-
-      values.push(from_date);
-      index++;
-    }
-
-
-    if (to_date) {
-      query += `
-        AND make_date(
-          es.salary_year,
-          es.salary_month,
-          1
-        ) <= DATE_TRUNC(
-          'month',
-          $${index}::date
-        )
-      `;
-
-      values.push(to_date);
-      index++;
-    }
-
+    /* =========================
+       ORDER
+    ========================= */
 
     query += `
       ORDER BY
-        es.salary_year DESC,
-        es.salary_month DESC,
+        rm.month_start DESC,
         s.full_name ASC;
     `;
-
 
     const result = await pool.query(
       query,
       values
     );
-
 
     return sendSuccessResponse(
       res,

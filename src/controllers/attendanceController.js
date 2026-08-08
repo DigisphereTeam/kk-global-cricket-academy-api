@@ -126,105 +126,6 @@ exports.getAttendance = async (req, res) => {
 
     for (const row of result.rows) {
       if (!attendanceMap.has(row.id)) {
-        const employeeRows = result.rows.filter(
-          (item) => item.id === row.id
-        );
-
-        // Get all IN punches for this employee
-        const inPunches = employeeRows.filter(
-          (item) =>
-            item.punch_type &&
-            item.punch_type.toLowerCase() === "in"
-        );
-
-        let batch = "One-to-One";
-        let session = 0;
-
-        /*
-          REGULAR MORNING
-          Original: 06:00 AM - 08:00 AM
-          Buffer: 25 minutes before start
-          Final: 05:35 AM - 08:00 AM
-
-          REGULAR EVENING
-          Original: 04:30 PM - 06:30 PM
-          Buffer: 25 minutes before start
-          Final: 04:05 PM - 06:30 PM
-        */
-
-        const regularMorningStart = 5 * 60 + 35; // 05:35 AM
-        const regularMorningEnd = 8 * 60; // 08:00 AM
-
-        const regularEveningStart = 16 * 60 + 5; // 04:05 PM
-        const regularEveningEnd = 18 * 60 + 30; // 06:30 PM
-
-        let regularSession = null;
-
-        for (const punch of inPunches) {
-          if (!punch.punch_time) continue;
-
-          // PetPooja gives UTC timestamp, convert to IST
-          const punchDate = new Date(punch.punch_time);
-
-          const istTime = punchDate.toLocaleTimeString("en-GB", {
-            timeZone: "Asia/Kolkata",
-            hour12: false,
-          });
-
-          const [hours, minutes, seconds = 0] =
-            istTime.split(":").map(Number);
-
-          const punchMinutes =
-            hours * 60 + minutes + seconds / 60;
-
-          if (
-            punchMinutes >= regularMorningStart &&
-            punchMinutes <= regularMorningEnd
-          ) {
-            regularSession = "Morning";
-            break;
-          }
-
-          if (
-            punchMinutes >= regularEveningStart &&
-            punchMinutes <= regularEveningEnd
-          ) {
-            regularSession = "Evening";
-            break;
-          }
-        }
-
-        if (regularSession) {
-          batch = "Regular";
-          session = regularSession;
-        } else {
-          batch = "One-on-One";
-          session = inPunches.length;
-        }
-
-        /*
-         * Get latest IN punch.
-         * This will be used only for sorting.
-         */
-        let latestPunchIn = null;
-
-        if (inPunches.length > 0) {
-          latestPunchIn = inPunches.reduce(
-            (latest, punch) => {
-              const currentPunch = new Date(
-                punch.punch_time
-              );
-
-              if (!latest || currentPunch > latest) {
-                return currentPunch;
-              }
-
-              return latest;
-            },
-            null
-          );
-        }
-
         attendanceMap.set(row.id, {
           id: row.attendance_id,
           attendance_id: row.id,
@@ -232,68 +133,24 @@ exports.getAttendance = async (req, res) => {
           code: row.code,
           name: row.name,
           date,
-          batch,
-          session,
+          batch: "Morning",
+          session: "Morning",
           attendance_status: row.attendance_id
             ? "Present"
-            : "Absent",
-
-          // Internal field used for sorting
-          latest_punch_in: latestPunchIn,
+            : "Absent"
         });
       }
     }
 
-    /*
-     * Sort order:
-     *
-     * 1. Employees with attendance first
-     * 2. Latest punch-in time first
-     * 3. Employees without attendance at the bottom
-     */
-    const data = Array.from(attendanceMap.values()).sort(
-      (a, b) => {
-        // Present employees first
-        if (a.latest_punch_in && !b.latest_punch_in) {
-          return -1;
-        }
-
-        if (!a.latest_punch_in && b.latest_punch_in) {
-          return 1;
-        }
-
-        // Both have punches -> latest punch first
-        if (a.latest_punch_in && b.latest_punch_in) {
-          return (
-            new Date(b.latest_punch_in) -
-            new Date(a.latest_punch_in)
-          );
-        }
-
-        // Both don't have punches -> alphabetical
-        return a.name.localeCompare(b.name);
-      }
-    );
-
-    /*
-     * Remove internal sorting field
-     * from API response.
-     */
-    data.forEach((item) => {
-      delete item.latest_punch_in;
-    });
+    const data = Array.from(attendanceMap.values());
 
     const statistics = {
       present_today: data.filter(
-        (item) =>
-          item.attendance_status === "Present"
+        (item) => item.attendance_status === "Present"
       ).length,
-
       absent_today: data.filter(
-        (item) =>
-          item.attendance_status === "Absent"
+        (item) => item.attendance_status === "Absent"
       ).length,
-
       late_today: 0,
       on_leave: 0,
     };
@@ -313,8 +170,7 @@ exports.getAttendance = async (req, res) => {
     return sendErrorResponse(
       res,
       500,
-      error.message ||
-      "Failed to fetch attendance."
+      error.message || "Failed to fetch attendance."
     );
   }
 };
@@ -351,7 +207,7 @@ exports.getMonthlyAttendanceSummary = async (req, res) => {
         SELECT admission_id AS employee_code
         FROM tbl_players
         WHERE player_id = $1
-  `;
+      `;
     }
 
     if (employee_type === "Coach") {
@@ -359,7 +215,7 @@ exports.getMonthlyAttendanceSummary = async (req, res) => {
         SELECT coach_code AS employee_code
         FROM tbl_coach
         WHERE coach_id = $1
-  `;
+      `;
     }
 
     if (employee_type === "Staff") {
@@ -367,7 +223,7 @@ exports.getMonthlyAttendanceSummary = async (req, res) => {
         SELECT staff_code AS employee_code
         FROM tbl_staff
         WHERE staff_id = $1
-  `;
+      `;
     }
 
     const employeeResult = await pool.query(employeeCodeQuery, [employee_id]);
@@ -386,45 +242,50 @@ exports.getMonthlyAttendanceSummary = async (req, res) => {
 
     const attendanceResult = await pool.query(
       `
-      WITH months AS(
-    SELECT generate_series(1, $3:: int) AS month_number
-  ),
-  attendance AS(
-    SELECT
-              EXTRACT(MONTH FROM payroll_date):: int AS month_number,
-    COUNT(DISTINCT payroll_date) AS working_days,
-    COUNT(DISTINCT payroll_date) AS present
+      WITH months AS (
+          SELECT generate_series(1, $3::int) AS month_number
+      ),
+      attendance AS (
+          SELECT
+              EXTRACT(MONTH FROM payroll_date)::int AS month_number,
+              COUNT(DISTINCT payroll_date) AS working_days,
+              COUNT(DISTINCT payroll_date) AS present
           FROM tbl_attendance
           WHERE employee_code = $1
             AND EXTRACT(YEAR FROM payroll_date) = $2
           GROUP BY EXTRACT(MONTH FROM payroll_date)
-  )
+      )
 
-SELECT
-m.month_number,
-  TRIM(
-    TO_CHAR(
-      TO_DATE(m.month_number:: text, 'MM'),
-      'Month'
-    )
-  ) AS month,
-    COALESCE(a.working_days, 0) AS working_days,
-      COALESCE(a.present, 0) AS present,
-        0 AS absent,
+      SELECT
+          m.month_number,
+          TRIM(
+            TO_CHAR(
+              TO_DATE(m.month_number::text, 'MM'),
+              'Month'
+            )
+          ) AS month,
+          COALESCE(a.working_days, 0) AS working_days,
+          COALESCE(a.present, 0) AS present,
+          0 AS absent,
           0 AS leave,
-            0 AS late,
-              CASE
+          0 AS late,
+          CASE
             WHEN COALESCE(a.working_days, 0) = 0 THEN 0
             ELSE ROUND(
-                (a.present:: numeric / a.working_days) * 100,
-  0
+              (a.present::numeric / a.working_days) * 100,
+              0
             )
           END AS attendance_percentage
       FROM months m
       LEFT JOIN attendance a
         ON m.month_number = a.month_number
+<<<<<<< HEAD
       ORDER BY m.month_number DESC;
 `,
+=======
+      ORDER BY m.month_number;
+      `,
+>>>>>>> develop
       [employeeCode, year, lastMonth]
     );
 
@@ -464,7 +325,7 @@ m.month_number,
           present: statistics.present,
           absent: statistics.absent,
           late: statistics.late,
-          attendance_percentage: `${statistics.attendance_percentage}% `,
+          attendance_percentage: `${statistics.attendance_percentage}%`,
         },
         monthly_attendance: monthlyData,
       }
@@ -596,6 +457,13 @@ exports.getAttendanceTimeline = async (req, res) => {
      * ============================================================
      * DATE RANGE
      * ============================================================
+     *
+     * If dates are not provided:
+     * from_date = first day of current month
+     * to_date   = today
+     *
+     * If dates are provided:
+     * use the provided date range.
      */
 
     const now = new Date();
@@ -608,6 +476,7 @@ exports.getAttendanceTimeline = async (req, res) => {
     let toDate;
 
     if (!from_date && !to_date) {
+      // First day of current month
       const currentMonthStart = new Date(
         now.toLocaleString("en-US", {
           timeZone: "Asia/Kolkata",
@@ -625,6 +494,7 @@ exports.getAttendanceTimeline = async (req, res) => {
 
       toDate = today;
     } else {
+      // If one is provided, both are required
       if (!from_date || !to_date) {
         return sendErrorResponse(
           res,
@@ -633,6 +503,7 @@ exports.getAttendanceTimeline = async (req, res) => {
         );
       }
 
+      // Validate date format
       if (
         !/^\d{4}-\d{2}-\d{2}$/.test(from_date) ||
         !/^\d{4}-\d{2}-\d{2}$/.test(to_date)
@@ -648,6 +519,7 @@ exports.getAttendanceTimeline = async (req, res) => {
       toDate = to_date;
     }
 
+    // Validate date range
     if (fromDate > toDate) {
       return sendErrorResponse(
         res,
@@ -656,11 +528,12 @@ exports.getAttendanceTimeline = async (req, res) => {
       );
     }
 
+    // Don't allow future to_date
     if (toDate > today) {
       return sendErrorResponse(
         res,
         400,
-        "To date cannot be a future date."
+        "to_date cannot be a future date."
       );
     }
 
@@ -716,12 +589,6 @@ exports.getAttendanceTimeline = async (req, res) => {
      * ============================================================
      * ATTENDANCE TIMELINE
      * ============================================================
-     *
-     * We get ALL IN punches because:
-     *
-     * 1. Regular batch is determined from IN punch time.
-     * 2. One-to-One session count = number of IN punches.
-     *
      */
 
     const result = await pool.query(
@@ -750,14 +617,7 @@ exports.getAttendanceTimeline = async (req, res) => {
             WHEN LOWER(l.punch_type) = 'out'
             THEN l.punch_time
           END
-        ) AS time_out,
-
-        ARRAY_AGG(
-          l.punch_time
-          ORDER BY l.punch_time
-        ) FILTER (
-          WHERE LOWER(l.punch_type) = 'in'
-        ) AS in_punches
+        ) AS time_out
 
       FROM dates d
 
@@ -784,28 +644,6 @@ exports.getAttendanceTimeline = async (req, res) => {
 
     /*
      * ============================================================
-     * BATCH TIME SETTINGS
-     * ============================================================
-     *
-     * Morning:
-     * Actual: 06:00 AM - 08:00 AM
-     * Buffer: 25 minutes before
-     * Final: 05:35 AM - 08:00 AM
-     *
-     * Evening:
-     * Actual: 04:30 PM - 06:30 PM
-     * Buffer: 25 minutes before
-     * Final: 04:05 PM - 06:30 PM
-     */
-
-    const regularMorningStart = 5 * 60 + 35; // 05:35 AM
-    const regularMorningEnd = 8 * 60;        // 08:00 AM
-
-    const regularEveningStart = 16 * 60 + 5; // 04:05 PM
-    const regularEveningEnd = 18 * 60 + 30;  // 06:30 PM
-
-    /*
-     * ============================================================
      * FORMAT RESPONSE
      * ============================================================
      */
@@ -815,42 +653,17 @@ exports.getAttendanceTimeline = async (req, res) => {
       let remarks;
       let marked_by = "-";
 
-      /*
-       * ----------------------------------------------------------
-       * STATUS
-       * ----------------------------------------------------------
-       */
-
       if (row.attendance_id) {
         status = "Present";
         remarks = "On Time";
         marked_by = "Coach";
 
-        /*
-         * Check late using IST time.
-         */
-
-        if (row.time_in) {
-          const punchDate = new Date(row.time_in);
-
-          const istTime = punchDate.toLocaleTimeString(
-            "en-GB",
-            {
-              timeZone: "Asia/Kolkata",
-              hour12: false,
-            }
-          );
-
-          const [hours, minutes] =
-            istTime.split(":").map(Number);
-
-          const punchMinutes =
-            hours * 60 + minutes;
-
-          if (punchMinutes > 9 * 60) {
-            status = "Late";
-            remarks = "Late Entry";
-          }
+        if (
+          row.time_in &&
+          row.time_in > "09:00:00"
+        ) {
+          status = "Late";
+          remarks = "Late Entry";
         }
       } else if (row.payroll_date === today) {
         status = "Pending";
@@ -860,6 +673,7 @@ exports.getAttendanceTimeline = async (req, res) => {
         remarks = "Not Attended";
       }
 
+<<<<<<< HEAD
       /*
        * ----------------------------------------------------------
        * BATCH / SESSION
@@ -947,18 +761,15 @@ exports.getAttendanceTimeline = async (req, res) => {
         session = inPunches.length;
       }
 
+=======
+>>>>>>> a6386bbf654d465fc7d2596f8dd5c56a5a74191b
       return {
         attendance_id: row.attendance_id,
         date: row.payroll_date,
-
-        batch,
-        session,
-
+        session: "Morning",
         status,
-
         time_in: row.time_in || "-",
         time_out: row.time_out || "-",
-
         marked_by,
         remarks,
       };
@@ -976,7 +787,6 @@ exports.getAttendanceTimeline = async (req, res) => {
         attendance,
       }
     );
-
   } catch (error) {
     console.error(error);
 

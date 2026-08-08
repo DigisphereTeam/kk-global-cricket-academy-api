@@ -486,77 +486,109 @@ exports.getDashboardCharts = async (req, res) => {
 
       `),
 
+      // Weekly Attendance Chart
       pool.query(`
-      WITH days AS(
-            SELECT generate_series(
-              CURRENT_DATE - INTERVAL '6 days',
-              CURRENT_DATE,
-              INTERVAL '1 day'
-            ):: date AS attendance_date
-          ),
 
-            total_players AS(
-              SELECT COUNT(*):: INT AS total
-        FROM tbl_players
-            ),
+        WITH days AS (
 
-            attendance_data AS(
-              SELECT
-          ta.payroll_date,
-              COUNT(DISTINCT ta.employee_code):: INT AS present
-        FROM tbl_attendance ta
-        INNER JOIN tbl_players p
-          ON p.admission_id = ta.employee_code
-        WHERE ta.payroll_date >= CURRENT_DATE - INTERVAL '6 days'
+          SELECT generate_series(
+            CURRENT_DATE - INTERVAL '5 days',
+            CURRENT_DATE,
+            INTERVAL '1 day'
+          )::date AS attendance_date
+
+        ),
+
+
+        total_players AS (
+
+          SELECT
+            COUNT(*) AS total
+
+          FROM tbl_players
+
+        ),
+
+
+        attendance_data AS (
+
+          SELECT
+
+            ta.payroll_date,
+
+            COUNT(DISTINCT ta.employee_code) AS present
+
+          FROM tbl_attendance ta
+
+          INNER JOIN tbl_players p
+
+            ON p.admission_id = ta.employee_code
+
+          WHERE ta.payroll_date >= CURRENT_DATE - INTERVAL '5 days'
+
           AND ta.payroll_date <= CURRENT_DATE
-        GROUP BY ta.payroll_date
-            )
 
-      SELECT
-        TO_CHAR(d.attendance_date, 'Dy') AS day,
-            d.attendance_date AS date,
+          GROUP BY ta.payroll_date
 
-            --Present
-        COALESCE(ad.present, 0):: INT AS present_count,
+        )
 
-            COALESCE(
-              ROUND(
-                (
-                  COALESCE(ad.present, 0):: NUMERIC
-              / NULLIF(tp.total, 0)
-              ) * 100,
-              0
-            ),
-            0
-          ):: INT AS present_percentage,
 
-          --Absent
-            (
-              tp.total - COALESCE(ad.present, 0)
-            ):: INT AS absent_count,
+        SELECT
+
+
+          TO_CHAR(
+            d.attendance_date,
+            'Dy'
+          ) AS day,
+
 
           COALESCE(
-            ROUND(
-              (
-                (tp.total - COALESCE(ad.present, 0)):: NUMERIC
-            / NULLIF(tp.total, 0)
-            ) * 100,
+            LEAST(
+              100,
+              ROUND(
+                (
+                  COALESCE(ad.present,0)::numeric
+                  /
+                  NULLIF(tp.total,0)
+                ) * 100
+              )
+            ),
             0
-          ),
-          0
-        ):: INT AS absent_percentage,
+          )::INT AS present_percentage,
 
-          tp.total AS total_players
 
-      FROM days d
+          COALESCE(
+            GREATEST(
+              0,
+              100 -
+              LEAST(
+                100,
+                ROUND(
+                  (
+                    COALESCE(ad.present,0)::numeric
+                    /
+                    NULLIF(tp.total,0)
+                  ) * 100
+                )
+              )
+            ),
+            0
+          )::INT AS absent_percentage
 
-      CROSS JOIN total_players tp
 
-      LEFT JOIN attendance_data ad
-        ON ad.payroll_date = d.attendance_date
+        FROM days d
 
-      ORDER BY d.attendance_date;
-    `)
+        CROSS JOIN total_players tp
+
+        LEFT JOIN attendance_data ad
+
+          ON ad.payroll_date = d.attendance_date
+
+
+        ORDER BY
+          d.attendance_date;
+
+      `)
 
     ]);
 
@@ -620,101 +652,101 @@ exports.getDashboardRevenueAndActivities = async (req, res) => {
 
       // Revenue Trend - Last 6 Months (Net Revenue)
       pool.query(`
-        WITH months AS(
+        WITH months AS (
 
-      SELECT
+          SELECT
             DATE_TRUNC('month', CURRENT_DATE)
-      - (INTERVAL '1 month' * generate_series(5, 0, -1))
+            - (INTERVAL '1 month' * generate_series(5, 0, -1))
             AS month_date
 
         )
 
-    SELECT
+        SELECT
 
-    TO_CHAR(
-      months.month_date,
-      'Mon'
-    ) AS month,
+          TO_CHAR(
+            months.month_date,
+            'Mon'
+          ) AS month,
 
-      COALESCE(
-        SUM(transactions.amount),
-        0
-      ) AS revenue
+          COALESCE(
+            SUM(transactions.amount),
+            0
+          ) AS revenue
 
         FROM months
 
-        LEFT JOIN(
+        LEFT JOIN (
 
-        --Regular Player Fee Revenue
+          -- Regular Player Fee Revenue
           SELECT
             amount,
-        payment_date AS transaction_date
+            payment_date AS transaction_date
           FROM tbl_player_fees
           WHERE status = 'Paid'
 
           UNION ALL
 
-          --One - On - One Revenue
+          -- One-On-One Revenue
           SELECT
             fee_amount AS amount,
-        application_date AS transaction_date
+            application_date AS transaction_date
           FROM tbl_one_on_one_applications
 
           UNION ALL
 
-          --Ground Booking Revenue
+          -- Ground Booking Revenue
           SELECT
             total_amount AS amount,
-        booking_date AS transaction_date
+            booking_date AS transaction_date
           FROM tbl_ground_booking
           WHERE status = 'Confirmed'
 
           UNION ALL
 
-          --Salary Expense
+          -- Salary Expense
           SELECT
-        - net_salary AS amount,
-        payment_date AS transaction_date
+            -net_salary AS amount,
+            payment_date AS transaction_date
           FROM tbl_employee_salary
 
           UNION ALL
 
-          --Other Expenditure
+          -- Other Expenditure
           SELECT
-        - amount AS amount,
-        expenditure_date AS transaction_date
+            -amount AS amount,
+            expenditure_date AS transaction_date
           FROM tbl_expenditure
 
-      ) transactions
+        ) transactions
 
         ON DATE_TRUNC(
-        'month',
-        transactions.transaction_date
-      ) = months.month_date
+          'month',
+          transactions.transaction_date
+        ) = months.month_date
 
         GROUP BY
-    months.month_date
+          months.month_date
 
         ORDER BY
-    months.month_date;
-    `),
+          months.month_date;
+      `),
 
       // Recent Activities
       pool.query(`
-    SELECT
-    module_name,
-      action,
-      description,
-      performed_by,
-      created_at
+        SELECT
+          module_name,
+          action,
+          description,
+          performed_by,
+          created_at
         FROM tbl_notification_logs
-        WHERE NOT(
-        module_name = 'Ground Booking'
-          AND action IN('Confirmed', 'Cancelled')
-      )
+        WHERE NOT (
+          module_name = 'Ground Booking'
+          AND action IN ('Confirmed', 'Cancelled')
+        )
         ORDER BY created_at DESC
         LIMIT 4;
-    `)
+      `)
 
     ]);
 
