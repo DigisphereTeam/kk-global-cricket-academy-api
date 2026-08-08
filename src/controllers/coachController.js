@@ -305,7 +305,6 @@ exports.getCoachById = async (req, res) => {
         AND a.payroll_date = $2
 
       WHERE c.coach_id = $1
-        AND c.is_active = TRUE
       `,
       [id, today]
     );

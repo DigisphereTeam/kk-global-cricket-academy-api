@@ -513,7 +513,6 @@ exports.getPlayerById = async (req, res) => {
         ON d.player_id = p.player_id
 
       WHERE p.player_id = $1
-        AND p.is_active = TRUE
 
       GROUP BY
         p.player_id,
