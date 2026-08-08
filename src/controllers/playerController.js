@@ -374,6 +374,7 @@ exports.getAllPlayers = async (req, res) => {
     });
 
     const [players, statistics] = await Promise.all([
+    
       pool.query(
         `
         SELECT
@@ -413,19 +414,113 @@ exports.getAllPlayers = async (req, res) => {
         [today]
       ),
 
+      // =========================
+      // PLAYER STATISTICS
+      // =========================
       pool.query(`
         SELECT
-          COUNT(*) AS total_players,
-          COUNT(*) FILTER (WHERE is_active = TRUE) AS active_players,
-          COUNT(*) FILTER (WHERE is_active = FALSE) AS inactive_players
-        FROM tbl_players
+
+          /* Total Players */
+          (
+            SELECT COUNT(*)
+            FROM tbl_players
+          ) AS total_players,
+
+
+          /* Active Players */
+          (
+            SELECT COUNT(*)
+            FROM tbl_players
+            WHERE is_active = TRUE
+          ) AS active_players,
+
+
+          /* Inactive Players */
+          (
+            SELECT COUNT(*)
+            FROM tbl_players
+            WHERE is_active = FALSE
+          ) AS inactive_players,
+
+
+          /* Pending Fee Players */
+          (
+            SELECT COUNT(DISTINCT player_id)
+            FROM (
+
+              /* Regular Players */
+              SELECT p.player_id
+              FROM tbl_players p
+
+              WHERE p.is_active = TRUE
+
+                /* Only after the 4th */
+                AND CURRENT_DATE >
+                    DATE_TRUNC('month', CURRENT_DATE)
+                    + INTERVAL '3 day'
+
+                /* Player has NOT paid this month */
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM tbl_player_fees pf
+                  WHERE pf.player_id = p.player_id
+                    AND pf.status = 'Paid'
+                    AND pf.payment_date >=
+                        DATE_TRUNC('month', CURRENT_DATE)
+                    AND pf.payment_date <
+                        DATE_TRUNC('month', CURRENT_DATE)
+                        + INTERVAL '1 month'
+                )
+
+
+              UNION
+
+
+              /* One-On-One Players */
+              SELECT o.player_id
+              FROM tbl_one_on_one_applications o
+
+              INNER JOIN tbl_players p
+                ON p.player_id = o.player_id
+                AND p.is_active = TRUE
+
+              WHERE o.is_active = TRUE
+
+                /* Only after the 4th */
+                AND CURRENT_DATE >
+                    DATE_TRUNC('month', CURRENT_DATE)
+                    + INTERVAL '3 day'
+
+                /* Player has NOT paid this month */
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM tbl_player_fees pf
+                  WHERE pf.player_id = o.player_id
+                    AND pf.status = 'Paid'
+                    AND pf.payment_date >=
+                        DATE_TRUNC('month', CURRENT_DATE)
+                    AND pf.payment_date <
+                        DATE_TRUNC('month', CURRENT_DATE)
+                        + INTERVAL '1 month'
+                )
+
+            ) AS pending_players
+          ) AS pending_fees
+
       `),
     ]);
+
+    // =========================
+    // PLAYER LIST RESPONSE
+    // =========================
     const playerList = players.rows.map((row) => ({
       ...row,
       status: row.is_active ? "Active" : "Inactive",
     }));
 
+    // =========================
+    // SUCCESS RESPONSE
+    // =========================
     return sendSuccessResponse(
       res,
       200,
@@ -435,19 +530,27 @@ exports.getAllPlayers = async (req, res) => {
           total_players: Number(
             statistics.rows[0].total_players
           ),
+
           active_players: Number(
             statistics.rows[0].active_players
           ),
+
           inactive_players: Number(
             statistics.rows[0].inactive_players
           ),
-          pending_fees: 0,
+
+          pending_fees: Number(
+            statistics.rows[0].pending_fees
+          ),
         },
+
         players: playerList,
       }
     );
 
   } catch (error) {
+    console.error("Get All Players Error:", error);
+
     return sendErrorResponse(
       res,
       500,

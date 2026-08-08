@@ -12,7 +12,7 @@ exports.getNotifications = async (req, res) => {
       [req.user.user_id]
     );
 
-    // User not found
+
     if (userResult.rowCount === 0) {
       return sendErrorResponse(
         res,
@@ -25,18 +25,6 @@ exports.getNotifications = async (req, res) => {
 
     let query = "";
 
-    // =====================================
-    // ADMIN
-    // =====================================
-    // ADMIN gets:
-    // 1. Fee Due notifications
-    // 2. Ground Booking Pending notifications
-    // 3. Other notifications
-    //
-    // ADMIN does NOT get:
-    // Ground Booking Confirmed
-    // Ground Booking Cancelled
-    // =====================================
 
     if (role === "ADMIN") {
       query = `
@@ -60,15 +48,6 @@ exports.getNotifications = async (req, res) => {
       `;
     }
 
-    // =====================================
-    // PRIMARY
-    // =====================================
-    // PRIMARY gets:
-    // Ground Booking Confirmed
-    // Ground Booking Cancelled
-    // Fee Due
-    // =====================================
-
     else if (role === "PRIMARY") {
       query = `
         SELECT *
@@ -85,10 +64,6 @@ exports.getNotifications = async (req, res) => {
         ORDER BY created_at DESC;
       `;
     }
-
-    // =====================================
-    // UNAUTHORIZED ROLE
-    // =====================================
 
     else {
       return sendErrorResponse(
