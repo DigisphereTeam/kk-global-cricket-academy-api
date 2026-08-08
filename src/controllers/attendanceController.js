@@ -38,85 +38,85 @@ exports.getAttendance = async (req, res) => {
 
     if (employee_type === "Player") {
       query = `
-        SELECT
-          p.player_id AS id,
-          p.admission_id AS code,
+      SELECT
+      p.player_id AS id,
+        p.admission_id AS code,
           p.full_name AS name,
 
-          a.attendance_id,
-          a.payroll_date,
+            a.attendance_id,
+            a.payroll_date,
 
-          l.punch_type,
-          l.punch_time,
-          l.branch_name,
-          l.device_id
+            l.punch_type,
+            l.punch_time,
+            l.branch_name,
+            l.device_id
 
-        FROM tbl_players p
+              FROM tbl_players p
 
-        LEFT JOIN tbl_attendance a
-          ON a.employee_code = p.admission_id
-          AND a.payroll_date = $1
+              LEFT JOIN tbl_attendance a
+                ON a.employee_code = p.admission_id
+                AND a.payroll_date = $1
 
-        LEFT JOIN tbl_attendance_logs l
-          ON l.attendance_id = a.attendance_id
+              LEFT JOIN tbl_attendance_logs l
+                ON l.attendance_id = a.attendance_id
 
-        ORDER BY p.full_name, l.punch_time;
+              ORDER BY p.full_name, l.punch_time;
       `;
     }
 
     if (employee_type === "Coach") {
       query = `
-        SELECT
-          c.coach_id AS id,
-          c.coach_code AS code,
+      SELECT
+      c.coach_id AS id,
+        c.coach_code AS code,
           c.full_name AS name,
 
-          a.attendance_id,
-          a.payroll_date,
+            a.attendance_id,
+            a.payroll_date,
 
-          l.punch_type,
-          l.punch_time,
-          l.branch_name,
-          l.device_id
+            l.punch_type,
+            l.punch_time,
+            l.branch_name,
+            l.device_id
 
-        FROM tbl_coach c
+              FROM tbl_coach c
 
-        LEFT JOIN tbl_attendance a
-          ON a.employee_code = c.coach_code
-          AND a.payroll_date = $1
+              LEFT JOIN tbl_attendance a
+                ON a.employee_code = c.coach_code
+                AND a.payroll_date = $1
 
-        LEFT JOIN tbl_attendance_logs l
-          ON l.attendance_id = a.attendance_id
+              LEFT JOIN tbl_attendance_logs l
+                ON l.attendance_id = a.attendance_id
 
-        ORDER BY c.full_name, l.punch_time;
+              ORDER BY c.full_name, l.punch_time;
       `;
     }
 
     if (employee_type === "Staff") {
       query = `
-        SELECT
-          s.staff_id AS id,
-          s.staff_code AS code,
+      SELECT
+      s.staff_id AS id,
+        s.staff_code AS code,
           s.full_name AS name,
 
-          a.attendance_id,
-          a.payroll_date,
+            a.attendance_id,
+            a.payroll_date,
 
-          l.punch_type,
-          l.punch_time,
-          l.branch_name,
-          l.device_id
+            l.punch_type,
+            l.punch_time,
+            l.branch_name,
+            l.device_id
 
-        FROM tbl_staff s
+              FROM tbl_staff s
 
-        LEFT JOIN tbl_attendance a
-          ON a.employee_code = s.staff_code
-          AND a.payroll_date = $1
+              LEFT JOIN tbl_attendance a
+                ON a.employee_code = s.staff_code
+                AND a.payroll_date = $1
 
-        LEFT JOIN tbl_attendance_logs l
-          ON l.attendance_id = a.attendance_id
+              LEFT JOIN tbl_attendance_logs l
+                ON l.attendance_id = a.attendance_id
 
-        ORDER BY s.full_name, l.punch_time;
+              ORDER BY s.full_name, l.punch_time;
       `;
     }
 
@@ -126,6 +126,89 @@ exports.getAttendance = async (req, res) => {
 
     for (const row of result.rows) {
       if (!attendanceMap.has(row.id)) {
+        const employeeRows = result.rows.filter(
+          (item) => item.id === row.id
+        );
+
+        // Get all IN punches for this employee
+        const inPunches = employeeRows.filter(
+          (item) =>
+            item.punch_type &&
+            item.punch_type.toLowerCase() === "in"
+        );
+
+        let batch = "One-to-One";
+        let session = 0;
+
+        /*
+          Regular Morning:
+          Original: 06:00 AM - 08:00 AM
+          Buffer: 25 minutes BEFORE start
+
+          Final: 05:35 AM - 08:00 AM
+
+          Regular Evening:
+          Original: 04:30 PM - 06:30 PM
+          Buffer: 25 minutes BEFORE start
+
+          Final: 04:05 PM - 06:30 PM
+        */
+
+        const regularMorningStart = 5 * 60 + 35; // 05:35 AM
+        const regularMorningEnd = 8 * 60;         // 08:00 AM
+
+        // const regularEveningStart = 15 * 60 + 20; // 03:20 PM - testing
+        const regularEveningStart = 16 * 60 + 5; // 04:05 PM - production
+        const regularEveningEnd = 18 * 60 + 30;   // 06:30 PM
+
+        let regularSession = null;
+
+        for (const punch of inPunches) {
+          if (!punch.punch_time) continue;
+
+          // PetPooja gives UTC timestamp, convert to IST
+          const punchDate = new Date(punch.punch_time);
+
+          const istTime = punchDate.toLocaleTimeString("en-GB", {
+            timeZone: "Asia/Kolkata",
+            hour12: false,
+          });
+
+          const [hours, minutes, seconds = 0] =
+            istTime.split(":").map(Number);
+
+          const punchMinutes =
+            hours * 60 + minutes + seconds / 60;
+
+          console.log(
+            `Employee: ${row.name}, UTC: ${punch.punch_time}, IST: ${istTime}`
+          );
+
+          if (
+            punchMinutes >= regularMorningStart &&
+            punchMinutes <= regularMorningEnd
+          ) {
+            regularSession = "Morning";
+            break;
+          }
+
+          if (
+            punchMinutes >= regularEveningStart &&
+            punchMinutes <= regularEveningEnd
+          ) {
+            regularSession = "Evening";
+            break;
+          }
+        }
+
+        if (regularSession) {
+          batch = "Regular";
+          session = regularSession;
+        } else {
+          batch = "One-to-One";
+          session = inPunches.length;
+        }
+
         attendanceMap.set(row.id, {
           id: row.attendance_id,
           attendance_id: row.id,
@@ -133,8 +216,8 @@ exports.getAttendance = async (req, res) => {
           code: row.code,
           name: row.name,
           date,
-          batch: "Morning",
-          session: "Morning",
+          batch,
+          session,
           attendance_status: row.attendance_id
             ? "Present"
             : "Absent"
@@ -148,9 +231,11 @@ exports.getAttendance = async (req, res) => {
       present_today: data.filter(
         (item) => item.attendance_status === "Present"
       ).length,
+
       absent_today: data.filter(
         (item) => item.attendance_status === "Absent"
       ).length,
+
       late_today: 0,
       on_leave: 0,
     };
@@ -207,7 +292,7 @@ exports.getMonthlyAttendanceSummary = async (req, res) => {
         SELECT admission_id AS employee_code
         FROM tbl_players
         WHERE player_id = $1
-      `;
+  `;
     }
 
     if (employee_type === "Coach") {
@@ -215,7 +300,7 @@ exports.getMonthlyAttendanceSummary = async (req, res) => {
         SELECT coach_code AS employee_code
         FROM tbl_coach
         WHERE coach_id = $1
-      `;
+  `;
     }
 
     if (employee_type === "Staff") {
@@ -223,7 +308,7 @@ exports.getMonthlyAttendanceSummary = async (req, res) => {
         SELECT staff_code AS employee_code
         FROM tbl_staff
         WHERE staff_id = $1
-      `;
+  `;
     }
 
     const employeeResult = await pool.query(employeeCodeQuery, [employee_id]);
@@ -242,45 +327,45 @@ exports.getMonthlyAttendanceSummary = async (req, res) => {
 
     const attendanceResult = await pool.query(
       `
-      WITH months AS (
-          SELECT generate_series(1, $3::int) AS month_number
-      ),
-      attendance AS (
-          SELECT
-              EXTRACT(MONTH FROM payroll_date)::int AS month_number,
-              COUNT(DISTINCT payroll_date) AS working_days,
-              COUNT(DISTINCT payroll_date) AS present
+      WITH months AS(
+    SELECT generate_series(1, $3:: int) AS month_number
+  ),
+  attendance AS(
+    SELECT
+              EXTRACT(MONTH FROM payroll_date):: int AS month_number,
+    COUNT(DISTINCT payroll_date) AS working_days,
+    COUNT(DISTINCT payroll_date) AS present
           FROM tbl_attendance
           WHERE employee_code = $1
             AND EXTRACT(YEAR FROM payroll_date) = $2
           GROUP BY EXTRACT(MONTH FROM payroll_date)
-      )
+  )
 
-      SELECT
-          m.month_number,
-          TRIM(
-            TO_CHAR(
-              TO_DATE(m.month_number::text, 'MM'),
-              'Month'
-            )
-          ) AS month,
-          COALESCE(a.working_days, 0) AS working_days,
-          COALESCE(a.present, 0) AS present,
-          0 AS absent,
+SELECT
+m.month_number,
+  TRIM(
+    TO_CHAR(
+      TO_DATE(m.month_number:: text, 'MM'),
+      'Month'
+    )
+  ) AS month,
+    COALESCE(a.working_days, 0) AS working_days,
+      COALESCE(a.present, 0) AS present,
+        0 AS absent,
           0 AS leave,
-          0 AS late,
-          CASE
+            0 AS late,
+              CASE
             WHEN COALESCE(a.working_days, 0) = 0 THEN 0
             ELSE ROUND(
-              (a.present::numeric / a.working_days) * 100,
-              0
+                (a.present:: numeric / a.working_days) * 100,
+  0
             )
           END AS attendance_percentage
       FROM months m
       LEFT JOIN attendance a
         ON m.month_number = a.month_number
       ORDER BY m.month_number;
-      `,
+`,
       [employeeCode, year, lastMonth]
     );
 
@@ -320,7 +405,7 @@ exports.getMonthlyAttendanceSummary = async (req, res) => {
           present: statistics.present,
           absent: statistics.absent,
           late: statistics.late,
-          attendance_percentage: `${statistics.attendance_percentage}%`,
+          attendance_percentage: `${statistics.attendance_percentage}% `,
         },
         monthly_attendance: monthlyData,
       }
@@ -545,7 +630,7 @@ exports.getAttendanceTimeline = async (req, res) => {
         SELECT admission_id AS employee_code
         FROM tbl_players
         WHERE player_id = $1
-      `;
+  `;
     }
 
     if (employee_type === "Coach") {
@@ -553,7 +638,7 @@ exports.getAttendanceTimeline = async (req, res) => {
         SELECT coach_code AS employee_code
         FROM tbl_coach
         WHERE coach_id = $1
-      `;
+  `;
     }
 
     if (employee_type === "Staff") {
@@ -561,7 +646,7 @@ exports.getAttendanceTimeline = async (req, res) => {
         SELECT staff_code AS employee_code
         FROM tbl_staff
         WHERE staff_id = $1
-      `;
+  `;
     }
 
     const employee = await pool.query(
@@ -588,31 +673,31 @@ exports.getAttendanceTimeline = async (req, res) => {
 
     const result = await pool.query(
       `
-      WITH dates AS (
-        SELECT generate_series(
-          $2::date,
-          $3::date,
-          interval '1 day'
-        )::date AS attendance_date
-      )
+      WITH dates AS(
+    SELECT generate_series(
+      $2:: date,
+      $3:: date,
+      interval '1 day'
+    ):: date AS attendance_date
+  )
 
-      SELECT
-        d.attendance_date AS payroll_date,
-        a.attendance_id,
+SELECT
+d.attendance_date AS payroll_date,
+  a.attendance_id,
 
-        MIN(
-          CASE
+  MIN(
+    CASE
             WHEN LOWER(l.punch_type) = 'in'
             THEN l.punch_time
           END
-        ) AS time_in,
+  ) AS time_in,
 
-        MAX(
-          CASE
+    MAX(
+      CASE
             WHEN LOWER(l.punch_type) = 'out'
             THEN l.punch_time
           END
-        ) AS time_out
+    ) AS time_out
 
       FROM dates d
 
@@ -624,12 +709,12 @@ exports.getAttendanceTimeline = async (req, res) => {
         ON l.attendance_id = a.attendance_id
 
       GROUP BY
-        d.attendance_date,
-        a.attendance_id
+d.attendance_date,
+  a.attendance_id
 
       ORDER BY
-        d.attendance_date DESC;
-      `,
+d.attendance_date DESC;
+`,
       [
         employeeCode,
         fromDate,
