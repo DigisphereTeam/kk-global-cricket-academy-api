@@ -613,7 +613,7 @@ exports.getAttendanceTimeline = async (req, res) => {
       return sendErrorResponse(
         res,
         400,
-        "to_date cannot be a future date."
+        "To date cannot be a future date."
       );
     }
 
