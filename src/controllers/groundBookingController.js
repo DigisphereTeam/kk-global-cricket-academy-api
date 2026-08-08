@@ -276,59 +276,26 @@ exports.createGroundBooking = async (req, res) => {
 };
 exports.getAllGroundBookings = async (req, res) => {
     try {
-
-        // Automatically mark expired bookings as Completed
-        await pool.query(`
-            UPDATE tbl_ground_booking
-            SET status = 'Completed',
-                updated_at = CURRENT_TIMESTAMP
-            WHERE LOWER(status) NOT IN ('cancelled', 'completed')
-              AND (
-                    booking_date
-                    + (
-                        TO_TIMESTAMP(
-                            TRIM(
-                                SPLIT_PART(time_slot, '-', 2)
-                            ),
-                            'HH12:MI AM'
-                        )::TIME
-                    )
-                  )
-                  <
-                  (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')
-        `);
-
         const [bookings, statistics] = await Promise.all([
-
-            pool.query(`
+            pool.query(
+                `
                 SELECT *
                 FROM tbl_ground_booking
                 ORDER BY booking_id DESC
-            `),
+                `
+            ),
 
-            pool.query(`
-                SELECT
-                    COUNT(*) AS total_bookings,
-
-                    COUNT(*) FILTER (
-                        WHERE LOWER(status) = 'confirmed'
-                    ) AS confirmed_bookings,
-
-                    COUNT(*) FILTER (
-                        WHERE LOWER(status) = 'pending'
-                    ) AS pending_bookings,
-
-                    COUNT(*) FILTER (
-                        WHERE LOWER(status) = 'completed'
-                    ) AS completed_bookings,
-
-                    COUNT(*) FILTER (
-                        WHERE booking_date >= CURRENT_DATE
-                          AND LOWER(status) NOT IN ('cancelled', 'completed')
-                    ) AS upcoming_bookings
-
-                FROM tbl_ground_booking
-            `)
+            pool.query(
+                `
+            SELECT
+                COUNT(*) AS total_bookings,
+                COUNT(*) FILTER ( WHERE LOWER(status) = 'confirmed') AS confirmed_bookings,
+                COUNT(*) FILTER ( WHERE LOWER(status) = 'pending' ) AS pending_bookings,
+                COUNT(*) FILTER ( WHERE LOWER(status) = 'completed' ) AS completed_bookings,
+                COUNT(*) FILTER ( WHERE booking_date >= CURRENT_DATE AND status != 'Cancelled' AND status != 'Completed') AS upcoming_bookings
+            FROM tbl_ground_booking
+            `
+            ),
         ]);
 
         return sendSuccessResponse(
@@ -337,35 +304,17 @@ exports.getAllGroundBookings = async (req, res) => {
             "Ground bookings fetched successfully.",
             {
                 statistics: {
-                    total_bookings: Number(
-                        statistics.rows[0].total_bookings
-                    ),
-
-                    confirmed_bookings: Number(
-                        statistics.rows[0].confirmed_bookings
-                    ),
-
-                    pending_bookings: Number(
-                        statistics.rows[0].pending_bookings
-                    ),
-
-                    completed_bookings: Number(
-                        statistics.rows[0].completed_bookings
-                    ),
-
-                    upcoming_bookings: Number(
-                        statistics.rows[0].upcoming_bookings
-                    ),
+                    total_bookings: Number(statistics.rows[0].total_bookings),
+                    confirmed_bookings: Number(statistics.rows[0].confirmed_bookings),
+                    pending_bookings: Number(statistics.rows[0].pending_bookings),
+                    completed_bookings: Number(statistics.rows[0].completed_bookings),
+                    upcoming_bookings: Number(statistics.rows[0].upcoming_bookings),
                 },
-
                 bookings: bookings.rows,
             }
         );
 
     } catch (error) {
-
-        console.error(error);
-
         return sendErrorResponse(
             res,
             500,
