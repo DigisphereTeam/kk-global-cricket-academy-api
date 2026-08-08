@@ -423,7 +423,7 @@ m.month_number,
       FROM months m
       LEFT JOIN attendance a
         ON m.month_number = a.month_number
-      ORDER BY m.month_number;
+      ORDER BY m.month_number DESC;
 `,
       [employeeCode, year, lastMonth]
     );
