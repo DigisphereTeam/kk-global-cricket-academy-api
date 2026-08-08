@@ -408,6 +408,10 @@ exports.getAllPlayers = async (req, res) => {
         FROM tbl_players
       `),
     ]);
+    const playerList = players.rows.map((row) => ({
+      ...row,
+      status: row.is_active ? "Active" : "Inactive",
+    }));
 
     return sendSuccessResponse(
       res,
@@ -415,14 +419,21 @@ exports.getAllPlayers = async (req, res) => {
       "Players fetched successfully.",
       {
         statistics: {
-          total_players: Number(statistics.rows[0].total_players),
-          active_players: Number(statistics.rows[0].active_players),
-          inactive_players: Number(statistics.rows[0].inactive_players),
+          total_players: Number(
+            statistics.rows[0].total_players
+          ),
+          active_players: Number(
+            statistics.rows[0].active_players
+          ),
+          inactive_players: Number(
+            statistics.rows[0].inactive_players
+          ),
           pending_fees: 0,
         },
-        players: players.rows,
+        players: playerList,
       }
     );
+
   } catch (error) {
     return sendErrorResponse(
       res,
@@ -507,11 +518,18 @@ exports.getPlayerById = async (req, res) => {
       );
     }
 
+    const player = {
+      ...result.rows[0],
+      status: result.rows[0].is_active
+        ? "Active"
+        : "Inactive",
+    };
+
     return sendSuccessResponse(
       res,
       200,
       "Player retrieved successfully.",
-      result.rows[0]
+      player
     );
   } catch (error) {
     return sendErrorResponse(

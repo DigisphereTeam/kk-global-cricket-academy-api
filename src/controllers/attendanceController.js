@@ -337,6 +337,43 @@ exports.getMonthlyAttendanceSummary = async (req, res) => {
   }
 };
 
+exports.syncAttendanceForCron = async (date) => {
+  try {
+    const syncDate =
+      date ||
+      new Date().toLocaleDateString("en-CA", {
+        timeZone: "Asia/Kolkata",
+      });
+
+    const syncedCount = await syncAttendanceData(syncDate);
+
+    if (syncedCount === 0) {
+      console.log(
+        `Attendance cron: No attendance records found for ${syncDate}.`
+      );
+
+      return {
+        success: true,
+        synced_records: 0,
+        date: syncDate,
+      };
+    }
+
+    return {
+      success: true,
+      synced_records: syncedCount,
+      date: syncDate,
+    };
+  } catch (error) {
+    console.error(
+      "Attendance cron sync failed:",
+      error.response?.data || error.message
+    );
+
+    throw error;
+  }
+};
+
 exports.syncAttendance = async (req, res) => {
   try {
     const today = req.query.date
@@ -668,7 +705,6 @@ const syncPetpoojaAttendance = async (punchData) => {
 
 const syncAttendanceData = async (date) => {
   let accessToken = getAccessToken();
-
   if (
     !accessToken ||
     !getTokenExpiry() ||
