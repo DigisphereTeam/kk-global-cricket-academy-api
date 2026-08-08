@@ -943,7 +943,7 @@ exports.getAttendanceTimeline = async (req, res) => {
         batch = "Regular";
         session = regularSession;
       } else {
-        batch = "One-to-One";
+        batch = "One-on-One";
         session = inPunches.length;
       }
 
