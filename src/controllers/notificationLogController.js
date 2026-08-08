@@ -12,26 +12,43 @@ exports.getNotifications = async (req, res) => {
       [req.user.user_id]
     );
 
+    
+    if (userResult.rowCount === 0) {
+      return sendErrorResponse(
+        res,
+        404,
+        "User not found."
+      );
+    }
+
     const role = userResult.rows[0].role;
 
     let query = "";
 
+
     if (role === "ADMIN") {
       query = `
-      SELECT *
-      FROM tbl_notification_logs
-      WHERE
-        (
-          module_name = 'Ground Booking'
-          AND action IN ('Confirmed', 'Cancelled')
-        )
-        OR
-        (
-          module_name <> 'Fee Due'
-        )
-      ORDER BY created_at DESC;
+        SELECT *
+        FROM tbl_notification_logs
+        WHERE
+          (
+            module_name = 'Ground Booking'
+            AND action = 'Pending'
+          )
+          OR
+          (
+            module_name = 'Fee Due'
+          )
+          OR
+          (
+            module_name <> 'Ground Booking'
+            AND module_name <> 'Fee Due'
+          )
+        ORDER BY created_at DESC;
       `;
-    } else if (role === "PRIMARY") {
+    }
+
+    else if (role === "PRIMARY") {
       query = `
         SELECT *
         FROM tbl_notification_logs
@@ -44,9 +61,11 @@ exports.getNotifications = async (req, res) => {
           (
             module_name = 'Fee Due'
           )
-        ORDER BY created_at DESC
+        ORDER BY created_at DESC;
       `;
-    } else {
+    }
+
+    else {
       return sendErrorResponse(
         res,
         403,
@@ -62,7 +81,10 @@ exports.getNotifications = async (req, res) => {
       "Notifications fetched successfully.",
       result.rows
     );
+
   } catch (error) {
+    console.error("Get Notifications Error:", error);
+
     return sendErrorResponse(
       res,
       500,
