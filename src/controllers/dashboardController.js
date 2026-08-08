@@ -254,8 +254,10 @@ exports.getDashboardCharts = async (req, res) => {
 
     const [
       playerGrowth,
-      feeCollection
+      feeCollection,
+      attendance
     ] = await Promise.all([
+
 
       // Player Growth - Last 6 Months
       pool.query(`
@@ -293,6 +295,8 @@ exports.getDashboardCharts = async (req, res) => {
           months.month_date;
       `),
 
+
+
       // Fee Collection - Current Month
       pool.query(`
         WITH current_month AS (
@@ -322,18 +326,17 @@ exports.getDashboardCharts = async (req, res) => {
 
         SELECT
 
-          -- Collected This Month
-          (
 
+          (
             SELECT
-              COALESCE(SUM(amount), 0)
+              COALESCE(SUM(amount),0)
 
             FROM tbl_player_fees pf
 
             CROSS JOIN current_month cm
 
             WHERE
-              pf.status = 'Paid'
+              pf.status='Paid'
 
               AND pf.payment_date >= cm.start_date
 
@@ -343,11 +346,9 @@ exports.getDashboardCharts = async (req, res) => {
 
 
 
-          -- Pending This Month
           (
-
             SELECT
-              COALESCE(SUM(lpf.amount), 0)
+              COALESCE(SUM(lpf.amount),0)
 
             FROM tbl_players p
 
@@ -355,7 +356,7 @@ exports.getDashboardCharts = async (req, res) => {
 
             LEFT JOIN latest_player_fee lpf
 
-              ON lpf.player_id = p.player_id
+              ON lpf.player_id=p.player_id
 
             WHERE NOT EXISTS (
 
@@ -363,20 +364,127 @@ exports.getDashboardCharts = async (req, res) => {
 
               FROM tbl_player_fees pf
 
-              WHERE pf.player_id = p.player_id
+              WHERE pf.player_id=p.player_id
 
-                AND pf.status = 'Paid'
+              AND pf.status='Paid'
 
-                AND pf.payment_date >= cm.start_date
+              AND pf.payment_date >= cm.start_date
 
-                AND pf.payment_date < cm.end_date
+              AND pf.payment_date < cm.end_date
 
             )
 
           ) AS pending;
+
+      `),
+
+      // Weekly Attendance Chart
+      pool.query(`
+
+        WITH days AS (
+
+          SELECT generate_series(
+            CURRENT_DATE - INTERVAL '5 days',
+            CURRENT_DATE,
+            INTERVAL '1 day'
+          )::date AS attendance_date
+
+        ),
+
+
+        total_players AS (
+
+          SELECT
+            COUNT(*) AS total
+
+          FROM tbl_players
+
+        ),
+
+
+        attendance_data AS (
+
+          SELECT
+
+            ta.payroll_date,
+
+            COUNT(DISTINCT ta.employee_code) AS present
+
+          FROM tbl_attendance ta
+
+          INNER JOIN tbl_players p
+
+            ON p.admission_id = ta.employee_code
+
+          WHERE ta.payroll_date >= CURRENT_DATE - INTERVAL '5 days'
+
+          AND ta.payroll_date <= CURRENT_DATE
+
+          GROUP BY ta.payroll_date
+
+        )
+
+
+        SELECT
+
+
+          TO_CHAR(
+            d.attendance_date,
+            'Dy'
+          ) AS day,
+
+
+          COALESCE(
+            LEAST(
+              100,
+              ROUND(
+                (
+                  COALESCE(ad.present,0)::numeric
+                  /
+                  NULLIF(tp.total,0)
+                ) * 100
+              )
+            ),
+            0
+          )::INT AS present_percentage,
+
+
+          COALESCE(
+            GREATEST(
+              0,
+              100 -
+              LEAST(
+                100,
+                ROUND(
+                  (
+                    COALESCE(ad.present,0)::numeric
+                    /
+                    NULLIF(tp.total,0)
+                  ) * 100
+                )
+              )
+            ),
+            0
+          )::INT AS absent_percentage
+
+
+        FROM days d
+
+        CROSS JOIN total_players tp
+
+        LEFT JOIN attendance_data ad
+
+          ON ad.payroll_date = d.attendance_date
+
+
+        ORDER BY
+          d.attendance_date;
+
       `)
 
     ]);
+
+
 
     return sendSuccessResponse(
       res,
@@ -384,31 +492,42 @@ exports.getDashboardCharts = async (req, res) => {
       "Dashboard charts fetched successfully.",
       {
 
-        player_growth: playerGrowth.rows,
+        player_growth:
+          playerGrowth.rows,
+
 
         fee_collection: {
 
-          collected: Number(
-            feeCollection.rows[0].collected
-          ),
+          collected:
+            Number(
+              feeCollection.rows[0].collected
+            ),
 
-          pending: Number(
-            feeCollection.rows[0].pending
-          )
+          pending:
+            Number(
+              feeCollection.rows[0].pending
+            )
 
-        }
+        },
+
+
+        attendance:
+          attendance.rows
 
       }
     );
+
 
   } catch (error) {
 
     console.error(error);
 
+
     return sendErrorResponse(
       res,
       500,
-      error.message || "Failed to fetch dashboard charts."
+      error.message ||
+      "Failed to fetch dashboard charts."
     );
 
   }

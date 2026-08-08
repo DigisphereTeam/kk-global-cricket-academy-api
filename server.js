@@ -60,7 +60,7 @@ app.use(globalErrorHandler)
 
 startAttendanceCron();
 
-const port = process.env.PORT;
+const port = process.env.PORT || 5000;
 
 app.listen(port, async () => {
   try {
