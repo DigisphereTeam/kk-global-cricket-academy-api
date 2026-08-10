@@ -499,75 +499,120 @@ exports.getAllPlayers = async (req, res) => {
           ) AS inactive_players,
 
 
-          /* =========================
-             PENDING FEES
-             ONLY REGULAR FEE PLAYERS
-          ========================= */
           (
-            SELECT COUNT(*)
-            FROM tbl_players p
+            SELECT COUNT(
+              DISTINCT pending_players.player_id
+            )
 
-            WHERE p.is_active = TRUE
+            FROM (
 
-              AND LOWER(TRIM(p.fee_type)) = 'regular fee'
+              /* =================================
+                 REGULAR PLAYERS
+                 ================================= */
 
-              AND CURRENT_DATE >
-                  DATE_TRUNC('month', CURRENT_DATE)
-                  + INTERVAL '3 day'
+              SELECT
+                p.player_id
 
-              AND (
-                /* FIRST MONTH */
-                (
-                  p.admission_date >=
-                    DATE_TRUNC('month', CURRENT_DATE)
+              FROM tbl_players p
 
-                  AND p.admission_date <
-                    DATE_TRUNC('month', CURRENT_DATE)
-                    + INTERVAL '1 month'
+              WHERE p.is_active = TRUE
 
-                  AND COALESCE(p.regular_fee, 0) > 0
+                /* Player must have joined */
+                AND p.admission_date <= CURRENT_DATE
 
-                  AND NOT EXISTS (
-                    SELECT 1
-                    FROM tbl_player_fees pf
-                    WHERE pf.player_id = p.player_id
-                      AND pf.is_active = TRUE
-                      AND LOWER(TRIM(pf.fee_type))
-                          = 'regular fee'
-                      AND pf.status = 'Paid'
-                      AND pf.payment_date >=
-                        DATE_TRUNC('month', CURRENT_DATE)
-                      AND pf.payment_date <
-                        DATE_TRUNC('month', CURRENT_DATE)
-                        + INTERVAL '1 month'
-                  )
+                /* Only after the 4th */
+                AND CURRENT_DATE >
+                    DATE_TRUNC(
+                      'month',
+                      CURRENT_DATE
+                    ) + INTERVAL '3 day'
+
+                /* Player has NOT paid this month */
+                AND NOT EXISTS (
+
+                  SELECT 1
+
+                  FROM tbl_player_fees pf
+
+                  WHERE pf.player_id = p.player_id
+
+                    AND pf.status = 'Paid'
+
+                    AND pf.is_active = TRUE
+
+                    AND pf.payment_date >=
+                        DATE_TRUNC(
+                          'month',
+                          CURRENT_DATE
+                        )
+
+                    AND pf.payment_date <
+                        DATE_TRUNC(
+                          'month',
+                          CURRENT_DATE
+                        ) + INTERVAL '1 month'
                 )
 
-                OR
 
-                /* PREVIOUSLY ADMITTED */
-                (
-                  p.admission_date <
-                    DATE_TRUNC('month', CURRENT_DATE)
+              UNION
 
-                  AND NOT EXISTS (
-                    SELECT 1
-                    FROM tbl_player_fees pf
-                    WHERE pf.player_id = p.player_id
-                      AND pf.is_active = TRUE
-                      AND LOWER(TRIM(pf.fee_type))
-                          = 'regular fee'
-                      AND pf.status = 'Paid'
-                      AND pf.payment_date >=
-                        DATE_TRUNC('month', CURRENT_DATE)
-                      AND pf.payment_date <
-                        DATE_TRUNC('month', CURRENT_DATE)
-                        + INTERVAL '1 month'
-                  )
+
+              /* =================================
+                 ONE-ON-ONE PLAYERS
+                 ================================= */
+
+              SELECT
+                o.player_id
+
+              FROM tbl_one_on_one_applications o
+
+              INNER JOIN tbl_players p
+                ON p.player_id = o.player_id
+                AND p.is_active = TRUE
+
+              WHERE o.is_active = TRUE
+
+                AND o.renewal_status = 'Active'
+
+                /* Player must have joined */
+                AND p.admission_date <= CURRENT_DATE
+
+                /* Only after the 4th */
+                AND CURRENT_DATE >
+                    DATE_TRUNC(
+                      'month',
+                      CURRENT_DATE
+                    ) + INTERVAL '3 day'
+
+                /* Player has NOT paid this month */
+                AND NOT EXISTS (
+
+                  SELECT 1
+
+                  FROM tbl_player_fees pf
+
+                  WHERE pf.player_id = o.player_id
+
+                    AND pf.status = 'Paid'
+
+                    AND pf.is_active = TRUE
+
+                    AND pf.payment_date >=
+                        DATE_TRUNC(
+                          'month',
+                          CURRENT_DATE
+                        )
+
+                    AND pf.payment_date <
+                        DATE_TRUNC(
+                          'month',
+                          CURRENT_DATE
+                        ) + INTERVAL '1 month'
                 )
-              )
+
+            ) AS pending_players
+
           ) AS pending_fees,
-
 
           /* =========================
              1. ADMISSION FEE
