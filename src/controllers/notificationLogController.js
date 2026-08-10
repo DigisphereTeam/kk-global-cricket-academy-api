@@ -12,7 +12,6 @@ exports.getNotifications = async (req, res) => {
       [req.user.user_id]
     );
 
-
     if (userResult.rowCount === 0) {
       return sendErrorResponse(
         res,

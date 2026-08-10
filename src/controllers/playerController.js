@@ -342,7 +342,7 @@ exports.createPlayerAdmission = async (req, res) => {
       for (const file of req.files) {
         await client.query(
           `
-          INSERT INTO tbl_documents
+          INSERT INTO tbl_player_documents
           (
             player_id,
             document_url

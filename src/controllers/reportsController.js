@@ -791,7 +791,7 @@ exports.getStaffWiseReport = async (req, res) => {
 exports.getStaffMonthlyReport = async (req, res) => {
   const {
     search,
-    staff_id,
+    staff_code,
     from_date,
     to_date,
   } = req.query;
@@ -842,11 +842,11 @@ exports.getStaffMonthlyReport = async (req, res) => {
 
       SELECT
 
-        /* Staff ID */
-        s.staff_code AS staff_id,
+        /* Staff Code */
+        s.staff_code AS staff_code,
 
-        /* Staff Primary Key */
-        s.staff_id AS staff_primary_id,
+        /* Staff Primary ID */
+        s.staff_id AS staff_id,
 
         /* Staff Name */
         s.full_name AS staff_name,
@@ -996,20 +996,21 @@ exports.getStaffMonthlyReport = async (req, res) => {
     }
 
     /* =========================
-       STAFF FILTER
+       STAFF CODE FILTER
     ========================= */
 
     if (
-      staff_id &&
-      staff_id !== "undefined" &&
-      staff_id !== "null"
+      staff_code &&
+      staff_code !== "undefined" &&
+      staff_code !== "null" &&
+      staff_code.trim() !== ""
     ) {
       query += `
-        AND s.staff_id = $${index}
+        AND s.staff_code = $${index}
       `;
 
       values.push(
-        Number(staff_id)
+        staff_code.trim()
       );
 
       index++;
