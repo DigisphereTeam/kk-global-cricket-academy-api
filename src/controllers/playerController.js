@@ -18,6 +18,8 @@ exports.createPlayerAdmission = async (req, res) => {
     school,
     admission_fee,
     payment_type,
+    fee_type,
+    regular_fee,
     remarks,
     father_name,
     father_phone,
@@ -33,6 +35,7 @@ exports.createPlayerAdmission = async (req, res) => {
     weight,
   } = req.body;
 
+  // Required field validation
   if (
     !full_name?.trim() ||
     !gender ||
@@ -42,7 +45,11 @@ exports.createPlayerAdmission = async (req, res) => {
     admission_fee === undefined ||
     admission_fee === null ||
     admission_fee === "" ||
-    !payment_type?.trim()
+    !payment_type?.trim() ||
+    !fee_type?.trim() ||
+    regular_fee === undefined ||
+    regular_fee === null ||
+    regular_fee === ""
   ) {
     return sendErrorResponse(
       res,
@@ -51,7 +58,7 @@ exports.createPlayerAdmission = async (req, res) => {
     );
   }
 
-
+  // Player phone validation
   if (!/^[6-9]\d{9}$/.test(phone_number.trim())) {
     return sendErrorResponse(
       res,
@@ -60,7 +67,11 @@ exports.createPlayerAdmission = async (req, res) => {
     );
   }
 
-  if (father_phone && !/^[6-9]\d{9}$/.test(father_phone.trim())) {
+  // Father phone validation
+  if (
+    father_phone &&
+    !/^[6-9]\d{9}$/.test(father_phone.trim())
+  ) {
     return sendErrorResponse(
       res,
       400,
@@ -68,7 +79,11 @@ exports.createPlayerAdmission = async (req, res) => {
     );
   }
 
-  if (mother_phone && !/^[6-9]\d{9}$/.test(mother_phone.trim())) {
+  // Mother phone validation
+  if (
+    mother_phone &&
+    !/^[6-9]\d{9}$/.test(mother_phone.trim())
+  ) {
     return sendErrorResponse(
       res,
       400,
@@ -76,7 +91,11 @@ exports.createPlayerAdmission = async (req, res) => {
     );
   }
 
-  if (contact_phone && !/^[6-9]\d{9}$/.test(contact_phone.trim())) {
+  // Emergency contact validation
+  if (
+    contact_phone &&
+    !/^[6-9]\d{9}$/.test(contact_phone.trim())
+  ) {
     return sendErrorResponse(
       res,
       400,
@@ -84,7 +103,7 @@ exports.createPlayerAdmission = async (req, res) => {
     );
   }
 
-
+  // Email validation
   if (
     email &&
     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
@@ -96,8 +115,11 @@ exports.createPlayerAdmission = async (req, res) => {
     );
   }
 
-
-  if (isNaN(Number(age)) || Number(age) <= 0) {
+  // Age validation
+  if (
+    isNaN(Number(age)) ||
+    Number(age) <= 0
+  ) {
     return sendErrorResponse(
       res,
       400,
@@ -105,7 +127,7 @@ exports.createPlayerAdmission = async (req, res) => {
     );
   }
 
-
+  // Admission fee validation
   if (
     isNaN(Number(admission_fee)) ||
     Number(admission_fee) <= 0
@@ -117,7 +139,19 @@ exports.createPlayerAdmission = async (req, res) => {
     );
   }
 
+  // Regular fee validation
+  if (
+    isNaN(Number(regular_fee)) ||
+    Number(regular_fee) <= 0
+  ) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Regular fee must be greater than 0."
+    );
+  }
 
+  // Weight validation
   if (
     weight !== undefined &&
     weight !== null &&
@@ -131,7 +165,7 @@ exports.createPlayerAdmission = async (req, res) => {
     );
   }
 
-
+  // Height validation
   if (
     height !== undefined &&
     height !== null &&
@@ -156,6 +190,7 @@ exports.createPlayerAdmission = async (req, res) => {
     const yearCode = String(currentYear).slice(-2);
     const prefix = `A${yearCode}`;
 
+    // Prevent duplicate admission ID generation
     await client.query(
       `SELECT pg_advisory_xact_lock($1)`,
       [currentYear]
@@ -178,11 +213,10 @@ exports.createPlayerAdmission = async (req, res) => {
     const nextNumber =
       Number(admissionResult.rows[0].last_number) + 1;
 
-    const admission_id = `${prefix}${String(nextNumber).padStart(
-      4,
-      "0"
-    )}`;
+    const admission_id =
+      `${prefix}${String(nextNumber).padStart(4, "0")}`;
 
+    // Check duplicate player
     let existingPlayer;
 
     if (email) {
@@ -194,7 +228,10 @@ exports.createPlayerAdmission = async (req, res) => {
            OR LOWER(email) = LOWER($2)
         LIMIT 1
         `,
-        [phone_number.trim(), email.trim()]
+        [
+          phone_number.trim(),
+          email.trim(),
+        ]
       );
     } else {
       existingPlayer = await client.query(
@@ -218,43 +255,48 @@ exports.createPlayerAdmission = async (req, res) => {
       );
     }
 
+    // Create player
     const result = await client.query(
       `
-          INSERT INTO tbl_players (
-            admission_id,
-            full_name,
-            gender,
-            age,
-            date_of_birth,
-            admission_date,
-            phone_number,
-            email,
-            address,
-            school,
-            admission_fee,
-            payment_type,
-            remarks,
-            father_name,
-            father_phone,
-            father_occupation,
-            mother_name,
-            mother_phone,
-            contact_name,
-            relation,
-            contact_phone,
-            blood_group,
-            allergies,
-            height,
-            weight,
-            id_increment
-          )
-          VALUES (
-            $1,$2,$3,$4,$5,COALESCE($6::date, CURRENT_DATE),$7,$8,$9,$10,
-            $11,$12,$13,$14,$15,$16,$17,$18,
-            $19,$20,$21,$22,$23,$24,$25,$26
-          )
-          RETURNING *;
-          `,
+      INSERT INTO tbl_players (
+        admission_id,
+        full_name,
+        gender,
+        age,
+        date_of_birth,
+        admission_date,
+        phone_number,
+        email,
+        address,
+        school,
+        admission_fee,
+        payment_type,
+        fee_type,
+        regular_fee,
+        remarks,
+        father_name,
+        father_phone,
+        father_occupation,
+        mother_name,
+        mother_phone,
+        contact_name,
+        relation,
+        contact_phone,
+        blood_group,
+        allergies,
+        height,
+        weight,
+        id_increment
+      )
+      VALUES (
+        $1,$2,$3,$4,$5,
+        COALESCE($6::date, CURRENT_DATE),
+        $7,$8,$9,$10,
+        $11,$12,$13,$14,$15,$16,$17,$18,
+        $19,$20,$21,$22,$23,$24,$25,$26,$27,$28
+      )
+      RETURNING *;
+      `,
       [
         admission_id,
         full_name.trim(),
@@ -263,11 +305,15 @@ exports.createPlayerAdmission = async (req, res) => {
         date_of_birth || null,
         admission_date || null,
         phone_number.trim(),
-        email ? email.trim().toLowerCase() : null,
+        email
+          ? email.trim().toLowerCase()
+          : null,
         address.trim(),
         school?.trim() || null,
         Number(admission_fee),
         payment_type.trim(),
+        fee_type.trim(),
+        Number(regular_fee),
         remarks?.trim() || null,
         father_name?.trim() || null,
         father_phone?.trim() || null,
@@ -279,13 +325,19 @@ exports.createPlayerAdmission = async (req, res) => {
         contact_phone?.trim() || null,
         blood_group || null,
         allergies?.trim() || null,
-        height != null ? Number(height) : null,
-        weight != null ? Number(weight) : null,
+        height != null
+          ? Number(height)
+          : null,
+        weight != null
+          ? Number(weight)
+          : null,
         nextNumber,
       ]
     );
 
     const playerId = result.rows[0].player_id;
+
+    // Insert multiple player documents
     if (req.files && req.files.length > 0) {
       for (const file of req.files) {
         await client.query(
@@ -306,6 +358,7 @@ exports.createPlayerAdmission = async (req, res) => {
       }
     }
 
+    // Get logged-in user
     const reqUserDetails = await client.query(
       `
       SELECT full_name
@@ -326,40 +379,50 @@ exports.createPlayerAdmission = async (req, res) => {
         "Logged-in user not found."
       );
     }
+
+    // Notification
     await client.query(
-      `INSERT INTO tbl_notification_logs
-        (
-          module_name,
-          action,
-          description,
-          performed_by
-        )
-        VALUES
-        ($1,$2,$3,$4)`,
+      `
+      INSERT INTO tbl_notification_logs
+      (
+        module_name,
+        action,
+        description,
+        performed_by
+      )
+      VALUES
+      ($1,$2,$3,$4)
+      `,
       [
         "Player",
         "Created",
-        `Player ${result.rows[0].full_name} was added .`,
+        `Player ${result.rows[0].full_name} was added.`,
         reqUser.full_name,
-      ])
+      ]
+    );
+
     await client.query("COMMIT");
 
     return sendSuccessResponse(
       res,
       201,
       "Player admission created successfully.",
-      result.rows[0],
+      result.rows[0]
     );
+
   } catch (error) {
     if (client) {
       await client.query("ROLLBACK");
     }
 
+    console.error(error);
+
     return sendErrorResponse(
       res,
       500,
-      error.message || "Internal Server Error",
+      error.message || "Internal Server Error"
     );
+
   } finally {
     if (client) {
       client.release();
@@ -367,12 +430,9 @@ exports.createPlayerAdmission = async (req, res) => {
   }
 };
 
+
 exports.getAllPlayers = async (req, res) => {
   try {
-    const today = new Date().toLocaleDateString("en-CA", {
-      timeZone: "Asia/Kolkata",
-    });
-
     const [players, statistics] = await Promise.all([
   
       pool.query(
@@ -401,16 +461,11 @@ exports.getAllPlayers = async (req, res) => {
 
         FROM tbl_players p
 
-        LEFT JOIN tbl_attendance a
-          ON a.employee_code = p.admission_id
-          AND a.payroll_date = $1
-
         LEFT JOIN tbl_player_documents d
           ON d.player_id = p.player_id
 
         GROUP BY
-          p.player_id,
-          a.attendance_id
+          p.player_id
 
         ORDER BY
           p.player_id DESC;
@@ -510,7 +565,6 @@ exports.getAllPlayers = async (req, res) => {
                         ) + INTERVAL '1 month'
                 )
 
-
               UNION
 
 
@@ -567,7 +621,6 @@ exports.getAllPlayers = async (req, res) => {
                 )
 
             ) AS pending_players
-
           ) AS pending_fees;
       `),
     ]);
@@ -603,7 +656,7 @@ exports.getAllPlayers = async (req, res) => {
           ),
         },
 
-        players: playerList,
+        players: players.rows,
       }
     );
 
@@ -1194,16 +1247,31 @@ exports.updatePlayerStatus = async (req, res) => {
 
   // Validate Player ID
   if (!player_id) {
-    return sendErrorResponse(res, 400, "Player ID is required.");
+    return sendErrorResponse(
+      res,
+      400,
+      "Player ID is required."
+    );
   }
 
-  if (!Number.isInteger(Number(player_id)) || Number(player_id) <= 0) {
-    return sendErrorResponse(res, 400, "Invalid Player ID.");
+  if (
+    !Number.isInteger(Number(player_id)) ||
+    Number(player_id) <= 0
+  ) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Invalid Player ID."
+    );
   }
 
   // Validate is_active
   if (is_active === undefined) {
-    return sendErrorResponse(res, 400, "is_active is required.");
+    return sendErrorResponse(
+      res,
+      400,
+      "is_active is required."
+    );
   }
 
   if (typeof is_active !== "boolean") {
@@ -1224,7 +1292,11 @@ exports.updatePlayerStatus = async (req, res) => {
     // Check player exists
     const player = await client.query(
       `
-      SELECT player_id, full_name, is_active
+      SELECT
+        player_id,
+        full_name,
+        is_active,
+        status
       FROM tbl_players
       WHERE player_id = $1;
       `,
@@ -1234,7 +1306,11 @@ exports.updatePlayerStatus = async (req, res) => {
     if (player.rowCount === 0) {
       await client.query("ROLLBACK");
 
-      return sendErrorResponse(res, 404, "Player not found.");
+      return sendErrorResponse(
+        res,
+        404,
+        "Player not found."
+      );
     }
 
     // Check if status is already same
@@ -1244,23 +1320,32 @@ exports.updatePlayerStatus = async (req, res) => {
       return sendErrorResponse(
         res,
         409,
-        `Player is already ${is_active ? "active" : "inactive"}.`
+        `Player is already ${is_active ? "active" : "inactive"
+        }.`
       );
     }
 
-    // Update player status
+    // Update both is_active and status
+    const status = is_active ? "Active" : "Inactive";
+
     const result = await client.query(
       `
       UPDATE tbl_players
-      SET is_active = $1
-      WHERE player_id = $2
+      SET
+        is_active = $1,
+        status = $2
+      WHERE player_id = $3
       RETURNING *;
       `,
-      [is_active, player_id]
+      [
+        is_active,
+        status,
+        player_id,
+      ]
     );
 
+    // Deactivate related records when player is inactive
     if (!is_active) {
-      // Deactivate player fees
       await client.query(
         `
         UPDATE tbl_player_fees
@@ -1270,7 +1355,6 @@ exports.updatePlayerStatus = async (req, res) => {
         [player_id]
       );
 
-      // Deactivate one-on-one applications
       await client.query(
         `
         UPDATE tbl_one_on_one_applications
@@ -1280,7 +1364,7 @@ exports.updatePlayerStatus = async (req, res) => {
         [player_id]
       );
     } else {
-      // Activate only player fees
+      // Activate player fees
       await client.query(
         `
         UPDATE tbl_player_fees
@@ -1340,19 +1424,24 @@ exports.updatePlayerStatus = async (req, res) => {
     return sendSuccessResponse(
       res,
       200,
-      `Player ${is_active ? "activated" : "deactivated"} successfully.`,
+      `Player ${is_active ? "activated" : "deactivated"
+      } successfully.`,
       result.rows[0]
     );
+
   } catch (error) {
     if (client) {
       await client.query("ROLLBACK");
     }
+
+    console.error("Update Player Status Error:", error);
 
     return sendErrorResponse(
       res,
       500,
       error.message || "Internal Server Error"
     );
+
   } finally {
     if (client) {
       client.release();

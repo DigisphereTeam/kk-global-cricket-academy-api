@@ -334,7 +334,7 @@ exports.getDashboardStatistics = async (req, res) => {
       res,
       500,
       error.message ||
-        "Internal Server Error"
+      "Internal Server Error"
     );
   }
 };
@@ -624,136 +624,110 @@ exports.getDashboardCharts = async (req, res) => {
       // =========================================
 
       pool.query(`
+  WITH days AS (
 
-        WITH days AS (
+    SELECT generate_series(
+      CURRENT_DATE - INTERVAL '5 days',
+      CURRENT_DATE,
+      INTERVAL '1 day'
+    )::date AS attendance_date
 
-          SELECT generate_series(
-            CURRENT_DATE - INTERVAL '5 days',
-            CURRENT_DATE,
-            INTERVAL '1 day'
-          )::date AS attendance_date
+  ),
 
-        ),
+  total_players AS (
 
+    SELECT
+      COUNT(*) AS total
+    FROM tbl_players
+    WHERE is_active = TRUE
 
-        total_players AS (
+  ),
 
-          SELECT
-            COUNT(*) AS total
+  attendance_data AS (
 
-          FROM tbl_players
+    SELECT
+      ta.payroll_date,
+      COUNT(DISTINCT ta.employee_code) AS present
 
-          WHERE is_active = TRUE
+    FROM tbl_attendance ta
 
-            AND admission_date <= CURRENT_DATE
+    INNER JOIN tbl_players p
+      ON p.admission_id = ta.employee_code
 
-        ),
+    WHERE ta.payroll_date >= CURRENT_DATE - INTERVAL '5 days'
+      AND ta.payroll_date <= CURRENT_DATE
+      AND p.is_active = TRUE
 
+    GROUP BY ta.payroll_date
 
-        attendance_data AS (
+  )
 
-          SELECT
+  SELECT
 
-            ta.payroll_date,
+    TO_CHAR(
+      d.attendance_date,
+      'Dy'
+    ) AS day,
 
-            COUNT(
-              DISTINCT ta.employee_code
-            ) AS present
+    d.attendance_date,
 
-          FROM tbl_attendance ta
+    /* Present Count */
+    COALESCE(
+      ad.present,
+      0
+    )::INT AS present_count,
 
-          INNER JOIN tbl_players p
-            ON p.admission_id =
-               ta.employee_code
+    /* Absent Count */
+    GREATEST(
+      tp.total - COALESCE(ad.present, 0),
+      0
+    )::INT AS absent_count,
 
-          WHERE p.is_active = TRUE
-
-            /* Player must have joined
-               before attendance date */
-
-            AND p.admission_date <=
-                ta.payroll_date
-
-            AND ta.payroll_date >=
-                CURRENT_DATE - INTERVAL '5 days'
-
-            AND ta.payroll_date <=
-                CURRENT_DATE
-
-          GROUP BY
-            ta.payroll_date
-
+    /* Present Percentage */
+    COALESCE(
+      LEAST(
+        100,
+        ROUND(
+          (
+            COALESCE(ad.present, 0)::numeric
+            /
+            NULLIF(tp.total, 0)
+          ) * 100
         )
+      ),
+      0
+    )::INT AS present_percentage,
 
+    /* Absent Percentage */
+    COALESCE(
+      GREATEST(
+        0,
+        100 -
+        LEAST(
+          100,
+          ROUND(
+            (
+              COALESCE(ad.present, 0)::numeric
+              /
+              NULLIF(tp.total, 0)
+            ) * 100
+          )
+        )
+      ),
+      0
+    )::INT AS absent_percentage
 
-        SELECT
+  FROM days d
 
+  CROSS JOIN total_players tp
 
-          TO_CHAR(
-            d.attendance_date,
-            'Dy'
-          ) AS day,
+  LEFT JOIN attendance_data ad
+    ON ad.payroll_date = d.attendance_date
 
+  ORDER BY
+    d.attendance_date;
+`)
 
-          COALESCE(
-            LEAST(
-              100,
-              ROUND(
-                (
-                  COALESCE(
-                    ad.present,
-                    0
-                  )::numeric
-                  /
-                  NULLIF(
-                    tp.total,
-                    0
-                  )
-                ) * 100
-              )
-            ),
-            0
-          )::INT AS present_percentage,
-
-
-          COALESCE(
-            GREATEST(
-              0,
-              100 -
-              LEAST(
-                100,
-                ROUND(
-                  (
-                    COALESCE(
-                      ad.present,
-                      0
-                    )::numeric
-                    /
-                    NULLIF(
-                      tp.total,
-                      0
-                    )
-                  ) * 100
-                )
-              )
-            ),
-            0
-          )::INT AS absent_percentage
-
-
-        FROM days d
-
-        CROSS JOIN total_players tp
-
-        LEFT JOIN attendance_data ad
-          ON ad.payroll_date =
-             d.attendance_date
-
-
-        ORDER BY
-          d.attendance_date;
-
-      `),
     ]);
 
     // =========================================
