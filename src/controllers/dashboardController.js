@@ -1,19 +1,26 @@
 const pool = require("../config/dbConfig");
-const { sendSuccessResponse, sendErrorResponse } = require("../utils/apiResponse");
+const {
+  sendSuccessResponse,
+  sendErrorResponse,
+} = require("../utils/apiResponse");
 
 exports.getDashboardStatistics = async (req, res) => {
   try {
     const statisticsQuery = `
       SELECT
 
-        /* Total Players */
+        /* =========================================
+           TOTAL PLAYERS
+           ========================================= */
         (
           SELECT COUNT(*)
           FROM tbl_players
         ) AS total_players,
 
 
-        /* Active Players */
+        /* =========================================
+           ACTIVE PLAYERS
+           ========================================= */
         (
           SELECT COUNT(*)
           FROM tbl_players
@@ -21,21 +28,27 @@ exports.getDashboardStatistics = async (req, res) => {
         ) AS active_players,
 
 
-        /* Total Trainers */
+        /* =========================================
+           TOTAL TRAINERS
+           ========================================= */
         (
           SELECT COUNT(*)
           FROM tbl_coach
         ) AS total_trainers,
 
 
-        /* Total Ground Bookings */
+        /* =========================================
+           TOTAL GROUND BOOKINGS
+           ========================================= */
         (
           SELECT COUNT(*)
           FROM tbl_ground_booking
         ) AS ground_bookings,
 
 
-        /* Pending Approvals */
+        /* =========================================
+           PENDING APPROVALS
+           ========================================= */
         (
           SELECT COUNT(*)
           FROM tbl_ground_booking
@@ -48,91 +61,45 @@ exports.getDashboardStatistics = async (req, res) => {
       SELECT
 
         /* =========================================
-           PENDING FEES
+           PENDING FEES - PLAYER COUNT
            ========================================= */
 
         (
-          SELECT COUNT(DISTINCT pending_players.player_id)
-          FROM (
+          SELECT COUNT(DISTINCT p.player_id)
 
-            /* =====================================
-               REGULAR PLAYERS
-               ===================================== */
+          FROM tbl_players p
 
-            SELECT
-              p.player_id
+          WHERE p.is_active = TRUE
 
-            FROM tbl_players p
+            /* Player must have joined */
+            AND p.admission_date <= CURRENT_DATE
 
-            WHERE p.is_active = TRUE
+            /* Due date is 4th
+               Count only after 4th */
+            AND CURRENT_DATE >
+                DATE_TRUNC('month', CURRENT_DATE)
+                + INTERVAL '3 day'
 
-              /* Due date is 4th
-                 Count only after 4th */
-              AND CURRENT_DATE >
-                  DATE_TRUNC('month', CURRENT_DATE)
-                  + INTERVAL '3 day'
+            /* Player has NOT paid this month */
+            AND NOT EXISTS (
+              SELECT 1
 
-              /* Player has NOT paid this month */
-              AND NOT EXISTS (
-                SELECT 1
-                FROM tbl_player_fees pf
+              FROM tbl_player_fees pf
 
-                WHERE pf.player_id = p.player_id
-                  AND pf.status = 'Paid'
-                  AND pf.is_active = TRUE
+              WHERE pf.player_id = p.player_id
 
-                  AND pf.payment_date >=
-                      DATE_TRUNC('month', CURRENT_DATE)
+                AND pf.status = 'Paid'
 
-                  AND pf.payment_date <
-                      DATE_TRUNC('month', CURRENT_DATE)
-                      + INTERVAL '1 month'
-              )
+                AND pf.is_active = TRUE
 
+                AND pf.payment_date >=
+                    DATE_TRUNC('month', CURRENT_DATE)
 
-            UNION
+                AND pf.payment_date <
+                    DATE_TRUNC('month', CURRENT_DATE)
+                    + INTERVAL '1 month'
+            )
 
-
-            /* =====================================
-               ONE-ON-ONE PLAYERS
-               ===================================== */
-
-            SELECT
-              o.player_id
-
-            FROM tbl_one_on_one_applications o
-
-            INNER JOIN tbl_players p
-              ON p.player_id = o.player_id
-             AND p.is_active = TRUE
-
-            WHERE o.is_active = TRUE
-              AND o.renewal_status = 'Active'
-
-              /* Due date is 4th
-                 Count only after 4th */
-              AND CURRENT_DATE >
-                  DATE_TRUNC('month', CURRENT_DATE)
-                  + INTERVAL '3 day'
-
-              /* Player has NOT paid this month */
-              AND NOT EXISTS (
-                SELECT 1
-                FROM tbl_player_fees pf
-
-                WHERE pf.player_id = o.player_id
-                  AND pf.status = 'Paid'
-                  AND pf.is_active = TRUE
-
-                  AND pf.payment_date >=
-                      DATE_TRUNC('month', CURRENT_DATE)
-
-                  AND pf.payment_date <
-                      DATE_TRUNC('month', CURRENT_DATE)
-                      + INTERVAL '1 month'
-              )
-
-          ) pending_players
         ) AS pending_fees,
 
 
@@ -240,7 +207,7 @@ exports.getDashboardStatistics = async (req, res) => {
             /* One-On-One */
             SELECT
               fee_amount,
-              application_date
+              application_date AS revenue_date
 
             FROM tbl_one_on_one_applications
 
@@ -251,7 +218,7 @@ exports.getDashboardStatistics = async (req, res) => {
             /* Ground Booking */
             SELECT
               total_amount,
-              booking_date
+              booking_date AS revenue_date
 
             FROM tbl_ground_booking
 
@@ -264,7 +231,7 @@ exports.getDashboardStatistics = async (req, res) => {
             /* Salary */
             SELECT
               -net_salary,
-              payment_date
+              payment_date AS revenue_date
 
             FROM tbl_employee_salary
 
@@ -275,7 +242,7 @@ exports.getDashboardStatistics = async (req, res) => {
             /* Other Expenses */
             SELECT
               -amount,
-              expenditure_date
+              expenditure_date AS revenue_date
 
             FROM tbl_expenditure
 
@@ -285,7 +252,6 @@ exports.getDashboardStatistics = async (req, res) => {
                 = DATE_TRUNC('month', CURRENT_DATE)
 
         ) AS monthly_revenue;
-
     `;
 
 
@@ -294,7 +260,7 @@ exports.getDashboardStatistics = async (req, res) => {
       revenueResult
     ] = await Promise.all([
       pool.query(statisticsQuery),
-      pool.query(revenueQuery)
+      pool.query(revenueQuery),
     ]);
 
 
@@ -307,74 +273,88 @@ exports.getDashboardStatistics = async (req, res) => {
       200,
       "Dashboard statistics fetched successfully.",
       {
-        total_players:
-          Number(stats.total_players),
+        total_players: Number(
+          stats.total_players
+        ),
 
-        active_players:
-          Number(stats.active_players),
+        active_players: Number(
+          stats.active_players
+        ),
 
-        trainers:
-          Number(stats.total_trainers),
+        trainers: Number(
+          stats.total_trainers
+        ),
 
-        pending_fees:
-          Number(revenue.pending_fees),
+        pending_fees: Number(
+          revenue.pending_fees
+        ),
 
-        ground_bookings:
-          Number(stats.ground_bookings),
+        ground_bookings: Number(
+          stats.ground_bookings
+        ),
 
-        approvals:
-          Number(stats.approvals),
+        approvals: Number(
+          stats.approvals
+        ),
 
-        monthly_revenue:
-          Number(revenue.monthly_revenue),
+        monthly_revenue: Number(
+          revenue.monthly_revenue
+        ),
 
-        regular_revenue:
-          Number(revenue.regular_revenue),
+        regular_revenue: Number(
+          revenue.regular_revenue
+        ),
 
-        one_on_one_revenue:
-          Number(revenue.one_on_one_revenue),
+        one_on_one_revenue: Number(
+          revenue.one_on_one_revenue
+        ),
 
-        ground_revenue:
-          Number(revenue.ground_revenue),
+        ground_revenue: Number(
+          revenue.ground_revenue
+        ),
 
-        salary_expense:
-          Number(revenue.salary_expense),
+        salary_expense: Number(
+          revenue.salary_expense
+        ),
 
-        total_expenditure:
-          Number(revenue.total_expenditure)
+        total_expenditure: Number(
+          revenue.total_expenditure
+        ),
       }
     );
 
   } catch (error) {
 
-    console.error("Dashboard Error:", error);
+    console.error(
+      "Dashboard Error:",
+      error
+    );
 
     return sendErrorResponse(
       res,
       500,
-      error.message || "Internal Server Error"
+      error.message ||
+        "Internal Server Error"
     );
   }
 };
 
 exports.getDashboardCharts = async (req, res) => {
   try {
-
-    const [
-      playerGrowth,
-      feeCollection,
-      attendance
-    ] = await Promise.all([
-
-
+    const [playerGrowth, feeCollection, attendance] = await Promise.all([
+      // =========================================
       // Player Growth - Last 6 Months
+      // =========================================
+
       pool.query(`
         WITH months AS (
 
           SELECT
             DATE_TRUNC('month', CURRENT_DATE)
-            - (INTERVAL '1 month' * generate_series(5, 0, -1))
-            AS month_date
+            - (
+                INTERVAL '1 month'
+                * generate_series(5, 0, -1)
+              ) AS month_date
 
         )
 
@@ -390,11 +370,10 @@ exports.getDashboardCharts = async (req, res) => {
         FROM months
 
         LEFT JOIN tbl_players p
-
           ON DATE_TRUNC(
-              'month',
-              p.admission_date
-            ) <= months.month_date
+               'month',
+               p.admission_date
+             ) <= months.month_date
 
         GROUP BY
           months.month_date
@@ -403,90 +382,247 @@ exports.getDashboardCharts = async (req, res) => {
           months.month_date;
       `),
 
-
-
+      // =========================================
       // Fee Collection - Current Month
+      // =========================================
+
       pool.query(`
-        WITH current_month AS (
-
-          SELECT
-            DATE_TRUNC('month', CURRENT_DATE) AS start_date,
-
-            DATE_TRUNC('month', CURRENT_DATE)
-            + INTERVAL '1 month' AS end_date
-
-        ),
-
-        latest_player_fee AS (
-
-          SELECT DISTINCT ON (player_id)
-
-            player_id,
-            amount
-
-          FROM tbl_player_fees
-
-          ORDER BY
-            player_id,
-            created_at DESC
-
-        )
-
         SELECT
 
 
-          (
-            SELECT
-              COALESCE(SUM(amount),0)
-
-            FROM tbl_player_fees pf
-
-            CROSS JOIN current_month cm
-
-            WHERE
-              pf.status='Paid'
-
-              AND pf.payment_date >= cm.start_date
-
-              AND pf.payment_date < cm.end_date
-
-          ) AS collected,
-
-
+          /* =====================================
+             PENDING FEES - PLAYER COUNT
+             ===================================== */
 
           (
-            SELECT
-              COALESCE(SUM(lpf.amount),0)
-
-            FROM tbl_players p
-
-            CROSS JOIN current_month cm
-
-            LEFT JOIN latest_player_fee lpf
-
-              ON lpf.player_id=p.player_id
-
-            WHERE NOT EXISTS (
-
-              SELECT 1
-
-              FROM tbl_player_fees pf
-
-              WHERE pf.player_id=p.player_id
-
-              AND pf.status='Paid'
-
-              AND pf.payment_date >= cm.start_date
-
-              AND pf.payment_date < cm.end_date
-
+            SELECT COUNT(
+              DISTINCT pending_players.player_id
             )
 
-          ) AS pending;
+            FROM (
+
+              /* =================================
+                 REGULAR PLAYERS
+                 ================================= */
+
+              SELECT
+                p.player_id
+
+              FROM tbl_players p
+
+              WHERE p.is_active = TRUE
+
+                /* Player must have joined */
+                AND p.admission_date <= CURRENT_DATE
+
+                /* Due date is 4th
+                   Count only after 4th */
+                AND CURRENT_DATE >
+                    DATE_TRUNC(
+                      'month',
+                      CURRENT_DATE
+                    ) + INTERVAL '3 day'
+
+                /* Player has NOT paid this month */
+                AND NOT EXISTS (
+
+                  SELECT 1
+
+                  FROM tbl_player_fees pf
+
+                  WHERE pf.player_id = p.player_id
+
+                    AND pf.status = 'Paid'
+
+                    AND pf.is_active = TRUE
+
+                    AND pf.payment_date >=
+                        DATE_TRUNC(
+                          'month',
+                          CURRENT_DATE
+                        )
+
+                    AND pf.payment_date <
+                        DATE_TRUNC(
+                          'month',
+                          CURRENT_DATE
+                        ) + INTERVAL '1 month'
+                )
+
+
+              UNION
+
+
+              /* =================================
+                 ONE-ON-ONE PLAYERS
+                 ================================= */
+
+              SELECT
+                o.player_id
+
+              FROM tbl_one_on_one_applications o
+
+              INNER JOIN tbl_players p
+                ON p.player_id = o.player_id
+               AND p.is_active = TRUE
+
+              WHERE o.is_active = TRUE
+
+                AND o.renewal_status = 'Active'
+
+                /* Player must have joined */
+                AND p.admission_date <= CURRENT_DATE
+
+                /* Due date is 4th
+                   Count only after 4th */
+                AND CURRENT_DATE >
+                    DATE_TRUNC(
+                      'month',
+                      CURRENT_DATE
+                    ) + INTERVAL '3 day'
+
+                /* Player has NOT paid this month */
+                AND NOT EXISTS (
+
+                  SELECT 1
+
+                  FROM tbl_player_fees pf
+
+                  WHERE pf.player_id = o.player_id
+
+                    AND pf.status = 'Paid'
+
+                    AND pf.is_active = TRUE
+
+                    AND pf.payment_date >=
+                        DATE_TRUNC(
+                          'month',
+                          CURRENT_DATE
+                        )
+
+                    AND pf.payment_date <
+                        DATE_TRUNC(
+                          'month',
+                          CURRENT_DATE
+                        ) + INTERVAL '1 month'
+                )
+
+            ) pending_players
+
+          ) AS pending,
+
+
+          /* =====================================
+             COLLECTED FEES - PLAYER COUNT
+             ===================================== */
+
+          (
+            SELECT COUNT(
+              DISTINCT collected_players.player_id
+            )
+
+            FROM (
+
+              /* =================================
+                 REGULAR PLAYERS
+                 ================================= */
+
+              SELECT
+                p.player_id
+
+              FROM tbl_players p
+
+              WHERE p.is_active = TRUE
+
+                /* Player must have joined */
+                AND p.admission_date <= CURRENT_DATE
+
+                /* Player has paid this month */
+                AND EXISTS (
+
+                  SELECT 1
+
+                  FROM tbl_player_fees pf
+
+                  WHERE pf.player_id = p.player_id
+
+                    AND pf.status = 'Paid'
+
+                    AND pf.is_active = TRUE
+
+                    AND pf.payment_date >=
+                        DATE_TRUNC(
+                          'month',
+                          CURRENT_DATE
+                        )
+
+                    AND pf.payment_date <
+                        DATE_TRUNC(
+                          'month',
+                          CURRENT_DATE
+                        ) + INTERVAL '1 month'
+                )
+
+
+              UNION
+
+
+              /* =================================
+                 ONE-ON-ONE PLAYERS
+                 ================================= */
+
+              SELECT
+                o.player_id
+
+              FROM tbl_one_on_one_applications o
+
+              INNER JOIN tbl_players p
+                ON p.player_id = o.player_id
+               AND p.is_active = TRUE
+
+              WHERE o.is_active = TRUE
+
+                AND o.renewal_status = 'Active'
+
+                /* Player must have joined */
+                AND p.admission_date <= CURRENT_DATE
+
+                /* Player has paid this month */
+                AND EXISTS (
+
+                  SELECT 1
+
+                  FROM tbl_player_fees pf
+
+                  WHERE pf.player_id = o.player_id
+
+                    AND pf.status = 'Paid'
+
+                    AND pf.is_active = TRUE
+
+                    AND pf.payment_date >=
+                        DATE_TRUNC(
+                          'month',
+                          CURRENT_DATE
+                        )
+
+                    AND pf.payment_date <
+                        DATE_TRUNC(
+                          'month',
+                          CURRENT_DATE
+                        ) + INTERVAL '1 month'
+                )
+
+            ) collected_players
+
+          ) AS collected;
 
       `),
 
+      // =========================================
       // Weekly Attendance Chart
+      // =========================================
+
       pool.query(`
 
         WITH days AS (
@@ -507,6 +643,10 @@ exports.getDashboardCharts = async (req, res) => {
 
           FROM tbl_players
 
+          WHERE is_active = TRUE
+
+            AND admission_date <= CURRENT_DATE
+
         ),
 
 
@@ -516,19 +656,32 @@ exports.getDashboardCharts = async (req, res) => {
 
             ta.payroll_date,
 
-            COUNT(DISTINCT ta.employee_code) AS present
+            COUNT(
+              DISTINCT ta.employee_code
+            ) AS present
 
           FROM tbl_attendance ta
 
           INNER JOIN tbl_players p
+            ON p.admission_id =
+               ta.employee_code
 
-            ON p.admission_id = ta.employee_code
+          WHERE p.is_active = TRUE
 
-          WHERE ta.payroll_date >= CURRENT_DATE - INTERVAL '5 days'
+            /* Player must have joined
+               before attendance date */
 
-          AND ta.payroll_date <= CURRENT_DATE
+            AND p.admission_date <=
+                ta.payroll_date
 
-          GROUP BY ta.payroll_date
+            AND ta.payroll_date >=
+                CURRENT_DATE - INTERVAL '5 days'
+
+            AND ta.payroll_date <=
+                CURRENT_DATE
+
+          GROUP BY
+            ta.payroll_date
 
         )
 
@@ -547,9 +700,15 @@ exports.getDashboardCharts = async (req, res) => {
               100,
               ROUND(
                 (
-                  COALESCE(ad.present,0)::numeric
+                  COALESCE(
+                    ad.present,
+                    0
+                  )::numeric
                   /
-                  NULLIF(tp.total,0)
+                  NULLIF(
+                    tp.total,
+                    0
+                  )
                 ) * 100
               )
             ),
@@ -565,9 +724,15 @@ exports.getDashboardCharts = async (req, res) => {
                 100,
                 ROUND(
                   (
-                    COALESCE(ad.present,0)::numeric
+                    COALESCE(
+                      ad.present,
+                      0
+                    )::numeric
                     /
-                    NULLIF(tp.total,0)
+                    NULLIF(
+                      tp.total,
+                      0
+                    )
                   ) * 100
                 )
               )
@@ -581,75 +746,50 @@ exports.getDashboardCharts = async (req, res) => {
         CROSS JOIN total_players tp
 
         LEFT JOIN attendance_data ad
-
-          ON ad.payroll_date = d.attendance_date
+          ON ad.payroll_date =
+             d.attendance_date
 
 
         ORDER BY
           d.attendance_date;
 
-      `)
-
+      `),
     ]);
 
-
+    // =========================================
+    // Response
+    // =========================================
 
     return sendSuccessResponse(
       res,
       200,
       "Dashboard charts fetched successfully.",
       {
-
-        player_growth:
-          playerGrowth.rows,
-
+        player_growth: playerGrowth.rows,
 
         fee_collection: {
+          collected: Number(feeCollection.rows[0].collected),
 
-          collected:
-            Number(
-              feeCollection.rows[0].collected
-            ),
-
-          pending:
-            Number(
-              feeCollection.rows[0].pending
-            )
-
+          pending: Number(feeCollection.rows[0].pending),
         },
 
-
-        attendance:
-          attendance.rows
-
-      }
+        attendance: attendance.rows,
+      },
     );
-
-
   } catch (error) {
-
-    console.error(error);
-
+    console.error("Dashboard Charts Error:", error);
 
     return sendErrorResponse(
       res,
       500,
-      error.message ||
-      "Failed to fetch dashboard charts."
+      error.message || "Failed to fetch dashboard charts.",
     );
-
   }
 };
 
-
 exports.getDashboardRevenueAndActivities = async (req, res) => {
   try {
-
-    const [
-      revenueTrend,
-      activities
-    ] = await Promise.all([
-
+    const [revenueTrend, activities] = await Promise.all([
       // Revenue Trend - Last 6 Months (Net Revenue)
       pool.query(`
         WITH months AS (
@@ -746,8 +886,7 @@ exports.getDashboardRevenueAndActivities = async (req, res) => {
         )
         ORDER BY created_at DESC
         LIMIT 4;
-      `)
-
+      `),
     ]);
 
     return sendSuccessResponse(
@@ -755,30 +894,27 @@ exports.getDashboardRevenueAndActivities = async (req, res) => {
       200,
       "Revenue trend and activities fetched successfully.",
       {
-        revenue_trend: revenueTrend.rows.map(row => ({
+        revenue_trend: revenueTrend.rows.map((row) => ({
           month: row.month,
-          revenue: Number(row.revenue)
+          revenue: Number(row.revenue),
         })),
 
-        recent_activities: activities.rows.map(row => ({
+        recent_activities: activities.rows.map((row) => ({
           type: row.module_name,
           action: row.action,
           message: row.description,
           performed_by: row.performed_by,
-          created_at: row.created_at
-        }))
-      }
+          created_at: row.created_at,
+        })),
+      },
     );
-
   } catch (error) {
-
     console.error(error);
 
     return sendErrorResponse(
       res,
       500,
-      error.message || "Failed to fetch dashboard data."
+      error.message || "Failed to fetch dashboard data.",
     );
-
   }
 };
