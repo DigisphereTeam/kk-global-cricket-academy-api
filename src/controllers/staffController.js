@@ -177,31 +177,13 @@ exports.addStaff = async (req, res) => {
 
 exports.getAllStaff = async (req, res) => {
   try {
-    const today = new Date().toLocaleDateString("en-CA", {
-      timeZone: "Asia/Kolkata",
-    });
-
     const [result, statistics] = await Promise.all([
-      pool.query(
-        `
+      pool.query(`
         SELECT
-          s.*,
-          a.attendance_id,
-          a.payroll_date,
-          CASE
-            WHEN a.attendance_id IS NOT NULL THEN 'Present'
-            ELSE 'Absent'
-          END AS attendance_status
+          s.*
         FROM tbl_staff s
-
-        LEFT JOIN tbl_attendance a
-          ON a.employee_code = s.staff_code
-          AND a.payroll_date = $1
-
         ORDER BY s.staff_id DESC
-        `,
-        [today]
-      ),
+      `),
 
       pool.query(`
         SELECT
@@ -259,29 +241,14 @@ exports.getStaffById = async (req, res) => {
   }
 
   try {
-    const today = new Date().toLocaleDateString("en-CA", {
-      timeZone: "Asia/Kolkata",
-    });
-
     const result = await pool.query(
       `
       SELECT
-        s.*,
-        a.attendance_id,
-        a.payroll_date,
-        CASE
-          WHEN a.attendance_id IS NOT NULL THEN 'Present'
-          ELSE 'Absent'
-        END AS attendance_status
+        s.*
       FROM tbl_staff s
-
-      LEFT JOIN tbl_attendance a
-        ON a.employee_code = s.staff_code
-        AND a.payroll_date = $2
-
       WHERE s.staff_id = $1
       `,
-      [id, today]
+      [id]
     );
 
     return sendSuccessResponse(
@@ -298,7 +265,6 @@ exports.getStaffById = async (req, res) => {
     );
   }
 };
-
 
 exports.updateStaff = async (req, res) => {
   const { id } = req.params;
@@ -487,8 +453,7 @@ exports.updateStaffStatus = async (req, res) => {
       return sendErrorResponse(
         res,
         409,
-        `Staff is already ${
-          is_active ? "active" : "inactive"
+        `Staff is already ${is_active ? "active" : "inactive"
         }.`
       );
     }
@@ -512,8 +477,7 @@ exports.updateStaffStatus = async (req, res) => {
     return sendSuccessResponse(
       res,
       200,
-      `Staff ${
-        is_active ? "activated" : "deactivated"
+      `Staff ${is_active ? "activated" : "deactivated"
       } successfully.`,
       result.rows[0]
     );
