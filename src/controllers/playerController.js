@@ -374,14 +374,15 @@ exports.getAllPlayers = async (req, res) => {
     });
 
     const [players, statistics] = await Promise.all([
-    
+  
       pool.query(
         `
         SELECT
           p.*,
 
           CASE
-            WHEN a.attendance_id IS NOT NULL THEN 'Present'
+            WHEN a.attendance_id IS NOT NULL
+            THEN 'Present'
             ELSE 'Absent'
           END AS attendance_status,
 
@@ -392,7 +393,9 @@ exports.getAllPlayers = async (req, res) => {
                 'document_url', d.document_url
               )
               ORDER BY d.document_id
-            ) FILTER (WHERE d.document_id IS NOT NULL),
+            ) FILTER (
+              WHERE d.document_id IS NOT NULL
+            ),
             '[]'
           ) AS documents
 
@@ -409,25 +412,29 @@ exports.getAllPlayers = async (req, res) => {
           p.player_id,
           a.attendance_id
 
-        ORDER BY p.player_id DESC;
+        ORDER BY
+          p.player_id DESC;
         `,
         [today]
       ),
 
-      // =========================
-      // PLAYER STATISTICS
-      // =========================
       pool.query(`
         SELECT
 
-          /* Total Players */
+          /* =====================================
+             TOTAL PLAYERS
+             ===================================== */
+
           (
             SELECT COUNT(*)
             FROM tbl_players
           ) AS total_players,
 
 
-          /* Active Players */
+          /* =====================================
+             ACTIVE PLAYERS
+             ===================================== */
+
           (
             SELECT COUNT(*)
             FROM tbl_players
@@ -435,7 +442,10 @@ exports.getAllPlayers = async (req, res) => {
           ) AS active_players,
 
 
-          /* Inactive Players */
+          /* =====================================
+             INACTIVE PLAYERS
+             ===================================== */
+
           (
             SELECT COUNT(*)
             FROM tbl_players
@@ -443,41 +453,74 @@ exports.getAllPlayers = async (req, res) => {
           ) AS inactive_players,
 
 
-          /* Pending Fee Players */
+          /* =====================================
+             PENDING FEES - PLAYER COUNT
+             ===================================== */
+
           (
-            SELECT COUNT(DISTINCT player_id)
+            SELECT COUNT(
+              DISTINCT pending_players.player_id
+            )
+
             FROM (
 
-              /* Regular Players */
-              SELECT p.player_id
+              /* ================================
+                 REGULAR PLAYERS
+                 ================================ */
+
+              SELECT
+                p.player_id
+
               FROM tbl_players p
 
               WHERE p.is_active = TRUE
 
+                /* Player must have joined */
+                AND p.admission_date <= CURRENT_DATE
+
                 /* Only after the 4th */
                 AND CURRENT_DATE >
-                    DATE_TRUNC('month', CURRENT_DATE)
-                    + INTERVAL '3 day'
+                    DATE_TRUNC(
+                      'month',
+                      CURRENT_DATE
+                    ) + INTERVAL '3 day'
 
                 /* Player has NOT paid this month */
                 AND NOT EXISTS (
                   SELECT 1
+
                   FROM tbl_player_fees pf
+
                   WHERE pf.player_id = p.player_id
+
                     AND pf.status = 'Paid'
+
+                    AND pf.is_active = TRUE
+
                     AND pf.payment_date >=
-                        DATE_TRUNC('month', CURRENT_DATE)
+                        DATE_TRUNC(
+                          'month',
+                          CURRENT_DATE
+                        )
+
                     AND pf.payment_date <
-                        DATE_TRUNC('month', CURRENT_DATE)
-                        + INTERVAL '1 month'
+                        DATE_TRUNC(
+                          'month',
+                          CURRENT_DATE
+                        ) + INTERVAL '1 month'
                 )
 
 
               UNION
 
 
-              /* One-On-One Players */
-              SELECT o.player_id
+              /* ================================
+                 ONE-ON-ONE PLAYERS
+                 ================================ */
+
+              SELECT
+                o.player_id
+
               FROM tbl_one_on_one_applications o
 
               INNER JOIN tbl_players p
@@ -486,41 +529,57 @@ exports.getAllPlayers = async (req, res) => {
 
               WHERE o.is_active = TRUE
 
+                AND o.renewal_status = 'Active'
+
+                /* Player must have joined */
+                AND p.admission_date <= CURRENT_DATE
+
                 /* Only after the 4th */
                 AND CURRENT_DATE >
-                    DATE_TRUNC('month', CURRENT_DATE)
-                    + INTERVAL '3 day'
+                    DATE_TRUNC(
+                      'month',
+                      CURRENT_DATE
+                    ) + INTERVAL '3 day'
 
                 /* Player has NOT paid this month */
                 AND NOT EXISTS (
                   SELECT 1
+
                   FROM tbl_player_fees pf
+
                   WHERE pf.player_id = o.player_id
+
                     AND pf.status = 'Paid'
+
+                    AND pf.is_active = TRUE
+
                     AND pf.payment_date >=
-                        DATE_TRUNC('month', CURRENT_DATE)
+                        DATE_TRUNC(
+                          'month',
+                          CURRENT_DATE
+                        )
+
                     AND pf.payment_date <
-                        DATE_TRUNC('month', CURRENT_DATE)
-                        + INTERVAL '1 month'
+                        DATE_TRUNC(
+                          'month',
+                          CURRENT_DATE
+                        ) + INTERVAL '1 month'
                 )
 
             ) AS pending_players
-          ) AS pending_fees
 
+          ) AS pending_fees;
       `),
     ]);
 
-    // =========================
-    // PLAYER LIST RESPONSE
-    // =========================
     const playerList = players.rows.map((row) => ({
       ...row,
-      status: row.is_active ? "Active" : "Inactive",
+
+      status: row.is_active
+        ? "Active"
+        : "Inactive",
     }));
 
-    // =========================
-    // SUCCESS RESPONSE
-    // =========================
     return sendSuccessResponse(
       res,
       200,
@@ -549,12 +608,16 @@ exports.getAllPlayers = async (req, res) => {
     );
 
   } catch (error) {
-    console.error("Get All Players Error:", error);
+    console.error(
+      "Get All Players Error:",
+      error
+    );
 
     return sendErrorResponse(
       res,
       500,
-      error.message || "Internal Server Error"
+      error.message ||
+        "Internal Server Error"
     );
   }
 };
