@@ -202,33 +202,16 @@ exports.addCoach = async (req, res) => {
 };
 
 
+
 exports.getAllCoaches = async (req, res) => {
   try {
-    const today = new Date().toLocaleDateString("en-CA", {
-      timeZone: "Asia/Kolkata",
-    });
-
     const [result, statistics] = await Promise.all([
-      pool.query(
-        `
+      pool.query(`
         SELECT
-          c.*,
-          a.attendance_id,
-          a.payroll_date,
-          CASE
-            WHEN a.attendance_id IS NOT NULL THEN 'Present'
-            ELSE 'Absent'
-          END AS attendance_status
+          c.*
         FROM tbl_coach c
-
-        LEFT JOIN tbl_attendance a
-          ON a.employee_code = c.coach_code
-          AND a.payroll_date = $1
-
         ORDER BY c.coach_id DESC
-        `,
-        [today]
-      ),
+      `),
 
       pool.query(`
         SELECT
@@ -264,6 +247,7 @@ exports.getAllCoaches = async (req, res) => {
 };
 
 
+
 exports.getCoachById = async (req, res) => {
   const { id } = req.params;
 
@@ -284,29 +268,14 @@ exports.getCoachById = async (req, res) => {
   }
 
   try {
-    const today = new Date().toLocaleDateString("en-CA", {
-      timeZone: "Asia/Kolkata",
-    });
-
     const result = await pool.query(
       `
       SELECT
-        c.*,
-        a.attendance_id,
-        a.payroll_date,
-        CASE
-          WHEN a.attendance_id IS NOT NULL THEN 'Present'
-          ELSE 'Absent'
-        END AS attendance_status
+        c.*
       FROM tbl_coach c
-
-      LEFT JOIN tbl_attendance a
-        ON a.employee_code = c.coach_code
-        AND a.payroll_date = $2
-
       WHERE c.coach_id = $1
       `,
-      [id, today]
+      [id]
     );
 
     return sendSuccessResponse(
@@ -323,7 +292,6 @@ exports.getCoachById = async (req, res) => {
     );
   }
 };
-
 
 
 exports.updateCoach = async (req, res) => {
