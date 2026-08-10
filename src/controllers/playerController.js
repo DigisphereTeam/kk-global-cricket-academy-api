@@ -1019,6 +1019,8 @@ exports.updatePlayer = async (req, res) => {
       "allergies",
       "height",
       "weight",
+      "fee_type",
+      "regular_fee"
     ];
 
 
