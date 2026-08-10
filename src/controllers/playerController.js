@@ -433,18 +433,32 @@ exports.createPlayerAdmission = async (req, res) => {
 
 exports.getAllPlayers = async (req, res) => {
   try {
-    const [players, statistics] = await Promise.all([
   
+    const today = new Date().toLocaleDateString("en-CA", {
+      timeZone: "Asia/Kolkata",
+    });
+
+    const [players, statistics] = await Promise.all([
+
+    
       pool.query(
         `
         SELECT
           p.*,
+
+          /* =====================================
+             TODAY'S ATTENDANCE STATUS
+             ===================================== */
 
           CASE
             WHEN a.attendance_id IS NOT NULL
             THEN 'Present'
             ELSE 'Absent'
           END AS attendance_status,
+
+          /* =====================================
+             PLAYER DOCUMENTS
+             ===================================== */
 
           COALESCE(
             json_agg(
@@ -461,11 +475,27 @@ exports.getAllPlayers = async (req, res) => {
 
         FROM tbl_players p
 
+        /* =====================================
+           TODAY'S ATTENDANCE
+
+           employee_code in attendance
+           = admission_id in players
+           ===================================== */
+
+        LEFT JOIN tbl_attendance a
+          ON a.employee_code = p.admission_id
+          AND a.payroll_date = $1
+
+        /* =====================================
+           PLAYER DOCUMENTS
+           ===================================== */
+
         LEFT JOIN tbl_player_documents d
           ON d.player_id = p.player_id
 
         GROUP BY
-          p.player_id
+          p.player_id,
+          a.attendance_id
 
         ORDER BY
           p.player_id DESC;
@@ -473,6 +503,7 @@ exports.getAllPlayers = async (req, res) => {
         [today]
       ),
 
+      
       pool.query(`
         SELECT
 
@@ -509,7 +540,7 @@ exports.getAllPlayers = async (req, res) => {
 
 
           /* =====================================
-             PENDING FEES - PLAYER COUNT
+             PENDING FEES
              ===================================== */
 
           (
@@ -519,9 +550,9 @@ exports.getAllPlayers = async (req, res) => {
 
             FROM (
 
-              /* ================================
+              /* =================================
                  REGULAR PLAYERS
-                 ================================ */
+                 ================================= */
 
               SELECT
                 p.player_id
@@ -542,6 +573,7 @@ exports.getAllPlayers = async (req, res) => {
 
                 /* Player has NOT paid this month */
                 AND NOT EXISTS (
+
                   SELECT 1
 
                   FROM tbl_player_fees pf
@@ -565,12 +597,13 @@ exports.getAllPlayers = async (req, res) => {
                         ) + INTERVAL '1 month'
                 )
 
+
               UNION
 
 
-              /* ================================
+              /* =================================
                  ONE-ON-ONE PLAYERS
-                 ================================ */
+                 ================================= */
 
               SELECT
                 o.player_id
@@ -597,6 +630,7 @@ exports.getAllPlayers = async (req, res) => {
 
                 /* Player has NOT paid this month */
                 AND NOT EXISTS (
+
                   SELECT 1
 
                   FROM tbl_player_fees pf
@@ -621,9 +655,11 @@ exports.getAllPlayers = async (req, res) => {
                 )
 
             ) AS pending_players
+
           ) AS pending_fees;
       `),
     ]);
+
 
     const playerList = players.rows.map((row) => ({
       ...row,
@@ -632,6 +668,7 @@ exports.getAllPlayers = async (req, res) => {
         ? "Active"
         : "Inactive",
     }));
+
 
     return sendSuccessResponse(
       res,
@@ -656,11 +693,12 @@ exports.getAllPlayers = async (req, res) => {
           ),
         },
 
-        players: players.rows,
+        players: playerList,
       }
     );
 
   } catch (error) {
+
     console.error(
       "Get All Players Error:",
       error
@@ -674,6 +712,8 @@ exports.getAllPlayers = async (req, res) => {
     );
   }
 };
+
+
 
 exports.getPlayerById = async (req, res) => {
   const { player_id } = req.params;
