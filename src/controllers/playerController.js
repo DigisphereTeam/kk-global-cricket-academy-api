@@ -430,7 +430,6 @@ exports.createPlayerAdmission = async (req, res) => {
   }
 };
 
-
 exports.getAllPlayers = async (req, res) => {
   try {
     const [players, statistics] = await Promise.all([
