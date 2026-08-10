@@ -718,33 +718,30 @@ exports.getAllPlayers = async (req, res) => {
              No Regular Fee.
           ========================= */
           (
-            SELECT COALESCE(
-              SUM(o.fee_amount),
-              0
-            )
-            FROM tbl_one_on_one_applications o
+          SELECT COALESCE(
+            SUM(o.fee_amount),
+            0
+          )
+          FROM tbl_one_on_one_applications o
 
-            INNER JOIN tbl_players p
-              ON p.player_id = o.player_id
+          INNER JOIN tbl_players p
+            ON p.player_id = o.player_id
 
-            WHERE o.is_active = TRUE
+          WHERE o.is_active = TRUE
 
-              AND o.application_date >=
-                DATE_TRUNC('month', CURRENT_DATE)
+            AND o.application_date >=
+              DATE_TRUNC('month', CURRENT_DATE)
 
-              AND o.application_date <
-                DATE_TRUNC('month', CURRENT_DATE)
-                + INTERVAL '1 month'
+            AND o.application_date <
+              DATE_TRUNC('month', CURRENT_DATE)
+              + INTERVAL '1 month'
 
-              /* Player is ONLY One-on-One */
-              AND LOWER(TRIM(p.fee_type)) IN (
-                'one-on-one',
-                'one on one',
-                'only one-on-one',
-                'only one on one'
-              )
-          ) AS only_one_on_one_fee
+            /* Player has only admission fee */
+            AND LOWER(TRIM(p.fee_type)) = 'admission fee'
 
+            /* No regular fee */
+            AND p.regular_fee IS NULL
+        ) AS only_one_on_one_fee
       `),
     ]);
 
