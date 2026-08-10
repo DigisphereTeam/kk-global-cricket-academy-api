@@ -530,18 +530,11 @@ exports.getEmployeeSalaries = async (req, res) => {
       );
     }
 
-    let employeeCondition = "";
-
     if (employee_type) {
-      if (employee_type === "Coach") {
-        employeeCondition = `
-          AND es.coach_id IS NOT NULL
-        `;
-      } else if (employee_type === "Staff") {
-        employeeCondition = `
-          AND es.staff_id IS NOT NULL
-        `;
-      } else {
+      if (
+        employee_type !== "Coach" &&
+        employee_type !== "Staff"
+      ) {
         return sendErrorResponse(
           res,
           400,
@@ -551,98 +544,101 @@ exports.getEmployeeSalaries = async (req, res) => {
     }
 
     let query = `
-    (
-      SELECT
-        es.salary_id,
-        c.coach_id AS employee_id,
-        c.coach_code AS employee_code,
-        c.full_name AS employee_name,
-        'Coach' AS employee_type,
+      (
+        SELECT
+          es.salary_id,
+          c.coach_id AS employee_id,
+          c.coach_code AS employee_code,
+          c.full_name AS employee_name,
+          'Coach' AS employee_type,
 
-        $1::INTEGER AS salary_month,
-        $2::INTEGER AS salary_year,
+          $1::INTEGER AS salary_month,
+          $2::INTEGER AS salary_year,
 
-        es.salary_month AS actual_salary_month,
-        es.salary_year AS actual_salary_year,
+          es.salary_month AS actual_salary_month,
+          es.salary_year AS actual_salary_year,
 
-        es.basic_salary,
-        es.bonus,
-        es.deduction,
-        es.net_salary,
+          es.basic_salary,
+          es.incentive_1,
+          es.incentive_2,
+          es.incentive_3,
+          es.net_salary,
 
-        es.payment_status,
-        es.payment_date,
-        es.payment_type,
-        es.remarks
+          es.payment_status,
+          es.payment_date,
+          es.payment_type,
+          es.remarks
 
-      FROM tbl_coach c
+        FROM tbl_coach c
 
-      JOIN LATERAL (
-        SELECT *
-        FROM tbl_employee_salary
-        WHERE coach_id = c.coach_id
-          AND (
-            salary_year < $2
-            OR (
-              salary_year = $2
-              AND salary_month <= $1
+        JOIN LATERAL (
+          SELECT *
+          FROM tbl_employee_salary
+          WHERE coach_id = c.coach_id
+            AND (
+              salary_year < $2
+              OR (
+                salary_year = $2
+                AND salary_month <= $1
+              )
             )
-          )
-        ORDER BY
-          salary_year DESC,
-          salary_month DESC,
-          created_at DESC
-        LIMIT 1
-      ) es ON TRUE
-    )
+          ORDER BY
+            salary_year DESC,
+            salary_month DESC,
+            created_at DESC
+          LIMIT 1
+        ) es ON TRUE
+      )
 
-    UNION ALL
+      UNION ALL
 
-    (
-      SELECT
-        es.salary_id,
-        s.staff_id AS employee_id,
-        s.staff_code AS employee_code,
-        s.full_name AS employee_name,
-        'Staff' AS employee_type,
+      (
+        SELECT
+          es.salary_id,
+          s.staff_id AS employee_id,
+          s.staff_code AS employee_code,
+          s.full_name AS employee_name,
+          'Staff' AS employee_type,
 
-        $1::INTEGER AS salary_month,
-        $2::INTEGER AS salary_year,
+          $1::INTEGER AS salary_month,
+          $2::INTEGER AS salary_year,
 
-        es.salary_month AS actual_salary_month,
-        es.salary_year AS actual_salary_year,
+          es.salary_month AS actual_salary_month,
+          es.salary_year AS actual_salary_year,
 
-        es.basic_salary,
-        es.bonus,
-        es.deduction,
-        es.net_salary,
+          es.basic_salary,
+          es.incentive_1,
+          es.incentive_2,
+          es.incentive_3,
+          es.net_salary,
 
-        es.payment_status,
-        es.payment_date,
-        es.payment_type,
-        es.remarks
+          es.payment_status,
+          es.payment_date,
+          es.payment_type,
+          es.remarks
 
-      FROM tbl_staff s
+        FROM tbl_staff s
 
-      JOIN LATERAL (
-        SELECT *
-        FROM tbl_employee_salary
-        WHERE staff_id = s.staff_id
-          AND (
-            salary_year < $2
-            OR (
-              salary_year = $2
-              AND salary_month <= $1
+        JOIN LATERAL (
+          SELECT *
+          FROM tbl_employee_salary
+          WHERE staff_id = s.staff_id
+            AND (
+              salary_year < $2
+              OR (
+                salary_year = $2
+                AND salary_month <= $1
+              )
             )
-          )
-        ORDER BY
-          salary_year DESC,
-          salary_month DESC,
-          created_at DESC
-        LIMIT 1
-      ) es ON TRUE
-    )
+          ORDER BY
+            salary_year DESC,
+            salary_month DESC,
+            created_at DESC
+          LIMIT 1
+        ) es ON TRUE
+      )
     `;
+
     if (employee_type === "Coach") {
       query = `
         SELECT *
@@ -741,7 +737,9 @@ exports.getEmployeeSalaries = async (req, res) => {
     data.forEach((employee) => {
       if (employee.payment_status === "Paid") {
         statistics.paid_salary += 1;
-        statistics.total_salary += Number(employee.net_salary || 0);
+        statistics.total_salary += Number(
+          employee.net_salary || 0
+        );
       } else {
         statistics.pending_salary += 1;
       }
@@ -756,7 +754,6 @@ exports.getEmployeeSalaries = async (req, res) => {
         salaries: data,
       }
     );
-
   } catch (error) {
     console.error(error);
 
@@ -767,6 +764,7 @@ exports.getEmployeeSalaries = async (req, res) => {
     );
   }
 };
+
 
 exports.getEligibleEmployees = async (req, res) => {
   const {
@@ -886,36 +884,37 @@ exports.getEmployeeSalaryById = async (req, res) => {
   try {
     const result = await pool.query(
       `
-      SELECT
-        es.salary_id,
-        es.staff_id,
-        es.coach_id,
+SELECT
+es.salary_id,
+  es.staff_id,
+  es.coach_id,
 
-        CASE
+  CASE
           WHEN es.staff_id IS NOT NULL THEN s.full_name
           ELSE c.full_name
         END AS employee_name,
 
-        CASE
+  CASE
           WHEN es.staff_id IS NOT NULL THEN 'Staff'
           ELSE 'Coach'
         END AS employee_type,
 
-        CASE
+  CASE
           WHEN es.staff_id IS NOT NULL THEN s.salary
           ELSE c.salary
         END AS employee_salary,
 
-        es.salary_month,
-        es.salary_year,
-        es.basic_salary,
-        es.bonus,
-        es.deduction,
-        es.net_salary,
-        es.payment_status,
-        es.payment_date::DATE AS payment_date,
-        es.remarks,
-        es.created_at
+  es.salary_month,
+  es.salary_year,
+  es.basic_salary,
+  es.incentive_1,
+  es.incentive_2,
+  es.incentive_3,
+  es.net_salary,
+  es.payment_status,
+  es.payment_date::DATE AS payment_date,
+    es.remarks,
+    es.created_at
 
       FROM tbl_employee_salary es
 
@@ -926,7 +925,7 @@ exports.getEmployeeSalaryById = async (req, res) => {
         ON es.coach_id = c.coach_id
 
       WHERE es.salary_id = $1;
-      `,
+`,
       [Number(salary_id)]
     );
 
@@ -944,7 +943,6 @@ exports.getEmployeeSalaryById = async (req, res) => {
       "Employee salary fetched successfully.",
       result.rows[0]
     );
-
   } catch (error) {
     console.error(error);
 
@@ -999,82 +997,82 @@ exports.getEmployeeSalaryHistory = async (req, res) => {
 
       // Staff Profile
       profileQuery = `
-        SELECT
+SELECT
           staff_id AS employee_id,
-          staff_code,
-          full_name,
-          phone_number,
-          designation,
-          salary,
-          join_date,
-          'Staff' AS employee_type
+  staff_code,
+  full_name,
+  phone_number,
+  designation,
+  salary,
+  join_date,
+  'Staff' AS employee_type
         FROM tbl_staff
         WHERE staff_id = $1;
-      `;
+`;
 
       // Staff Salary History
       historyQuery = `
-        SELECT
-          salary_id,
-          salary_month,
-          salary_year,
-          basic_salary,
-          bonus,
-          deduction,
-          net_salary,
-          payment_status,
-          payment_date,
-          remarks,
-          created_at
+SELECT
+salary_id,
+  salary_month,
+  salary_year,
+  basic_salary,
+  bonus,
+  deduction,
+  net_salary,
+  payment_status,
+  payment_date,
+  remarks,
+  created_at
         FROM tbl_employee_salary
         WHERE staff_id = $1
         ORDER BY
           salary_year DESC,
-          salary_month DESC,
-          created_at DESC;
-      `;
+  salary_month DESC,
+    created_at DESC;
+`;
     } else {
       params = [Number(coach_id)];
 
       // Coach Profile
       profileQuery = `
-        SELECT
+SELECT
           coach_id AS employee_id,
-          coach_code,
-          full_name,
-          phone_number,
-          specialization,
-          experience,
-          rating,
-          salary,
-          join_date,
-          is_active,
-          'Coach' AS employee_type
+  coach_code,
+  full_name,
+  phone_number,
+  specialization,
+  experience,
+  rating,
+  salary,
+  join_date,
+  is_active,
+  'Coach' AS employee_type
         FROM tbl_coach
         WHERE coach_id = $1;
-      `;
+`;
 
       // Coach Salary History
       historyQuery = `
-        SELECT
-          salary_id,
-          salary_month,
-          salary_year,
-          basic_salary,
-          bonus,
-          deduction,
-          net_salary,
-          payment_status,
-          payment_date,
-          remarks,
-          created_at
+SELECT
+salary_id,
+  salary_month,
+  salary_year,
+  basic_salary,
+  bonus,
+  deduction,
+  net_salary,
+  payment_status,
+  payment_date,
+  remarks,
+  created_at
         FROM tbl_employee_salary
         WHERE coach_id = $1
         ORDER BY
           salary_year DESC,
-          salary_month DESC,
-          created_at DESC;
-      `;
+  salary_month DESC,
+    created_at DESC;
+`;
     }
 
     const [profileResult, historyResult] = await Promise.all([
@@ -1249,7 +1247,7 @@ exports.updateEmployeeSalary = async (req, res) => {
         AND salary_year = $3
         AND salary_id <> $4
       LIMIT 1
-      `,
+  `,
       [
         employeeId,
         salary_month,
@@ -1277,22 +1275,22 @@ exports.updateEmployeeSalary = async (req, res) => {
     const result = await pool.query(
       `
       UPDATE tbl_employee_salary
-      SET
-        staff_id = $1,
-        coach_id = $2,
-        salary_month = $3,
-        salary_year = $4,
-        basic_salary = $5,
-        incentive_1 = $6,
-        incentive_2 = $7,
-        incentive_3 = $8,
-        net_salary = $9,
-        payment_status = 'Paid',
-        payment_date = $10,
-        remarks = $11
+SET
+staff_id = $1,
+  coach_id = $2,
+  salary_month = $3,
+  salary_year = $4,
+  basic_salary = $5,
+  incentive_1 = $6,
+  incentive_2 = $7,
+  incentive_3 = $8,
+  net_salary = $9,
+  payment_status = 'Paid',
+  payment_date = $10,
+  remarks = $11
       WHERE salary_id = $12
-      RETURNING *;
-      `,
+RETURNING *;
+`,
       [
         staff_id || null,
         coach_id || null,
@@ -1357,7 +1355,7 @@ exports.deleteEmployeeSalary = async (req, res) => {
       SELECT salary_id
       FROM tbl_employee_salary
       WHERE salary_id = $1
-      `,
+  `,
       [salary_id]
     );
 
@@ -1373,7 +1371,7 @@ exports.deleteEmployeeSalary = async (req, res) => {
       `
       DELETE FROM tbl_employee_salary
       WHERE salary_id = $1
-      `,
+  `,
       [salary_id]
     );
 
