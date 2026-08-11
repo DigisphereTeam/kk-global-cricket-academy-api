@@ -80,7 +80,6 @@ exports.getPlayerWiseReport = async (req, res) => {
   }
 };
 
-
 exports.getPlayerMonthlyReport = async (req, res) => {
   const {
     search,
@@ -90,102 +89,155 @@ exports.getPlayerMonthlyReport = async (req, res) => {
   } = req.query;
 
   try {
-    const query = `
-      WITH report_months AS (
-        SELECT
-          generate_series(
-            DATE_TRUNC(
-              'month',
-              COALESCE($1::date, CURRENT_DATE)
-            ),
-            DATE_TRUNC(
-              'month',
-              COALESCE($2::date, CURRENT_DATE)
-            ),
-            INTERVAL '1 month'
-          ) AS month_start
-      ),
+    // ==========================================
+    // MONTHLY PLAYER REPORT
+    // ==========================================
 
-      attendance_summary AS (
-        SELECT
+    const query = `
+      WITH report_months AS(
+  SELECT
+          generate_series(
+    DATE_TRUNC(
+      'month',
+      COALESCE($1:: date, CURRENT_DATE)
+    ),
+    DATE_TRUNC(
+      'month',
+      COALESCE($2:: date, CURRENT_DATE)
+    ),
+    INTERVAL '1 month'
+  ) AS month_start
+),
+
+  /* ==========================================
+     ATTENDANCE SUMMARY
+     ========================================== */
+
+  attendance_summary AS(
+    SELECT
           a.employee_code,
 
-          DATE_TRUNC(
-            'month',
-            a.payroll_date
-          ) AS month_start,
+    DATE_TRUNC(
+      'month',
+      a.payroll_date
+    ) AS month_start,
 
-          COUNT(
-            DISTINCT a.payroll_date
-          ) AS days_present
+    COUNT(
+      DISTINCT a.payroll_date
+    ) AS days_present
 
         FROM tbl_attendance a
 
         GROUP BY
           a.employee_code,
-          DATE_TRUNC(
-            'month',
-            a.payroll_date
-          )
-      ),
+    DATE_TRUNC(
+      'month',
+      a.payroll_date
+    )
+  ),
 
-      fee_summary AS (
-        SELECT
+    /* ==========================================
+       FEE SUMMARY
+       One row per player per month
+       ========================================== */
+
+    fee_summary AS(
+      SELECT
           pf.player_id,
-          pf.status,
 
-          DATE_TRUNC(
-            'month',
-            pf.payment_date
-          ) AS month_start,
+      DATE_TRUNC(
+        'month',
+        pf.payment_date
+      ) AS month_start,
 
-          /* Admission Fee */
-          SUM(
-            CASE
+      /* ======================================
+         TOTAL FEE PAID
+         ====================================== */
+
+      SUM(
+        CASE
               WHEN pf.status = 'Paid'
-                AND LOWER(TRIM(pf.fee_type)) = 'admission'
               THEN COALESCE(pf.amount, 0)
               ELSE 0
             END
-          ) AS admission_fee,
+      ) AS fee_paid,
 
-          /* Regular Fee */
-          SUM(
-            CASE
+      /* ======================================
+         ADMISSION FEE
+         ====================================== */
+
+      SUM(
+        CASE
               WHEN pf.status = 'Paid'
-                AND LOWER(TRIM(pf.fee_type)) = 'regular'
+                AND LOWER(TRIM(pf.fee_type)) IN(
+          'admission',
+          'admission fee'
+        )
               THEN COALESCE(pf.amount, 0)
               ELSE 0
             END
-          ) AS regular_fee,
+      ) AS admission_fee,
 
-          /* One On One Fee */
-          SUM(
-            CASE
+      /* ======================================
+         REGULAR FEE
+         ====================================== */
+
+      SUM(
+        CASE
               WHEN pf.status = 'Paid'
-                AND LOWER(TRIM(pf.fee_type)) = 'one on one'
+                AND LOWER(TRIM(pf.fee_type)) IN(
+          'regular',
+          'regular fee'
+        )
               THEN COALESCE(pf.amount, 0)
               ELSE 0
             END
-          ) AS one_on_one_fee,
+      ) AS regular_fee,
 
-          /* Only One On One Fee */
-          SUM(
-            CASE
+      /* ======================================
+         ONE ON ONE FEE
+         ====================================== */
+
+      SUM(
+        CASE
               WHEN pf.status = 'Paid'
-                AND LOWER(TRIM(pf.fee_type)) = 'only one on one'
+                AND LOWER(TRIM(pf.fee_type)) IN(
+          'one on one',
+          'one-on-one',
+          'one on one fee'
+        )
               THEN COALESCE(pf.amount, 0)
               ELSE 0
             END
-          ) AS only_one_on_one_fee,
+      ) AS one_on_one_fee,
 
-          /* Last Paid Date */
-          MAX(
-            CASE
+      /* ======================================
+         ONLY ONE ON ONE FEE
+         ====================================== */
+
+      SUM(
+        CASE
+              WHEN pf.status = 'Paid'
+                AND LOWER(TRIM(pf.fee_type)) IN(
+          'only one on one',
+          'only one-on-one',
+          'only one on one fee'
+        )
+              THEN COALESCE(pf.amount, 0)
+              ELSE 0
+            END
+      ) AS only_one_on_one_fee,
+
+      /* ======================================
+         LAST PAID DATE
+         ====================================== */
+
+      MAX(
+        CASE
               WHEN pf.status = 'Paid'
               THEN pf.payment_date
             END
-          ) AS fee_paid_date
+      ) AS fee_paid_date
 
         FROM tbl_player_fees pf
 
@@ -194,147 +246,178 @@ exports.getPlayerMonthlyReport = async (req, res) => {
 
         GROUP BY
           pf.player_id,
-          pf.status,
-          DATE_TRUNC(
-            'month',
-            pf.payment_date
-          )
+      DATE_TRUNC(
+        'month',
+        pf.payment_date
       )
+    )
 
-      SELECT
+/* ==========================================
+   MAIN REPORT
+   ========================================== */
 
-        p.admission_id,
+SELECT
 
-        p.player_id,
+p.admission_id,
 
-        p.full_name AS player_name,
+  p.player_id,
 
-        p.fee_type AS fee_type,
+  p.full_name AS player_name,
 
-        TRIM(
-          TO_CHAR(
-            rm.month_start,
-            'Month'
-          )
-        ) AS month,
+    p.fee_type AS fee_type,
+
+      TRIM(
+        TO_CHAR(
+          rm.month_start,
+          'Month'
+        )
+      ) AS month,
 
         EXTRACT(
           YEAR FROM rm.month_start
         )::INT AS year,
 
-        /* Present */
-        COALESCE(
-          att.days_present,
-          0
-        ) AS present,
+          /* ======================================
+             PRESENT
+             ====================================== */
 
-        /* Absent */
-        GREATEST(
-          (
-            CASE
+          COALESCE(
+            att.days_present,
+            0
+          ) AS present,
+
+            /* ======================================
+               ABSENT
+               ====================================== */
+
+            GREATEST(
+              (
+                CASE
 
               /* Current Month */
               WHEN rm.month_start =
-                   DATE_TRUNC(
-                     'month',
-                     CURRENT_DATE
-                   )
+            DATE_TRUNC(
+              'month',
+              CURRENT_DATE
+            )
 
               THEN
                 CURRENT_DATE
-                -
-                GREATEST(
-                  p.admission_date,
-                  rm.month_start::date
-                )
-                + 1
+              -
+              GREATEST(
+                p.admission_date,
+                rm.month_start:: date
+              )
+              + 1
 
               /* Previous Months */
               ELSE
                 (
                   rm.month_start
                   + INTERVAL '1 month'
-                  - INTERVAL '1 day'
-                )::date
+                - INTERVAL '1 day'
+                ):: date
                 -
                 GREATEST(
                   p.admission_date,
-                  rm.month_start::date
+                  rm.month_start:: date
                 )
-                + 1
+            + 1
 
             END
 
-            -
-            COALESCE(
-              att.days_present,
-              0
-            )
-          ),
-          0
+              -
+              COALESCE(
+                att.days_present,
+                0
+              )
+            ),
+            0
         ) AS absent,
 
-        /* Total Fee Paid */
-        CASE
+  /* ======================================
+     TOTAL FEE PAID
+     ====================================== */
+
+  CASE
           WHEN COALESCE(
-            fee.fee_paid,
-            0
-          ) > 0
+    fee.fee_paid,
+    0
+  ) > 0
           THEN fee.fee_paid
           ELSE NULL
         END AS fee_paid,
 
-        /* Monthly Fee Statistics */
+  /* ======================================
+     MONTHLY FEE STATISTICS
+     ====================================== */
 
-        COALESCE(
-          fee.admission_fee,
-          0
-        ) AS admission_fee,
+  COALESCE(
+    fee.admission_fee,
+    0
+  ) AS admission_fee,
 
-        COALESCE(
-          fee.regular_fee,
-          0
-        ) AS regular_fee,
+    COALESCE(
+      fee.regular_fee,
+      0
+    ) AS regular_fee,
 
-        COALESCE(
-          fee.one_on_one_fee,
-          0
-        ) AS one_on_one_fee,
+      COALESCE(
+        fee.one_on_one_fee,
+        0
+      ) AS one_on_one_fee,
 
         COALESCE(
           fee.only_one_on_one_fee,
           0
         ) AS only_one_on_one_fee,
 
-        fee.fee_paid_date
+          fee.fee_paid_date
 
       FROM tbl_players p
 
       CROSS JOIN report_months rm
 
+      /* ==========================================
+         ATTENDANCE
+         ========================================== */
+
       LEFT JOIN attendance_summary att
         ON att.employee_code =
-           p.admission_id
+  p.admission_id
 
         AND att.month_start =
-            rm.month_start
+  rm.month_start
+
+      /* ==========================================
+         FEES
+         ========================================== */
 
       LEFT JOIN fee_summary fee
         ON fee.player_id =
-           p.player_id
+  p.player_id
 
         AND fee.month_start =
-            rm.month_start
+  rm.month_start
 
-      WHERE
+/* ==========================================
+   PLAYER MUST HAVE JOINED
+   BY END OF REPORT MONTH
+   ========================================== */
 
-        p.admission_date <=
-        (
-          rm.month_start
-          + INTERVAL '1 month'
-          - INTERVAL '1 day'
-        )::date
-    `;
+WHERE
+
+p.admission_date <=
+  (
+    rm.month_start
+    + INTERVAL '1 month'
+      - INTERVAL '1 day'
+        ):: date
+  `;
+
+    // ==========================================
+    // MAIN QUERY VALUES
+    // ==========================================
 
     const values = [
       from_date || null,
@@ -345,44 +428,64 @@ exports.getPlayerMonthlyReport = async (req, res) => {
 
     let finalQuery = query;
 
-    /* Search Filter */
+    // ==========================================
+    // SEARCH FILTER
+    // ==========================================
+
     if (search) {
       finalQuery += `
-        AND (
-          p.full_name ILIKE $${index}
+AND(
+  p.full_name ILIKE $${index}
           OR p.admission_id ILIKE $${index}
-        )
-      `;
+)
+  `;
 
-      values.push(`%${search}%`);
+      values.push(
+        `% ${search}% `
+      );
+
       index++;
     }
 
-    /* Player Filter */
+    // ==========================================
+    // PLAYER FILTER
+    // ==========================================
+
     if (player_id) {
       finalQuery += `
         AND p.player_id = $${index}
-      `;
+`;
 
-      values.push(player_id);
+      values.push(
+        player_id
+      );
+
       index++;
     }
 
-    /* Order */
+    // ==========================================
+    // ORDER
+    // ==========================================
+
     finalQuery += `
       ORDER BY
-        rm.month_start DESC,
-        p.full_name ASC;
-    `;
+rm.month_start DESC,
+  p.full_name ASC;
+`;
+
+    // ==========================================
+    // EXECUTE MAIN QUERY
+    // ==========================================
 
     const result = await pool.query(
       finalQuery,
       values
     );
 
-    /*
-     * Convert monthly rows to numbers
-     */
+    // ==========================================
+    // CONVERT MONTHLY VALUES TO NUMBERS
+    // ==========================================
+
     const rows = result.rows.map((row) => ({
       ...row,
 
@@ -416,92 +519,121 @@ exports.getPlayerMonthlyReport = async (req, res) => {
       ),
     }));
 
-
-    /*
-     * ==========================================
-     * OVERALL STATISTICS
-     * ==========================================
-     *
-     * Calculate statistics directly from
-     * tbl_player_fees for the selected period.
-     */
+    // ==========================================
+    // OVERALL STATISTICS
+    // ==========================================
 
     let statsQuery = `
-      SELECT
+SELECT
 
-        COALESCE(
-          SUM(
-            CASE
+/* ======================================
+   ADMISSION FEE
+   ====================================== */
+
+COALESCE(
+  SUM(
+    CASE
               WHEN pf.status = 'Paid'
-                AND LOWER(TRIM(pf.fee_type)) = 'admission'
+                AND LOWER(TRIM(pf.fee_type)) IN(
+      'admission',
+      'admission fee'
+    )
               THEN COALESCE(pf.amount, 0)
               ELSE 0
             END
-          ),
-          0
-        ) AS admission_fee,
+  ),
+  0
+) AS admission_fee,
 
-        COALESCE(
-          SUM(
-            CASE
+  /* ======================================
+     REGULAR FEE
+     ====================================== */
+
+  COALESCE(
+    SUM(
+      CASE
               WHEN pf.status = 'Paid'
-                AND LOWER(TRIM(pf.fee_type)) = 'regular'
+                AND LOWER(TRIM(pf.fee_type)) IN(
+        'regular',
+        'regular fee'
+      )
               THEN COALESCE(pf.amount, 0)
               ELSE 0
             END
-          ),
-          0
-        ) AS regular_fee,
+    ),
+    0
+  ) AS regular_fee,
 
-        COALESCE(
-          SUM(
-            CASE
+    /* ======================================
+       ONE ON ONE FEE
+       ====================================== */
+
+    COALESCE(
+      SUM(
+        CASE
               WHEN pf.status = 'Paid'
-                AND LOWER(TRIM(pf.fee_type)) = 'one on one'
+                AND LOWER(TRIM(pf.fee_type)) IN(
+          'one on one',
+          'one-on-one',
+          'one on one fee'
+        )
               THEN COALESCE(pf.amount, 0)
               ELSE 0
             END
-          ),
-          0
-        ) AS one_on_one_fee,
+      ),
+      0
+    ) AS one_on_one_fee,
 
-        COALESCE(
-          SUM(
-            CASE
+      /* ======================================
+         ONLY ONE ON ONE FEE
+         ====================================== */
+
+      COALESCE(
+        SUM(
+          CASE
               WHEN pf.status = 'Paid'
-                AND LOWER(TRIM(pf.fee_type)) = 'only one on one'
+                AND LOWER(TRIM(pf.fee_type)) IN(
+            'only one on one',
+            'only one-on-one',
+            'only one on one fee'
+          )
               THEN COALESCE(pf.amount, 0)
               ELSE 0
             END
-          ),
-          0
-        ) AS only_one_on_one_fee
+        ),
+        0
+      ) AS only_one_on_one_fee
 
       FROM tbl_player_fees pf
 
       INNER JOIN tbl_players p
         ON p.player_id = pf.player_id
 
-      WHERE
-        pf.status = 'Paid'
+WHERE
+
+pf.status = 'Paid'
 
         AND pf.payment_date IS NOT NULL
 
-        AND pf.payment_date::date >=
-            COALESCE(
-              $1::date,
-              DATE_TRUNC(
-                'month',
-                CURRENT_DATE
-              )::date
-            )
+        AND pf.payment_date:: date >=
+  COALESCE(
+    $1:: date,
+    DATE_TRUNC(
+      'month',
+      CURRENT_DATE
+    ):: date
+  )
 
-        AND pf.payment_date::date <=
-            COALESCE(
-              $2::date,
-              CURRENT_DATE
-            )
+        AND pf.payment_date:: date <=
+  COALESCE(
+    $2:: date,
+    CURRENT_DATE
+  )
     `;
+
+    // ==========================================
+    // STATISTICS VALUES
+    // ==========================================
 
     const statsValues = [
       from_date || null,
@@ -510,31 +642,33 @@ exports.getPlayerMonthlyReport = async (req, res) => {
 
     let statsIndex = 3;
 
-    /*
-     * Apply same search filter
-     */
+    // ==========================================
+    // STATISTICS SEARCH FILTER
+    // ==========================================
+
     if (search) {
       statsQuery += `
-        AND (
-          p.full_name ILIKE $${statsIndex}
+AND(
+  p.full_name ILIKE $${statsIndex}
           OR p.admission_id ILIKE $${statsIndex}
-        )
-      `;
+)
+  `;
 
       statsValues.push(
-        `%${search}%`
+        `% ${search}% `
       );
 
       statsIndex++;
     }
 
-    /*
-     * Apply same player filter
-     */
+    // ==========================================
+    // STATISTICS PLAYER FILTER
+    // ==========================================
+
     if (player_id) {
       statsQuery += `
         AND p.player_id = $${statsIndex}
-      `;
+`;
 
       statsValues.push(
         player_id
@@ -543,19 +677,21 @@ exports.getPlayerMonthlyReport = async (req, res) => {
       statsIndex++;
     }
 
+    // ==========================================
+    // EXECUTE STATISTICS QUERY
+    // ==========================================
+
     const statsResult = await pool.query(
       statsQuery,
       statsValues
     );
 
-    const stats = statsResult.rows[0];
+    const stats =
+      statsResult.rows[0];
 
-
-    /*
-     * ==========================================
-     * FINAL STATISTICS OBJECT
-     * ==========================================
-     */
+    // ==========================================
+    // FINAL STATISTICS OBJECT
+    // ==========================================
 
     const statistics = {
       admission_fee: Number(
@@ -575,10 +711,9 @@ exports.getPlayerMonthlyReport = async (req, res) => {
       ),
     };
 
-
-    /*
-     * Final Response
-     */
+    // ==========================================
+    // FINAL RESPONSE
+    // ==========================================
 
     return sendSuccessResponse(
       res,
@@ -591,7 +726,6 @@ exports.getPlayerMonthlyReport = async (req, res) => {
     );
 
   } catch (error) {
-
     console.error(
       "Monthly Player Report Error:",
       error
@@ -601,10 +735,11 @@ exports.getPlayerMonthlyReport = async (req, res) => {
       res,
       500,
       error.message ||
-        "Internal Server Error"
+      "Internal Server Error"
     );
   }
 };
+
 
 
 
@@ -614,38 +749,38 @@ exports.getTrainerWiseReport = async (req, res) => {
 
   try {
     let query = `
-      SELECT
-        c.coach_id,
-        c.coach_code AS trainer_id,
-        c.full_name AS trainer_name,
-        c.specialization,
-        c.phone_number AS contact_number,
+SELECT
+c.coach_id,
+  c.coach_code AS trainer_id,
+    c.full_name AS trainer_name,
+      c.specialization,
+      c.phone_number AS contact_number,
         c.experience,
         c.join_date
 
       FROM tbl_coach c
-      WHERE 1=1
-    `;
+      WHERE 1 = 1
+  `;
 
     const values = [];
     let index = 1;
 
     if (search) {
       query += `
-        AND (
-          c.full_name ILIKE $${index}
+AND(
+  c.full_name ILIKE $${index}
           OR c.coach_code ILIKE $${index}
           OR c.specialization ILIKE $${index}
-        )
-      `;
-      values.push(`%${search}%`);
+)
+  `;
+      values.push(`% ${search}% `);
       index++;
     }
 
     if (coach_id) {
       query += `
         AND c.coach_id = $${index}
-      `;
+`;
       values.push(coach_id);
       index++;
     }
@@ -653,7 +788,7 @@ exports.getTrainerWiseReport = async (req, res) => {
     if (from_date) {
       query += `
         AND c.join_date >= $${index}
-      `;
+`;
       values.push(from_date);
       index++;
     }
@@ -661,16 +796,16 @@ exports.getTrainerWiseReport = async (req, res) => {
     if (to_date) {
       query += `
         AND c.join_date <= $${index}
-      `;
+`;
       values.push(to_date);
       index++;
     }
 
     query += `
       ORDER BY
-      c.join_date DESC,
-      c.full_name ASC;
-    `;
+c.join_date DESC,
+  c.full_name ASC;
+`;
 
     const result = await pool.query(query, values);
 
@@ -699,72 +834,72 @@ exports.getTrainerMonthlyReport = async (req, res) => {
 
   try {
     let query = `
-      WITH report_months AS (
+      WITH report_months AS(
 
-        SELECT
+  SELECT
           generate_series(
-            DATE_TRUNC(
-              'month',
-              COALESCE($1::date, CURRENT_DATE)
-            ),
-            DATE_TRUNC(
-              'month',
-              COALESCE($2::date, CURRENT_DATE)
-            ),
-            INTERVAL '1 month'
-          )::date AS month_start
+    DATE_TRUNC(
+      'month',
+      COALESCE($1:: date, CURRENT_DATE)
+    ),
+    DATE_TRUNC(
+      'month',
+      COALESCE($2:: date, CURRENT_DATE)
+    ),
+    INTERVAL '1 month'
+  ):: date AS month_start
 
-      ),
+),
 
-      attendance_summary AS (
+  attendance_summary AS(
 
-        SELECT
+    SELECT
           employee_code,
 
-          DATE_TRUNC(
-            'month',
-            payroll_date
-          )::date AS month_start,
+    DATE_TRUNC(
+      'month',
+      payroll_date
+    ):: date AS month_start,
 
-          COUNT(
-            DISTINCT payroll_date
-          ) AS days_present
+    COUNT(
+      DISTINCT payroll_date
+    ) AS days_present
 
         FROM tbl_attendance
 
         GROUP BY
           employee_code,
-          DATE_TRUNC(
-            'month',
-            payroll_date
-          )::date
+    DATE_TRUNC(
+      'month',
+      payroll_date
+    ):: date
 
-      )
+  )
 
-      SELECT
+SELECT
 
-        /* Trainer ID */
-        c.coach_code AS trainer_id,
+/* Trainer ID */
+c.coach_code AS trainer_id,
 
-        /* Trainer Primary Key */
-        c.coach_id,
+  /* Trainer Primary Key */
+  c.coach_id,
 
-        /* Trainer Name */
-        c.full_name AS trainer_name,
+  /* Trainer Name */
+  c.full_name AS trainer_name,
 
-        /* Specialization */
-        c.specialization,
+    /* Specialization */
+    c.specialization,
 
-        /* Month */
-        TO_CHAR(
-          rm.month_start,
-          'FMMonth'
-        ) AS month,
+    /* Month */
+    TO_CHAR(
+      rm.month_start,
+      'FMMonth'
+    ) AS month,
 
-        /* Year */
-        EXTRACT(
-          YEAR FROM rm.month_start
-        )::INTEGER AS year,
+      /* Year */
+      EXTRACT(
+        YEAR FROM rm.month_start
+      )::INTEGER AS year,
 
         /* Present */
         COALESCE(
@@ -772,17 +907,17 @@ exports.getTrainerMonthlyReport = async (req, res) => {
           0
         ) AS present,
 
-        /* Absent */
-        GREATEST(
+          /* Absent */
+          GREATEST(
 
-          CASE
+            CASE
 
             /* Current Month */
             WHEN rm.month_start =
-                 DATE_TRUNC(
-                   'month',
-                   CURRENT_DATE
-                 )::date
+          DATE_TRUNC(
+            'month',
+            CURRENT_DATE
+          ):: date
 
             THEN
               (
@@ -797,29 +932,29 @@ exports.getTrainerMonthlyReport = async (req, res) => {
                 (
                   rm.month_start
                   + INTERVAL '1 month'
-                  - INTERVAL '1 day'
-                )::date
-                - rm.month_start
-                + 1
-              )
+              - INTERVAL '1 day'
+              ):: date
+              - rm.month_start
+          + 1
+          )
 
-          END
+END
 
-          -
-          COALESCE(
-            att.days_present,
-            0
-          ),
+  -
+  COALESCE(
+    att.days_present,
+    0
+  ),
 
-          0
+  0
 
         ) AS absent,
 
-        /* Salary Paid */
-        salary.net_salary AS salary_paid,
+  /* Salary Paid */
+  salary.net_salary AS salary_paid,
 
-        /* Salary Paid Date */
-        salary.payment_date AS salary_paid_date
+    /* Salary Paid Date */
+    salary.payment_date AS salary_paid_date
 
       FROM tbl_coach c
 
@@ -829,17 +964,17 @@ exports.getTrainerMonthlyReport = async (req, res) => {
       LEFT JOIN attendance_summary att
 
         ON att.employee_code =
-           c.coach_code
+  c.coach_code
 
         AND att.month_start =
-            rm.month_start
+  rm.month_start
 
       /* Salary */
-      LEFT JOIN LATERAL (
+      LEFT JOIN LATERAL(
 
-        SELECT
+    SELECT
           es.net_salary,
-          es.payment_date
+    es.payment_date
 
         FROM tbl_employee_salary es
 
@@ -847,24 +982,24 @@ exports.getTrainerMonthlyReport = async (req, res) => {
           es.coach_id = c.coach_id
 
           AND es.salary_year =
-              EXTRACT(
-                YEAR FROM rm.month_start
-              )::INTEGER
+  EXTRACT(
+    YEAR FROM rm.month_start
+  ):: INTEGER
 
           AND es.salary_month =
-              EXTRACT(
-                MONTH FROM rm.month_start
-              )::INTEGER
+  EXTRACT(
+    MONTH FROM rm.month_start
+  ):: INTEGER
 
         ORDER BY
           es.payment_date DESC NULLS LAST
 
         LIMIT 1
 
-      ) salary ON TRUE
+  ) salary ON TRUE
 
       WHERE 1 = 1
-    `;
+  `;
 
     const values = [
       from_date || null,
@@ -880,15 +1015,15 @@ exports.getTrainerMonthlyReport = async (req, res) => {
     if (search && search.trim() !== "") {
 
       query += `
-        AND (
-          c.full_name ILIKE $${index}
+AND(
+  c.full_name ILIKE $${index}
           OR c.coach_code ILIKE $${index}
           OR c.specialization ILIKE $${index}
-        )
-      `;
+)
+  `;
 
       values.push(
-        `%${search.trim()}%`
+        `% ${search.trim()}% `
       );
 
       index++;
@@ -906,7 +1041,7 @@ exports.getTrainerMonthlyReport = async (req, res) => {
 
       query += `
         AND c.coach_id = $${index}
-      `;
+`;
 
       values.push(
         Number(coach_id)
@@ -921,9 +1056,9 @@ exports.getTrainerMonthlyReport = async (req, res) => {
 
     query += `
       ORDER BY
-        rm.month_start DESC,
-        c.full_name ASC;
-    `;
+rm.month_start DESC,
+  c.full_name ASC;
+`;
 
     const result = await pool.query(
       query,
@@ -948,7 +1083,7 @@ exports.getTrainerMonthlyReport = async (req, res) => {
       res,
       500,
       error.message ||
-        "Internal Server Error"
+      "Internal Server Error"
     );
   }
 };
@@ -958,17 +1093,17 @@ exports.getStaffWiseReport = async (req, res) => {
 
   try {
     let query = `
-      SELECT
-        s.staff_code,
-        s.full_name AS staff_name,
-        s.designation,
-        s.join_date AS joining_date,
-        s.phone_number AS contact_number
+SELECT
+s.staff_code,
+  s.full_name AS staff_name,
+    s.designation,
+    s.join_date AS joining_date,
+      s.phone_number AS contact_number
 
       FROM tbl_staff s
 
-      WHERE 1=1
-    `;
+      WHERE 1 = 1
+  `;
 
     const values = [];
     let index = 1;
@@ -976,13 +1111,13 @@ exports.getStaffWiseReport = async (req, res) => {
     // Search
     if (search) {
       query += `
-        AND (
-          s.full_name ILIKE $${index}
+AND(
+  s.full_name ILIKE $${index}
           OR s.staff_code ILIKE $${index}
           OR s.role ILIKE $${index}
-        )
-      `;
-      values.push(`%${search}%`);
+)
+  `;
+      values.push(`% ${search}% `);
       index++;
     }
 
@@ -990,7 +1125,7 @@ exports.getStaffWiseReport = async (req, res) => {
     if (staff_id) {
       query += `
         AND s.staff_id = $${index}
-      `;
+`;
       values.push(staff_id);
       index++;
     }
@@ -999,7 +1134,7 @@ exports.getStaffWiseReport = async (req, res) => {
     if (from_date) {
       query += `
         AND s.join_date >= $${index}
-      `;
+`;
       values.push(from_date);
       index++;
     }
@@ -1008,16 +1143,16 @@ exports.getStaffWiseReport = async (req, res) => {
     if (to_date) {
       query += `
         AND s.join_date <= $${index}
-      `;
+`;
       values.push(to_date);
       index++;
     }
 
     query += `
       ORDER BY
-        s.join_date DESC,
-        s.full_name ASC;
-    `;
+s.join_date DESC,
+  s.full_name ASC;
+`;
 
     const result = await pool.query(query, values);
 
@@ -1046,127 +1181,127 @@ exports.getStaffMonthlyReport = async (req, res) => {
 
   try {
     let query = `
-      WITH report_months AS (
+      WITH report_months AS(
 
-        SELECT
+  SELECT
           generate_series(
-            DATE_TRUNC(
-              'month',
-              COALESCE($1::date, CURRENT_DATE)
-            ),
-            DATE_TRUNC(
-              'month',
-              COALESCE($2::date, CURRENT_DATE)
-            ),
-            INTERVAL '1 month'
-          )::date AS month_start
+    DATE_TRUNC(
+      'month',
+      COALESCE($1:: date, CURRENT_DATE)
+    ),
+    DATE_TRUNC(
+      'month',
+      COALESCE($2:: date, CURRENT_DATE)
+    ),
+    INTERVAL '1 month'
+  ):: date AS month_start
 
-      ),
+),
 
-      attendance_summary AS (
+  attendance_summary AS(
 
-        SELECT
+    SELECT
           employee_code,
 
-          DATE_TRUNC(
-            'month',
-            payroll_date
-          )::date AS month_start,
+    DATE_TRUNC(
+      'month',
+      payroll_date
+    ):: date AS month_start,
 
-          COUNT(
-            DISTINCT payroll_date
-          ) AS days_present
+    COUNT(
+      DISTINCT payroll_date
+    ) AS days_present
 
         FROM tbl_attendance
 
         GROUP BY
           employee_code,
-          DATE_TRUNC(
-            'month',
-            payroll_date
-          )::date
+    DATE_TRUNC(
+      'month',
+      payroll_date
+    ):: date
 
-      )
+  )
 
-      SELECT
+SELECT
 
-        /* Staff Code */
-        s.staff_code AS staff_code,
+/* Staff Code */
+s.staff_code AS staff_code,
 
-        /* Staff Primary ID */
-        s.staff_id AS staff_id,
+  /* Staff Primary ID */
+  s.staff_id AS staff_id,
 
-        /* Staff Name */
-        s.full_name AS staff_name,
+    /* Staff Name */
+    s.full_name AS staff_name,
 
-        /* Designation */
-        s.designation,
+      /* Designation */
+      s.designation,
 
-        /* Month */
-        TO_CHAR(
-          rm.month_start,
-          'FMMonth'
-        ) AS month,
+      /* Month */
+      TO_CHAR(
+        rm.month_start,
+        'FMMonth'
+      ) AS month,
 
         /* Year */
         EXTRACT(
           YEAR FROM rm.month_start
         )::INTEGER AS year,
 
-        /* Present */
-        COALESCE(
-          att.days_present,
-          0
-        ) AS present,
-
-        /* Absent */
-        GREATEST(
-
-          CASE
-
-            /* Current Month */
-            WHEN rm.month_start =
-                 DATE_TRUNC(
-                   'month',
-                   CURRENT_DATE
-                 )::date
-
-            THEN
-              (
-                CURRENT_DATE
-                - rm.month_start
-                + 1
-              )
-
-            /* Previous Months */
-            ELSE
-              (
-                (
-                  rm.month_start
-                  + INTERVAL '1 month'
-                  - INTERVAL '1 day'
-                )::date
-                - rm.month_start
-                + 1
-              )
-
-          END
-
-          -
+          /* Present */
           COALESCE(
             att.days_present,
             0
-          ),
+          ) AS present,
 
-          0
+            /* Absent */
+            GREATEST(
+
+              CASE
+
+            /* Current Month */
+            WHEN rm.month_start =
+            DATE_TRUNC(
+              'month',
+              CURRENT_DATE
+            ):: date
+
+            THEN
+                (
+                  CURRENT_DATE
+                  - rm.month_start
+                  + 1
+                )
+
+            /* Previous Months */
+            ELSE
+                (
+                  (
+                    rm.month_start
+                    + INTERVAL '1 month'
+                - INTERVAL '1 day'
+                ):: date
+                - rm.month_start
+            + 1
+            )
+
+END
+
+  -
+  COALESCE(
+    att.days_present,
+    0
+  ),
+
+  0
 
         ) AS absent,
 
-        /* Salary Paid */
-        salary.net_salary AS salary_paid,
+  /* Salary Paid */
+  salary.net_salary AS salary_paid,
 
-        /* Salary Paid Date */
-        salary.payment_date AS salary_paid_date
+    /* Salary Paid Date */
+    salary.payment_date AS salary_paid_date
 
       FROM tbl_staff s
 
@@ -1176,17 +1311,17 @@ exports.getStaffMonthlyReport = async (req, res) => {
       LEFT JOIN attendance_summary att
 
         ON att.employee_code =
-           s.staff_code
+  s.staff_code
 
         AND att.month_start =
-            rm.month_start
+  rm.month_start
 
       /* Salary */
-      LEFT JOIN LATERAL (
+      LEFT JOIN LATERAL(
 
-        SELECT
+    SELECT
           es.net_salary,
-          es.payment_date
+    es.payment_date
 
         FROM tbl_employee_salary es
 
@@ -1194,24 +1329,24 @@ exports.getStaffMonthlyReport = async (req, res) => {
           es.staff_id = s.staff_id
 
           AND es.salary_year =
-              EXTRACT(
-                YEAR FROM rm.month_start
-              )::INTEGER
+  EXTRACT(
+    YEAR FROM rm.month_start
+  ):: INTEGER
 
           AND es.salary_month =
-              EXTRACT(
-                MONTH FROM rm.month_start
-              )::INTEGER
+  EXTRACT(
+    MONTH FROM rm.month_start
+  ):: INTEGER
 
         ORDER BY
           es.payment_date DESC NULLS LAST
 
         LIMIT 1
 
-      ) salary ON TRUE
+  ) salary ON TRUE
 
       WHERE 1 = 1
-    `;
+  `;
 
     const values = [
       from_date || null,
@@ -1229,15 +1364,15 @@ exports.getStaffMonthlyReport = async (req, res) => {
       search.trim() !== ""
     ) {
       query += `
-        AND (
-          s.full_name ILIKE $${index}
+AND(
+  s.full_name ILIKE $${index}
           OR s.staff_code ILIKE $${index}
           OR s.designation ILIKE $${index}
-        )
-      `;
+)
+  `;
 
       values.push(
-        `%${search.trim()}%`
+        `% ${search.trim()}% `
       );
 
       index++;
@@ -1255,7 +1390,7 @@ exports.getStaffMonthlyReport = async (req, res) => {
     ) {
       query += `
         AND s.staff_code = $${index}
-      `;
+`;
 
       values.push(
         staff_code.trim()
@@ -1270,9 +1405,9 @@ exports.getStaffMonthlyReport = async (req, res) => {
 
     query += `
       ORDER BY
-        rm.month_start DESC,
-        s.full_name ASC;
-    `;
+rm.month_start DESC,
+  s.full_name ASC;
+`;
 
     const result = await pool.query(
       query,
@@ -1297,7 +1432,7 @@ exports.getStaffMonthlyReport = async (req, res) => {
       res,
       500,
       error.message ||
-        "Internal Server Error"
+      "Internal Server Error"
     );
   }
 };
