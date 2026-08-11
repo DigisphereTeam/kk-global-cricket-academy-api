@@ -55,16 +55,19 @@ exports.applyOneOnOne = async (req, res) => {
 
     const existingApplication = await pool.query(
       `SELECT 1
-       FROM tbl_one_on_one_applications
-       WHERE player_id = $1`,
+      FROM tbl_one_on_one_applications
+      WHERE player_id = $1
+      LIMIT 1`,
       [player_id],
     );
 
-    return sendErrorResponse(
-      res,
-      409,
-      "An application already exists for this player.",
-    );
+    if (existingApplication.rowCount > 0) {
+      return sendErrorResponse(
+        res,
+        409,
+        "An application already exists for this player.",
+      );
+    }
 
     const application = await pool.query(
       `
