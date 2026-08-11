@@ -1024,70 +1024,46 @@ p.player_id DESC;
     ) AS admission_fee,
 
 
-      /* =========================
-         REGULAR FEE
-         CURRENT MONTH
-      ========================= */
+      /* =========================================
+           REGULAR REVENUE
+           ========================================= */
 
-      (
-        SELECT COALESCE(
-          SUM(regular_amount),
-          0
-        )
-    FROM(
+        (
+          SELECT COALESCE(SUM(regular_amount), 0)
+          FROM (
 
-      /* Players admitted in current month */
+          /* Paid regular fees */
 
-      SELECT
-          COALESCE(
-        p.regular_fee,
-        0
-      ) AS regular_amount
+          SELECT
+            COALESCE(pf.amount, 0) AS regular_amount
 
-        FROM tbl_players p
+          FROM tbl_player_fees pf
 
-        WHERE p.is_active = TRUE
+          WHERE pf.status = 'Paid'
+            AND pf.is_active = TRUE
 
-          AND p.admission_date >=
-    DATE_TRUNC('month', CURRENT_DATE)
-
-          AND p.admission_date <
-    DATE_TRUNC('month', CURRENT_DATE)
-    + INTERVAL '1 month'
+            AND DATE_TRUNC('month', pf.payment_date)
+                = DATE_TRUNC('month', CURRENT_DATE)
 
 
-        UNION ALL
+          UNION ALL
 
 
-        /* Existing players who paid */
+          /* Regular fee from players admitted this month */
+          SELECT
+            COALESCE(p.regular_fee, 0) AS regular_amount
 
-        SELECT
-          COALESCE(
-      pf.amount,
-      0
-    ) AS regular_amount
+          FROM tbl_players p
 
-        FROM tbl_player_fees pf
+          WHERE p.is_active = TRUE
+            AND p.regular_fee IS NOT NULL
 
-        INNER JOIN tbl_players p
-          ON p.player_id = pf.player_id
+            AND DATE_TRUNC('month', p.admission_date)
+                = DATE_TRUNC('month', CURRENT_DATE)
 
-        WHERE pf.is_active = TRUE
-          AND pf.status = 'Paid'
-          AND p.is_active = TRUE
+        ) AS regular_revenue_data
 
-          AND pf.payment_date >=
-    DATE_TRUNC('month', CURRENT_DATE)
-
-          AND pf.payment_date <
-    DATE_TRUNC('month', CURRENT_DATE)
-    + INTERVAL '1 month'
-
-          AND p.admission_date <
-    DATE_TRUNC('month', CURRENT_DATE)
-
-    ) AS regular_fees
-    ) AS regular_fee,
+      ) AS regular_fee,
 
 
       /* =========================
