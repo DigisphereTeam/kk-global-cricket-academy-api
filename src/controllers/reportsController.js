@@ -80,6 +80,7 @@ exports.getPlayerWiseReport = async (req, res) => {
   }
 };
 
+
 exports.getPlayerMonthlyReport = async (req, res) => {
   const {
     search,
@@ -131,20 +132,54 @@ exports.getPlayerMonthlyReport = async (req, res) => {
       fee_summary AS (
         SELECT
           pf.player_id,
+          pf.status,
 
           DATE_TRUNC(
             'month',
             pf.payment_date
           ) AS month_start,
 
+          /* Admission Fee */
           SUM(
             CASE
               WHEN pf.status = 'Paid'
-              THEN pf.amount
+                AND LOWER(TRIM(pf.fee_type)) = 'admission'
+              THEN COALESCE(pf.amount, 0)
               ELSE 0
             END
-          ) AS fee_paid,
+          ) AS admission_fee,
 
+          /* Regular Fee */
+          SUM(
+            CASE
+              WHEN pf.status = 'Paid'
+                AND LOWER(TRIM(pf.fee_type)) = 'regular'
+              THEN COALESCE(pf.amount, 0)
+              ELSE 0
+            END
+          ) AS regular_fee,
+
+          /* One On One Fee */
+          SUM(
+            CASE
+              WHEN pf.status = 'Paid'
+                AND LOWER(TRIM(pf.fee_type)) = 'one on one'
+              THEN COALESCE(pf.amount, 0)
+              ELSE 0
+            END
+          ) AS one_on_one_fee,
+
+          /* Only One On One Fee */
+          SUM(
+            CASE
+              WHEN pf.status = 'Paid'
+                AND LOWER(TRIM(pf.fee_type)) = 'only one on one'
+              THEN COALESCE(pf.amount, 0)
+              ELSE 0
+            END
+          ) AS only_one_on_one_fee,
+
+          /* Last Paid Date */
           MAX(
             CASE
               WHEN pf.status = 'Paid'
@@ -154,10 +189,12 @@ exports.getPlayerMonthlyReport = async (req, res) => {
 
         FROM tbl_player_fees pf
 
-        WHERE pf.payment_date IS NOT NULL
+        WHERE
+          pf.payment_date IS NOT NULL
 
         GROUP BY
           pf.player_id,
+          pf.status,
           DATE_TRUNC(
             'month',
             pf.payment_date
@@ -172,9 +209,7 @@ exports.getPlayerMonthlyReport = async (req, res) => {
 
         p.full_name AS player_name,
 
-        p.batch,
-
-
+        p.fee_type AS fee_type,
 
         TRIM(
           TO_CHAR(
@@ -187,19 +222,18 @@ exports.getPlayerMonthlyReport = async (req, res) => {
           YEAR FROM rm.month_start
         )::INT AS year,
 
-
+        /* Present */
         COALESCE(
           att.days_present,
           0
         ) AS present,
 
-
+        /* Absent */
         GREATEST(
-
           (
             CASE
 
-              
+              /* Current Month */
               WHEN rm.month_start =
                    DATE_TRUNC(
                      'month',
@@ -215,7 +249,7 @@ exports.getPlayerMonthlyReport = async (req, res) => {
                 )
                 + 1
 
-             
+              /* Previous Months */
               ELSE
                 (
                   rm.month_start
@@ -236,36 +270,47 @@ exports.getPlayerMonthlyReport = async (req, res) => {
               att.days_present,
               0
             )
-
           ),
           0
-
         ) AS absent,
 
-
+        /* Total Fee Paid */
         CASE
           WHEN COALESCE(
             fee.fee_paid,
             0
           ) > 0
-
           THEN fee.fee_paid
-
           ELSE NULL
         END AS fee_paid,
 
+        /* Monthly Fee Statistics */
+
+        COALESCE(
+          fee.admission_fee,
+          0
+        ) AS admission_fee,
+
+        COALESCE(
+          fee.regular_fee,
+          0
+        ) AS regular_fee,
+
+        COALESCE(
+          fee.one_on_one_fee,
+          0
+        ) AS one_on_one_fee,
+
+        COALESCE(
+          fee.only_one_on_one_fee,
+          0
+        ) AS only_one_on_one_fee,
 
         fee.fee_paid_date
 
-
       FROM tbl_players p
 
-      
-
       CROSS JOIN report_months rm
-
-
-      
 
       LEFT JOIN attendance_summary att
         ON att.employee_code =
@@ -274,14 +319,12 @@ exports.getPlayerMonthlyReport = async (req, res) => {
         AND att.month_start =
             rm.month_start
 
-
       LEFT JOIN fee_summary fee
         ON fee.player_id =
            p.player_id
 
         AND fee.month_start =
             rm.month_start
-
 
       WHERE
 
@@ -300,9 +343,9 @@ exports.getPlayerMonthlyReport = async (req, res) => {
 
     let index = 3;
 
-
     let finalQuery = query;
 
+    /* Search Filter */
     if (search) {
       finalQuery += `
         AND (
@@ -315,6 +358,7 @@ exports.getPlayerMonthlyReport = async (req, res) => {
       index++;
     }
 
+    /* Player Filter */
     if (player_id) {
       finalQuery += `
         AND p.player_id = $${index}
@@ -324,25 +368,226 @@ exports.getPlayerMonthlyReport = async (req, res) => {
       index++;
     }
 
-
+    /* Order */
     finalQuery += `
       ORDER BY
         rm.month_start DESC,
         p.full_name ASC;
     `;
 
-
     const result = await pool.query(
       finalQuery,
       values
     );
 
+    /*
+     * Convert monthly rows to numbers
+     */
+    const rows = result.rows.map((row) => ({
+      ...row,
+
+      present: Number(
+        row.present || 0
+      ),
+
+      absent: Number(
+        row.absent || 0
+      ),
+
+      fee_paid:
+        row.fee_paid !== null
+          ? Number(row.fee_paid)
+          : null,
+
+      admission_fee: Number(
+        row.admission_fee || 0
+      ),
+
+      regular_fee: Number(
+        row.regular_fee || 0
+      ),
+
+      one_on_one_fee: Number(
+        row.one_on_one_fee || 0
+      ),
+
+      only_one_on_one_fee: Number(
+        row.only_one_on_one_fee || 0
+      ),
+    }));
+
+
+    /*
+     * ==========================================
+     * OVERALL STATISTICS
+     * ==========================================
+     *
+     * Calculate statistics directly from
+     * tbl_player_fees for the selected period.
+     */
+
+    let statsQuery = `
+      SELECT
+
+        COALESCE(
+          SUM(
+            CASE
+              WHEN pf.status = 'Paid'
+                AND LOWER(TRIM(pf.fee_type)) = 'admission'
+              THEN COALESCE(pf.amount, 0)
+              ELSE 0
+            END
+          ),
+          0
+        ) AS admission_fee,
+
+        COALESCE(
+          SUM(
+            CASE
+              WHEN pf.status = 'Paid'
+                AND LOWER(TRIM(pf.fee_type)) = 'regular'
+              THEN COALESCE(pf.amount, 0)
+              ELSE 0
+            END
+          ),
+          0
+        ) AS regular_fee,
+
+        COALESCE(
+          SUM(
+            CASE
+              WHEN pf.status = 'Paid'
+                AND LOWER(TRIM(pf.fee_type)) = 'one on one'
+              THEN COALESCE(pf.amount, 0)
+              ELSE 0
+            END
+          ),
+          0
+        ) AS one_on_one_fee,
+
+        COALESCE(
+          SUM(
+            CASE
+              WHEN pf.status = 'Paid'
+                AND LOWER(TRIM(pf.fee_type)) = 'only one on one'
+              THEN COALESCE(pf.amount, 0)
+              ELSE 0
+            END
+          ),
+          0
+        ) AS only_one_on_one_fee
+
+      FROM tbl_player_fees pf
+
+      INNER JOIN tbl_players p
+        ON p.player_id = pf.player_id
+
+      WHERE
+        pf.status = 'Paid'
+
+        AND pf.payment_date IS NOT NULL
+
+        AND pf.payment_date::date >=
+            COALESCE(
+              $1::date,
+              DATE_TRUNC(
+                'month',
+                CURRENT_DATE
+              )::date
+            )
+
+        AND pf.payment_date::date <=
+            COALESCE(
+              $2::date,
+              CURRENT_DATE
+            )
+    `;
+
+    const statsValues = [
+      from_date || null,
+      to_date || null,
+    ];
+
+    let statsIndex = 3;
+
+    /*
+     * Apply same search filter
+     */
+    if (search) {
+      statsQuery += `
+        AND (
+          p.full_name ILIKE $${statsIndex}
+          OR p.admission_id ILIKE $${statsIndex}
+        )
+      `;
+
+      statsValues.push(
+        `%${search}%`
+      );
+
+      statsIndex++;
+    }
+
+    /*
+     * Apply same player filter
+     */
+    if (player_id) {
+      statsQuery += `
+        AND p.player_id = $${statsIndex}
+      `;
+
+      statsValues.push(
+        player_id
+      );
+
+      statsIndex++;
+    }
+
+    const statsResult = await pool.query(
+      statsQuery,
+      statsValues
+    );
+
+    const stats = statsResult.rows[0];
+
+
+    /*
+     * ==========================================
+     * FINAL STATISTICS OBJECT
+     * ==========================================
+     */
+
+    const statistics = {
+      admission_fee: Number(
+        stats.admission_fee || 0
+      ),
+
+      regular_fee: Number(
+        stats.regular_fee || 0
+      ),
+
+      one_on_one_fee: Number(
+        stats.one_on_one_fee || 0
+      ),
+
+      only_one_on_one_fee: Number(
+        stats.only_one_on_one_fee || 0
+      ),
+    };
+
+
+    /*
+     * Final Response
+     */
 
     return sendSuccessResponse(
       res,
       200,
       "Monthly player report fetched successfully.",
-      result.rows
+      {
+        statistics,
+        data: rows,
+      }
     );
 
   } catch (error) {
@@ -360,6 +605,9 @@ exports.getPlayerMonthlyReport = async (req, res) => {
     );
   }
 };
+
+
+
 
 exports.getTrainerWiseReport = async (req, res) => {
   const { search, coach_id, from_date, to_date } = req.query;
