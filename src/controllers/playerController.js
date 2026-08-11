@@ -898,223 +898,251 @@ p.*
 p.player_id DESC;
 `),
 
+
       pool.query(`
-SELECT
+  SELECT
 
-  /* =========================
-     PLAYER COUNTS
-  ========================= */
+        /* =========================
+           PLAYER COUNTS
+        ========================= */
 
-  (
-    SELECT COUNT(*)
-            FROM tbl_players
-  ) AS total_players,
+        (
+          SELECT COUNT(*)
+      FROM tbl_players
+        ) AS total_players,
+
+      (
+        SELECT COUNT(*)
+      FROM tbl_players
+      WHERE is_active = TRUE
+    ) AS active_players,
 
     (
       SELECT COUNT(*)
-            FROM tbl_players
-            WHERE is_active = TRUE
-          ) AS active_players,
-
-  (
-    SELECT COUNT(*)
-            FROM tbl_players
-            WHERE is_active = FALSE
-          ) AS inactive_players,
+      FROM tbl_players
+      WHERE is_active = FALSE
+    ) AS inactive_players,
 
 
-  /* =========================
-     PENDING FEES
-  ========================= */
+      /* =========================
+         PENDING FEES
+      ========================= */
 
-  (
-    SELECT COUNT(DISTINCT pending_players.player_id)
-FROM(
-  /* =========================
-     REGULAR PLAYERS
-  ========================= */
+      (
+        SELECT COUNT(DISTINCT pending_players.player_id)
+    FROM(
 
-  SELECT
-                p.player_id
-              FROM tbl_players p
-              WHERE p.is_active = TRUE
+      /* =========================
+         REGULAR PLAYERS
+      ========================= */
 
-                /* Player must have joined */
-                AND p.admission_date <= CURRENT_DATE
+      SELECT
+          p.player_id
+        FROM tbl_players p
+        WHERE p.is_active = TRUE
 
-                /* Player has NOT paid this month */
-                AND NOT EXISTS(
-    SELECT 1
-                  FROM tbl_player_fees pf
-                  WHERE pf.player_id = p.player_id
-                    AND pf.status = 'Paid'
-                    AND pf.is_active = TRUE
-                    AND pf.payment_date >=
-  DATE_TRUNC('month', CURRENT_DATE)
-                    AND pf.payment_date <
-  DATE_TRUNC('month', CURRENT_DATE)
-  + INTERVAL '1 month'
-  )
+          /* Player must have joined */
+          AND p.admission_date <= CURRENT_DATE
 
-              UNION
+          /* Player has NOT paid this month */
+          AND NOT EXISTS(
+        SELECT 1
+            FROM tbl_player_fees pf
+            WHERE pf.player_id = p.player_id
+              AND pf.status = 'Paid'
+              AND pf.is_active = TRUE
 
-              /* =========================
-                 ONE-ON-ONE PLAYERS
-              ========================= */
+              AND pf.payment_date >=
+      DATE_TRUNC('month', CURRENT_DATE)
 
-              SELECT
-                o.player_id
-              FROM tbl_one_on_one_applications o
-              INNER JOIN tbl_players p
-                ON p.player_id = o.player_id
-                AND p.is_active = TRUE
-              WHERE o.is_active = TRUE
-                AND o.renewal_status = 'Active'
-
-                /* Player must have joined */
-                AND p.admission_date <= CURRENT_DATE
-
-                /* Only after the 4th */
-                AND CURRENT_DATE >
-DATE_TRUNC('month', CURRENT_DATE)
-+ INTERVAL '3 day'
-
-                /* Player has NOT paid this month */
-                AND NOT EXISTS(
-  SELECT 1
-                  FROM tbl_player_fees pf
-                  WHERE pf.player_id = o.player_id
-                    AND pf.status = 'Paid'
-                    AND pf.is_active = TRUE
-                    AND pf.payment_date >=
-DATE_TRUNC('month', CURRENT_DATE)
-                    AND pf.payment_date <
-DATE_TRUNC('month', CURRENT_DATE)
-+ INTERVAL '1 month'
-)
-) AS pending_players
-          ) AS pending_fees,
+              AND pf.payment_date <
+      DATE_TRUNC('month', CURRENT_DATE)
+      + INTERVAL '1 month'
+      )
 
 
-  /* =========================
-     ADMISSION FEE
-     CURRENT MONTH
-  ========================= */
+        UNION
 
-  (
-    SELECT COALESCE(
-      SUM(p.admission_fee),
-      0
+
+        /* =========================
+           ONE-ON-ONE PLAYERS
+        ========================= */
+
+        SELECT
+          o.player_id
+        FROM tbl_one_on_one_applications o
+
+        INNER JOIN tbl_players p
+          ON p.player_id = o.player_id
+          AND p.is_active = TRUE
+
+        WHERE o.is_active = TRUE
+
+          /* Player must have joined */
+          AND p.admission_date <= CURRENT_DATE
+
+          /* Player has NOT paid this month */
+          AND NOT EXISTS(
+      SELECT 1
+            FROM tbl_player_fees pf
+            WHERE pf.player_id = o.player_id
+              AND pf.status = 'Paid'
+              AND pf.is_active = TRUE
+
+              AND pf.payment_date >=
+    DATE_TRUNC('month', CURRENT_DATE)
+
+              AND pf.payment_date <
+    DATE_TRUNC('month', CURRENT_DATE)
+    + INTERVAL '1 month'
     )
-            FROM tbl_players p
-            WHERE p.admission_date >=
-  DATE_TRUNC('month', CURRENT_DATE)
-              AND p.admission_date <
-  DATE_TRUNC('month', CURRENT_DATE)
-  + INTERVAL '1 month'
-              AND p.admission_fee IS NOT NULL
-          ) AS admission_fee,
+
+    ) AS pending_players
+    ) AS pending_fees,
 
 
-  /* =========================
-     REGULAR FEE
-     CURRENT MONTH
-  ========================= */
+      /* =========================
+         ADMISSION FEE
+         CURRENT MONTH
+      ========================= */
 
-  (
-    SELECT COALESCE(
-      SUM(regular_amount),
+      (
+        SELECT COALESCE(
+          SUM(p.admission_fee),
+          0
+        )
+      FROM tbl_players p
+
+      WHERE p.admission_date >=
+      DATE_TRUNC('month', CURRENT_DATE)
+
+        AND p.admission_date <
+      DATE_TRUNC('month', CURRENT_DATE)
+      + INTERVAL '1 month'
+
+        AND p.admission_fee IS NOT NULL
+    ) AS admission_fee,
+
+
+      /* =========================
+         REGULAR FEE
+         CURRENT MONTH
+      ========================= */
+
+      (
+        SELECT COALESCE(
+          SUM(regular_amount),
+          0
+        )
+    FROM(
+
+      /* Players admitted in current month */
+
+      SELECT
+          COALESCE(
+        p.regular_fee,
+        0
+      ) AS regular_amount
+
+        FROM tbl_players p
+
+        WHERE p.is_active = TRUE
+
+          AND p.admission_date >=
+    DATE_TRUNC('month', CURRENT_DATE)
+
+          AND p.admission_date <
+    DATE_TRUNC('month', CURRENT_DATE)
+    + INTERVAL '1 month'
+
+
+        UNION ALL
+
+
+        /* Existing players who paid */
+
+        SELECT
+          COALESCE(
+      pf.amount,
       0
-    )
-FROM(
-  /* Players admitted in current month */
+    ) AS regular_amount
 
-  SELECT
-                COALESCE(
-    p.regular_fee,
-    0
-  ) AS regular_amount
-              FROM tbl_players p
-              WHERE p.is_active = TRUE
-                AND p.admission_date >=
-DATE_TRUNC('month', CURRENT_DATE)
-                AND p.admission_date <
-DATE_TRUNC('month', CURRENT_DATE)
-+ INTERVAL '1 month'
+        FROM tbl_player_fees pf
 
-              UNION ALL
+        INNER JOIN tbl_players p
+          ON p.player_id = pf.player_id
 
-              /* Existing players who paid */
+        WHERE pf.is_active = TRUE
+          AND pf.status = 'Paid'
+          AND p.is_active = TRUE
 
-              SELECT
-                COALESCE(
-  pf.amount,
-  0
-) AS regular_amount
-              FROM tbl_player_fees pf
-              INNER JOIN tbl_players p
-                ON p.player_id = pf.player_id
-              WHERE pf.is_active = TRUE
-                AND pf.status = 'Paid'
-                AND p.is_active = TRUE
-                AND pf.payment_date >=
-DATE_TRUNC('month', CURRENT_DATE)
-                AND pf.payment_date <
-DATE_TRUNC('month', CURRENT_DATE)
-+ INTERVAL '1 month'
-                AND p.admission_date <
-DATE_TRUNC('month', CURRENT_DATE)
-) AS regular_fees
-          ) AS regular_fee,
+          AND pf.payment_date >=
+    DATE_TRUNC('month', CURRENT_DATE)
+
+          AND pf.payment_date <
+    DATE_TRUNC('month', CURRENT_DATE)
+    + INTERVAL '1 month'
+
+          AND p.admission_date <
+    DATE_TRUNC('month', CURRENT_DATE)
+
+    ) AS regular_fees
+    ) AS regular_fee,
 
 
-  /* =========================
-     ONE-ON-ONE FEE
-     CURRENT MONTH
-  ========================= */
+      /* =========================
+         ONE-ON-ONE FEE
+         CURRENT MONTH
+      ========================= */
 
-  (
-    SELECT COALESCE(
-      SUM(o.fee_amount),
-      0
-    )
-            FROM tbl_one_on_one_applications o
-            WHERE o.is_active = TRUE
-              AND o.application_date >=
-  DATE_TRUNC('month', CURRENT_DATE)
-              AND o.application_date <
-  DATE_TRUNC('month', CURRENT_DATE)
-  + INTERVAL '1 month'
-          ) AS one_on_one_fee,
+      (
+        SELECT COALESCE(
+          SUM(o.fee_amount),
+          0
+        )
+      FROM tbl_one_on_one_applications o
+
+      WHERE o.is_active = TRUE
+
+        AND o.application_date >=
+      DATE_TRUNC('month', CURRENT_DATE)
+
+        AND o.application_date <
+      DATE_TRUNC('month', CURRENT_DATE)
+      + INTERVAL '1 month'
+    ) AS one_on_one_fee,
 
 
-  /* =========================
-     ONLY ONE-ON-ONE FEE
-     CURRENT MONTH
-  ========================= */
+      /* =========================
+         ONLY ONE-ON-ONE FEE
+         CURRENT MONTH
+      ========================= */
 
-  (
-    SELECT COALESCE(
-      SUM(o.fee_amount),
-      0
-    )
-            FROM tbl_one_on_one_applications o
-            INNER JOIN tbl_players p
-              ON p.player_id = o.player_id
-            WHERE o.is_active = TRUE
-              AND o.application_date >=
-  DATE_TRUNC('month', CURRENT_DATE)
-              AND o.application_date <
-  DATE_TRUNC('month', CURRENT_DATE)
-  + INTERVAL '1 month'
+      (
+        SELECT COALESCE(
+          SUM(o.fee_amount),
+          0
+        )
+      FROM tbl_one_on_one_applications o
 
-              /* Player has only admission fee */
-              AND LOWER(TRIM(p.fee_type)) = 'admission fee'
+      INNER JOIN tbl_players p
+        ON p.player_id = o.player_id
 
-              /* No regular fee */
-              AND p.regular_fee IS NULL
-          ) AS only_one_on_one_fee
-  `),
+      WHERE o.is_active = TRUE
+
+        AND o.application_date >=
+      DATE_TRUNC('month', CURRENT_DATE)
+
+        AND o.application_date <
+      DATE_TRUNC('month', CURRENT_DATE)
+      + INTERVAL '1 month'
+
+        /* No regular fee */
+        AND p.regular_fee IS NULL
+
+        ) AS only_one_on_one_fee
+      `),
+
     ]);
 
     const stats = statistics.rows[0];

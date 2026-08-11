@@ -720,7 +720,7 @@ exports.updateOneOnOneApplicationStatus = async (req, res) => {
   const { id } = req.params;
   const { is_active } = req.body;
 
-  // Validate Application ID
+
   if (!id) {
     return sendErrorResponse(
       res,
@@ -737,7 +737,7 @@ exports.updateOneOnOneApplicationStatus = async (req, res) => {
     );
   }
 
-  // Validate is_active
+
   if (is_active === undefined) {
     return sendErrorResponse(
       res,
@@ -759,7 +759,7 @@ exports.updateOneOnOneApplicationStatus = async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    // Get selected application
+
     const applicationResult = await client.query(
       `
       SELECT *
@@ -781,9 +781,42 @@ exports.updateOneOnOneApplicationStatus = async (req, res) => {
 
     const application = applicationResult.rows[0];
 
-    // ===========================
-    // DEACTIVATE
-    // ===========================
+
+    const playerResult = await client.query(
+      `
+      SELECT
+        player_id,
+        is_active
+      FROM tbl_players
+      WHERE player_id = $1
+      `,
+      [application.player_id]
+    );
+
+    if (playerResult.rowCount === 0) {
+      await client.query("ROLLBACK");
+
+      return sendErrorResponse(
+        res,
+        404,
+        "Player not found."
+      );
+    }
+
+    const player = playerResult.rows[0];
+
+
+    if (!player.is_active) {
+      await client.query("ROLLBACK");
+
+      return sendErrorResponse(
+        res,
+        409,
+        "Inactive player cannot be activated"
+      );
+    }
+
+
     if (!is_active) {
 
       if (!application.is_active) {
@@ -818,9 +851,28 @@ exports.updateOneOnOneApplicationStatus = async (req, res) => {
       );
     }
 
-    // ===========================
-    // ACTIVATE
-    // ===========================
+    const activeApplication = await client.query(
+      `
+      SELECT application_id
+      FROM tbl_one_on_one_applications
+      WHERE
+        player_id = $1
+        AND is_active = TRUE
+        AND application_id != $2
+      LIMIT 1
+      `,
+      [application.player_id, id]
+    );
+
+    if (activeApplication.rowCount > 0) {
+      await client.query("ROLLBACK");
+
+      return sendErrorResponse(
+        res,
+        409,
+        "Player already has an active one-on-one application."
+      );
+    }
 
     const currentMonthApplication = await client.query(
       `
@@ -836,9 +888,6 @@ exports.updateOneOnOneApplicationStatus = async (req, res) => {
       [application.player_id]
     );
 
-    // ----------------------------------------------------
-    // Current month record already exists
-    // ----------------------------------------------------
     if (currentMonthApplication.rowCount > 0) {
 
       const currentRecord = currentMonthApplication.rows[0];
@@ -859,6 +908,7 @@ exports.updateOneOnOneApplicationStatus = async (req, res) => {
         SET
           is_active = TRUE,
           payment_status = 'Pending',
+          renewal_status = 'Active',
           updated_at = CURRENT_TIMESTAMP
         WHERE application_id = $1
         RETURNING *;
@@ -876,9 +926,6 @@ exports.updateOneOnOneApplicationStatus = async (req, res) => {
       );
     }
 
-    // ----------------------------------------------------
-    // Create new current month record
-    // ----------------------------------------------------
 
     const insertResult = await client.query(
       `
@@ -941,7 +988,10 @@ exports.updateOneOnOneApplicationStatus = async (req, res) => {
 
     await client.query("ROLLBACK");
 
-    console.error(error);
+    console.error(
+      "Update One-on-One Application Status Error:",
+      error
+    );
 
     return sendErrorResponse(
       res,
@@ -950,9 +1000,7 @@ exports.updateOneOnOneApplicationStatus = async (req, res) => {
     );
 
   } finally {
-
     client.release();
-
   }
 };
 

@@ -74,11 +74,6 @@ exports.getDashboardStatistics = async (req, res) => {
             /* Player must have joined */
             AND p.admission_date <= CURRENT_DATE
 
-            /* Due date is 4th
-               Count only after 4th */
-            AND CURRENT_DATE >
-                DATE_TRUNC('month', CURRENT_DATE)
-                + INTERVAL '3 day'
 
             /* Player has NOT paid this month */
             AND NOT EXISTS (
@@ -108,16 +103,41 @@ exports.getDashboardStatistics = async (req, res) => {
            ========================================= */
 
         (
-          SELECT COALESCE(SUM(amount), 0)
+          SELECT COALESCE(SUM(regular_amount), 0)
+          FROM (
 
-          FROM tbl_player_fees
+          /* Paid regular fees */
 
-          WHERE status = 'Paid'
+          SELECT
+            COALESCE(pf.amount, 0) AS regular_amount
 
-            AND DATE_TRUNC('month', payment_date)
+          FROM tbl_player_fees pf
+
+          WHERE pf.status = 'Paid'
+            AND pf.is_active = TRUE
+
+            AND DATE_TRUNC('month', pf.payment_date)
                 = DATE_TRUNC('month', CURRENT_DATE)
 
-        ) AS regular_revenue,
+
+          UNION ALL
+
+
+          /* Regular fee from players admitted this month */
+          SELECT
+            COALESCE(p.regular_fee, 0) AS regular_amount
+
+          FROM tbl_players p
+
+          WHERE p.is_active = TRUE
+            AND p.regular_fee IS NOT NULL
+
+            AND DATE_TRUNC('month', p.admission_date)
+                = DATE_TRUNC('month', CURRENT_DATE)
+
+        ) AS regular_revenue_data
+
+      ) AS regular_revenue,
 
 
         /* =========================================
