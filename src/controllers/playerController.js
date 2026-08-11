@@ -929,10 +929,6 @@ exports.getAllPlayers = async (req, res) => {
 
             FROM (
 
-              /* =================================
-                 REGULAR PLAYERS
-                 ================================= */
-
               SELECT
                 p.player_id
 
@@ -941,16 +937,11 @@ exports.getAllPlayers = async (req, res) => {
               WHERE p.is_active = TRUE
 
                 /* Player must have joined */
+
                 AND p.admission_date <= CURRENT_DATE
 
-                /* Only after the 4th */
-                AND CURRENT_DATE >
-                    DATE_TRUNC(
-                      'month',
-                      CURRENT_DATE
-                    ) + INTERVAL '3 day'
-
                 /* Player has NOT paid this month */
+
                 AND NOT EXISTS (
 
                   SELECT 1
