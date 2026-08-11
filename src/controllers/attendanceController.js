@@ -312,11 +312,11 @@ s.full_name,
       // =========================
       attendanceMap.set(row.id, {
         // Employee ID
-        id: row.id,
+        id: row.attendance_id,
 
         // Attendance ID
         attendance_id:
-          row.attendance_id,
+          row.id,
 
         employee_type,
 
