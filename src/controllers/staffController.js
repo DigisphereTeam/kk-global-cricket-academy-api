@@ -1,5 +1,6 @@
 const pool = require("../config/dbConfig");
 const { sendErrorResponse, sendSuccessResponse } = require("../utils/apiResponse");
+const { deletefroms3, uploadToS3, getSignedVideoUrl } = require("../utils/s3upload");
 
 exports.addStaff = async (req, res) => {
   const {
@@ -12,15 +13,17 @@ exports.addStaff = async (req, res) => {
   } = req.body;
 
   let client;
+  const uploadedS3Files = [];
 
   try {
-
+    // Required field validation
     if (
-      !full_name ||
-      !phone_number ||
-      !department ||
-      !designation ||
+      !full_name?.trim() ||
+      !phone_number?.trim() ||
+      !department?.trim() ||
+      !designation?.trim() ||
       salary == null ||
+      salary === "" ||
       !join_date
     ) {
       return sendErrorResponse(
@@ -30,7 +33,8 @@ exports.addStaff = async (req, res) => {
       );
     }
 
-    if (!/^[6-9]\d{9}$/.test(phone_number)) {
+    // Phone validation
+    if (!/^[6-9]\d{9}$/.test(phone_number.trim())) {
       return sendErrorResponse(
         res,
         400,
@@ -38,7 +42,11 @@ exports.addStaff = async (req, res) => {
       );
     }
 
-    if (salary <= 0) {
+    // Salary validation
+    if (
+      isNaN(Number(salary)) ||
+      Number(salary) <= 0
+    ) {
       return sendErrorResponse(
         res,
         400,
@@ -46,11 +54,9 @@ exports.addStaff = async (req, res) => {
       );
     }
 
-
     client = await pool.connect();
 
     await client.query("BEGIN");
-
 
     // Check duplicate phone number
     const existingStaff = await client.query(
@@ -60,12 +66,10 @@ exports.addStaff = async (req, res) => {
       WHERE phone_number = $1
       LIMIT 1
       `,
-      [phone_number]
+      [phone_number.trim()]
     );
 
-
     if (existingStaff.rowCount > 0) {
-
       await client.query("ROLLBACK");
 
       return sendErrorResponse(
@@ -75,26 +79,23 @@ exports.addStaff = async (req, res) => {
       );
     }
 
-
     const currentYear = new Date().getFullYear();
-
     const yearCode = String(currentYear).slice(-2);
-
     const prefix = `S${yearCode}`;
 
-
-    // Prevent duplicate code generation
+    // Prevent duplicate staff code generation
     await client.query(
       `SELECT pg_advisory_xact_lock($1)`,
       [currentYear]
     );
 
-
     const staffNumberResult = await client.query(
       `
       SELECT COALESCE(
         MAX(
-          CAST(SUBSTRING(staff_code FROM 5) AS INTEGER)
+          CAST(
+            SUBSTRING(staff_code FROM 4) AS INTEGER
+          )
         ),
         0
       ) AS last_number
@@ -104,15 +105,13 @@ exports.addStaff = async (req, res) => {
       [`${prefix}%`]
     );
 
-
     const nextNumber =
       Number(staffNumberResult.rows[0].last_number) + 1;
-
 
     const staff_code =
       `${prefix}${String(nextNumber).padStart(4, "0")}`;
 
-
+    // Create staff
     const result = await client.query(
       `
       INSERT INTO tbl_staff
@@ -134,17 +133,61 @@ exports.addStaff = async (req, res) => {
         staff_code,
         nextNumber,
         full_name.trim(),
-        phone_number,
+        phone_number.trim(),
         department.trim(),
         designation.trim(),
-        salary,
+        Number(salary),
         join_date,
       ]
     );
 
+    const staffId = result.rows[0].staff_id;
+
+    // Upload multiple documents to S3
+    if (req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        try {
+          // Upload file to S3
+          const s3Key = await uploadToS3(
+            file,
+            "staff"
+          );
+
+          // Keep track of uploaded files
+          // so we can delete them if DB transaction fails
+          uploadedS3Files.push(s3Key);
+
+          // Store S3 key in common documents table
+          await client.query(
+            `
+        INSERT INTO tbl_documents
+        (
+          staff_id,
+          document_url
+        )
+        VALUES
+        ($1, $2)
+        `,
+            [
+              staffId,
+              s3Key,
+            ]
+          );
+
+        } catch (uploadError) {
+          console.error(
+            "S3 upload failed:",
+            uploadError
+          );
+
+          throw new Error(
+            `Failed to upload document: ${file.originalname}`
+          );
+        }
+      }
+    }
 
     await client.query("COMMIT");
-
 
     return sendSuccessResponse(
       res,
@@ -153,11 +196,35 @@ exports.addStaff = async (req, res) => {
       result.rows[0]
     );
 
-
   } catch (error) {
+    console.error(
+      "Add staff error:",
+      error
+    );
 
     if (client) {
-      await client.query("ROLLBACK");
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        console.error(
+          "Rollback error:",
+          rollbackError
+        );
+      }
+    }
+
+    // Delete uploaded S3 files if DB transaction fails
+    if (uploadedS3Files.length > 0) {
+      for (const s3Key of uploadedS3Files) {
+        try {
+          await deletefroms3(s3Key);
+        } catch (deleteError) {
+          console.error(
+            `Failed to delete S3 file ${s3Key}:`,
+            deleteError
+          );
+        }
+      }
     }
 
     return sendErrorResponse(
@@ -167,52 +234,102 @@ exports.addStaff = async (req, res) => {
     );
 
   } finally {
-
     if (client) {
       client.release();
     }
-
   }
 };
 
 exports.getAllStaff = async (req, res) => {
   try {
-    const today = new Date().toLocaleDateString("en-CA", {
-      timeZone: "Asia/Kolkata",
-    });
+    const [result, statistics] =
+      await Promise.all([
+        pool.query(`
+          SELECT
+            s.*,
 
-    const [result, statistics] = await Promise.all([
-      pool.query(
-        `
-        SELECT
-          s.*,
-          a.attendance_id,
-          a.payroll_date,
-          CASE
-            WHEN a.attendance_id IS NOT NULL THEN 'Present'
-            ELSE 'Absent'
-          END AS attendance_status
-        FROM tbl_staff s
+            COALESCE(
+              JSON_AGG(
+                JSON_BUILD_OBJECT(
+                  'document_id', d.document_id,
+                  'document_url', d.document_url,
+                  'created_at', d.created_at
+                )
+                ORDER BY d.document_id
+              ) FILTER (
+                WHERE d.document_id IS NOT NULL
+              ),
+              '[]'
+            ) AS documents
 
-        LEFT JOIN tbl_attendance a
-          ON a.employee_code = s.staff_code
-          AND a.payroll_date = $1
+          FROM tbl_staff s
 
-        ORDER BY s.staff_id DESC
-        `,
-        [today]
-      ),
+          LEFT JOIN tbl_documents d
+            ON d.staff_id = s.staff_id
 
-      pool.query(`
-        SELECT
-          COUNT(*) AS total_staff,
-          COUNT(*) FILTER (WHERE is_active = TRUE) AS active_staff,
-          COUNT(*) FILTER (WHERE is_active = FALSE) AS inactive_staff,
-          COUNT(DISTINCT department) AS total_departments,
-          0 AS leave_staff
-        FROM tbl_staff
-      `),
-    ]);
+          GROUP BY s.staff_id
+
+          ORDER BY s.staff_id DESC
+        `),
+
+        pool.query(`
+          SELECT
+            COUNT(*) AS total_staff,
+
+            COUNT(*) FILTER (
+              WHERE is_active = TRUE
+            ) AS active_staff,
+
+            COUNT(*) FILTER (
+              WHERE is_active = FALSE
+            ) AS inactive_staff,
+
+            COUNT(DISTINCT department)
+              AS total_departments,
+
+            0 AS leave_staff
+
+          FROM tbl_staff
+        `),
+      ]);
+
+    // ==========================================
+    // Generate signed S3 URLs
+    // ==========================================
+
+    const staff = await Promise.all(
+      result.rows.map(async (employee) => {
+
+        const documents = await Promise.all(
+          employee.documents.map(
+            async (document) => {
+
+              if (!document.document_url) {
+                return {
+                  ...document,
+                  file_url: null,
+                };
+              }
+
+              const signedUrl =
+                await getSignedVideoUrl(
+                  document.document_url
+                );
+
+              return {
+                ...document,
+                file_url: signedUrl,
+              };
+            }
+          )
+        );
+
+        return {
+          ...employee,
+          documents,
+        };
+      })
+    );
 
     return sendSuccessResponse(
       res,
@@ -220,20 +337,42 @@ exports.getAllStaff = async (req, res) => {
       "Staff retrieved successfully.",
       {
         statistics: {
-          total_staff: Number(statistics.rows[0].total_staff),
-          active_staff: Number(statistics.rows[0].active_staff),
-          inactive_staff: Number(statistics.rows[0].inactive_staff),
-          total_departments: Number(statistics.rows[0].total_departments),
-          leave_staff: Number(statistics.rows[0].leave_staff),
+          total_staff: Number(
+            statistics.rows[0].total_staff
+          ),
+
+          active_staff: Number(
+            statistics.rows[0].active_staff
+          ),
+
+          inactive_staff: Number(
+            statistics.rows[0].inactive_staff
+          ),
+
+          total_departments: Number(
+            statistics.rows[0].total_departments
+          ),
+
+          leave_staff: Number(
+            statistics.rows[0].leave_staff
+          ),
         },
-        staff: result.rows,
+
+        staff,
       }
     );
+
   } catch (error) {
+    console.error(
+      "Get all staff error:",
+      error
+    );
+
     return sendErrorResponse(
       res,
       500,
-      error.message || "Internal Server Error"
+      error.message ||
+      "Internal Server Error"
     );
   }
 };
@@ -259,29 +398,14 @@ exports.getStaffById = async (req, res) => {
   }
 
   try {
-    const today = new Date().toLocaleDateString("en-CA", {
-      timeZone: "Asia/Kolkata",
-    });
-
     const result = await pool.query(
       `
       SELECT
-        s.*,
-        a.attendance_id,
-        a.payroll_date,
-        CASE
-          WHEN a.attendance_id IS NOT NULL THEN 'Present'
-          ELSE 'Absent'
-        END AS attendance_status
+        s.*
       FROM tbl_staff s
-
-      LEFT JOIN tbl_attendance a
-        ON a.employee_code = s.staff_code
-        AND a.payroll_date = $2
-
       WHERE s.staff_id = $1
       `,
-      [id, today]
+      [id]
     );
 
     return sendSuccessResponse(
@@ -299,7 +423,6 @@ exports.getStaffById = async (req, res) => {
   }
 };
 
-
 exports.updateStaff = async (req, res) => {
   const { id } = req.params;
 
@@ -311,7 +434,7 @@ exports.updateStaff = async (req, res) => {
     );
   }
 
-  if (isNaN(id)) {
+  if (!Number.isInteger(Number(id))) {
     return sendErrorResponse(
       res,
       400,
@@ -319,19 +442,35 @@ exports.updateStaff = async (req, res) => {
     );
   }
 
+  let client;
+
+  // Keep track of newly uploaded S3 files
+  // so they can be deleted if transaction fails
+  const uploadedS3Files = [];
+
   try {
+    client = await pool.connect();
+
+    await client.query("BEGIN");
+
+    // ==========================================
     // Check active staff exists
-    const existingStaff = await pool.query(
-      `
-      SELECT *
-      FROM tbl_staff
-      WHERE staff_id = $1
+    // ==========================================
+
+    const existingStaff =
+      await client.query(
+        `
+        SELECT *
+        FROM tbl_staff
+        WHERE staff_id = $1
         AND is_active = TRUE
-      `,
-      [id]
-    );
+        `,
+        [id]
+      );
 
     if (existingStaff.rowCount === 0) {
+      await client.query("ROLLBACK");
+
       return sendErrorResponse(
         res,
         404,
@@ -339,20 +478,57 @@ exports.updateStaff = async (req, res) => {
       );
     }
 
-    // Duplicate phone number validation
+    // ==========================================
+    // Normalize phone number
+    // ==========================================
+
     if (req.body.phone_number) {
-      const phoneExists = await pool.query(
-        `
-        SELECT 1
-        FROM tbl_staff
-        WHERE phone_number = $1
-          AND staff_id <> $2
-        LIMIT 1
-        `,
-        [req.body.phone_number, id]
+      req.body.phone_number =
+        req.body.phone_number.trim();
+    }
+
+    // ==========================================
+    // Phone validation
+    // ==========================================
+
+    if (
+      req.body.phone_number &&
+      !/^[6-9]\d{9}$/.test(
+        req.body.phone_number
+      )
+    ) {
+      await client.query("ROLLBACK");
+
+      return sendErrorResponse(
+        res,
+        400,
+        "Invalid phone number."
       );
+    }
+
+    // ==========================================
+    // Duplicate phone number validation
+    // ==========================================
+
+    if (req.body.phone_number) {
+      const phoneExists =
+        await client.query(
+          `
+          SELECT 1
+          FROM tbl_staff
+          WHERE phone_number = $1
+          AND staff_id <> $2
+          LIMIT 1
+          `,
+          [
+            req.body.phone_number,
+            id,
+          ]
+        );
 
       if (phoneExists.rowCount > 0) {
+        await client.query("ROLLBACK");
+
         return sendErrorResponse(
           res,
           409,
@@ -360,6 +536,32 @@ exports.updateStaff = async (req, res) => {
         );
       }
     }
+
+    // ==========================================
+    // Salary validation
+    // ==========================================
+
+    if (
+      req.body.salary !== undefined &&
+      req.body.salary !== null &&
+      req.body.salary !== "" &&
+      (
+        isNaN(Number(req.body.salary)) ||
+        Number(req.body.salary) <= 0
+      )
+    ) {
+      await client.query("ROLLBACK");
+
+      return sendErrorResponse(
+        res,
+        400,
+        "Salary must be greater than zero."
+      );
+    }
+
+    // ==========================================
+    // Allowed fields
+    // ==========================================
 
     const allowedFields = [
       "full_name",
@@ -372,48 +574,270 @@ exports.updateStaff = async (req, res) => {
 
     const updates = [];
     const values = [];
+
     let index = 1;
 
+    // ==========================================
+    // Build UPDATE query
+    // ==========================================
+
     for (const field of allowedFields) {
-      if (Object.hasOwn(req.body, field)) {
-        updates.push(`${field} = $${index}`);
-        values.push(req.body[field]);
+      if (
+        Object.hasOwn(
+          req.body,
+          field
+        )
+      ) {
+        let value =
+          req.body[field];
+
+        if (
+          typeof value === "string"
+        ) {
+          value = value.trim();
+        }
+
+        if (
+          field === "salary" &&
+          value !== null &&
+          value !== ""
+        ) {
+          value = Number(value);
+        }
+
+        updates.push(
+          `${field} = $${index}`
+        );
+
+        values.push(
+          value === ""
+            ? null
+            : value
+        );
+
         index++;
       }
     }
 
-    if (updates.length === 0) {
-      return sendErrorResponse(
-        res,
-        400,
-        "No fields provided for update."
+    let result;
+
+    // ==========================================
+    // Update Staff
+    // ==========================================
+
+    if (updates.length > 0) {
+      values.push(id);
+
+      result = await client.query(
+        `
+        UPDATE tbl_staff
+        SET ${updates.join(", ")}
+        WHERE staff_id = $${index}
+        AND is_active = TRUE
+        RETURNING *;
+        `,
+        values
+      );
+
+      if (result.rowCount === 0) {
+        await client.query("ROLLBACK");
+
+        return sendErrorResponse(
+          res,
+          404,
+          "Active staff not found."
+        );
+      }
+    } else {
+      // No staff fields were changed.
+      // Documents may still be uploaded.
+      result = {
+        rows: [
+          existingStaff.rows[0],
+        ],
+        rowCount: 1,
+      };
+    }
+
+    const staffId =
+      result.rows[0].staff_id;
+
+    // ==========================================
+    // Upload Multiple Documents to S3
+    // ==========================================
+
+    if (
+      req.files &&
+      req.files.length > 0
+    ) {
+      for (const file of req.files) {
+        try {
+          // Upload file to S3
+          const s3Key =
+            await uploadToS3(
+              file,
+              "staff"
+            );
+
+          // Track uploaded S3 file
+          // for cleanup if transaction fails
+          uploadedS3Files.push(
+            s3Key
+          );
+
+          // Store S3 key in common documents table
+          await client.query(
+            `
+            INSERT INTO tbl_documents
+            (
+              staff_id,
+              document_url
+            )
+            VALUES
+            ($1, $2)
+            `,
+            [
+              staffId,
+              s3Key,
+            ]
+          );
+
+        } catch (uploadError) {
+          console.error(
+            "S3 upload failed:",
+            uploadError
+          );
+
+          throw new Error(
+            `Failed to upload document: ${file.originalname}`
+          );
+        }
+      }
+    }
+
+    const documents =
+      await client.query(
+        `
+        SELECT
+          document_id,
+          document_url,
+          created_at
+        FROM tbl_documents
+        WHERE staff_id = $1
+        ORDER BY document_id;
+        `,
+        [staffId]
+      );
+
+
+    const reqUserDetails =
+      await client.query(
+        `
+        SELECT full_name
+        FROM tbl_users
+        WHERE user_id = $1
+        `,
+        [req.user.user_id]
+      );
+
+    const reqUser =
+      reqUserDetails.rows[0];
+
+    if (!reqUser) {
+      throw new Error(
+        "Logged-in user not found."
       );
     }
 
-    values.push(id);
 
-    const result = await pool.query(
+    await client.query(
       `
-      UPDATE tbl_staff
-      SET ${updates.join(", ")}
-      WHERE staff_id = $${index}
-      RETURNING *;
+      INSERT INTO tbl_notification_logs
+      (
+        module_name,
+        action,
+        description,
+        performed_by
+      )
+      VALUES
+      ($1,$2,$3,$4)
       `,
-      values
+      [
+        "Staff",
+        "Updated",
+        `Staff ${result.rows[0].full_name} was updated.`,
+        reqUser.full_name,
+      ]
     );
+
+
+    await client.query("COMMIT");
 
     return sendSuccessResponse(
       res,
       200,
       "Staff updated successfully.",
-      result.rows[0]
+      {
+        ...result.rows[0],
+        documents:
+          documents.rows,
+      }
     );
+
   } catch (error) {
+
+    console.error(
+      "Update staff error:",
+      error
+    );
+
+
+    if (client) {
+      try {
+        await client.query(
+          "ROLLBACK"
+        );
+      } catch (rollbackError) {
+        console.error(
+          "Rollback error:",
+          rollbackError
+        );
+      }
+    }
+
+
+    if (
+      uploadedS3Files.length > 0
+    ) {
+      for (
+        const s3Key
+        of uploadedS3Files
+      ) {
+        try {
+          await deletefroms3(
+            s3Key
+          );
+        } catch (deleteError) {
+          console.error(
+            `Failed to delete S3 file ${s3Key}:`,
+            deleteError
+          );
+        }
+      }
+    }
+
     return sendErrorResponse(
       res,
       500,
-      error.message || "Internal Server Error"
+      error.message ||
+      "Internal Server Error"
     );
+
+  } finally {
+
+    if (client) {
+      client.release();
+    }
   }
 };
 
@@ -487,8 +911,7 @@ exports.updateStaffStatus = async (req, res) => {
       return sendErrorResponse(
         res,
         409,
-        `Staff is already ${
-          is_active ? "active" : "inactive"
+        `Staff is already ${is_active ? "active" : "inactive"
         }.`
       );
     }
@@ -512,8 +935,7 @@ exports.updateStaffStatus = async (req, res) => {
     return sendSuccessResponse(
       res,
       200,
-      `Staff ${
-        is_active ? "activated" : "deactivated"
+      `Staff ${is_active ? "activated" : "deactivated"
       } successfully.`,
       result.rows[0]
     );
