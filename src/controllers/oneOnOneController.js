@@ -715,6 +715,7 @@ exports.getApplicationById = async (req, res) => {
   }
 };
 
+
 exports.updateOneOnOneApplicationStatus = async (req, res) => {
   const { id } = req.params;
   const { is_active } = req.body;
@@ -728,7 +729,10 @@ exports.updateOneOnOneApplicationStatus = async (req, res) => {
     );
   }
 
-  if (!Number.isInteger(Number(id)) || Number(id) <= 0) {
+  if (
+    !Number.isInteger(Number(id)) ||
+    Number(id) <= 0
+  ) {
     return sendErrorResponse(
       res,
       400,
@@ -754,12 +758,22 @@ exports.updateOneOnOneApplicationStatus = async (req, res) => {
   }
 
   try {
-    // Check application exists
+    // ==========================================
+    // CHECK APPLICATION AND PLAYER STATUS
+    // ==========================================
+
     const applicationResult = await pool.query(
       `
-      SELECT *
-      FROM tbl_one_on_one_applications
-      WHERE application_id = $1
+      SELECT
+        o.*,
+        p.is_active AS player_is_active
+
+      FROM tbl_one_on_one_applications o
+
+      INNER JOIN tbl_players p
+        ON p.player_id = o.player_id
+
+      WHERE o.application_id = $1
       `,
       [id]
     );
@@ -774,7 +788,18 @@ exports.updateOneOnOneApplicationStatus = async (req, res) => {
 
     const application = applicationResult.rows[0];
 
-    // Check if status is already the requested status
+    if (application.player_is_active !== true) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Cannot activate or deactivate the application because the player is inactive."
+      );
+    }
+
+    // ==========================================
+    // CHECK CURRENT APPLICATION STATUS
+    // ==========================================
+
     if (application.is_active === is_active) {
       return sendErrorResponse(
         res,
@@ -784,14 +809,20 @@ exports.updateOneOnOneApplicationStatus = async (req, res) => {
       );
     }
 
-    // Update application status only
+    // ==========================================
+    // UPDATE APPLICATION STATUS
+    // ==========================================
+
     const updateResult = await pool.query(
       `
       UPDATE tbl_one_on_one_applications
+
       SET
         is_active = $1,
         updated_at = CURRENT_TIMESTAMP
+
       WHERE application_id = $2
+
       RETURNING *;
       `,
       [is_active, id]
@@ -813,10 +844,12 @@ exports.updateOneOnOneApplicationStatus = async (req, res) => {
     return sendErrorResponse(
       res,
       500,
-      error.message || "Internal Server Error"
+      error.message ||
+      "Internal Server Error"
     );
   }
 };
+
 
 exports.updateApplication = async (req, res) => {
   const { application_id } = req.params;
