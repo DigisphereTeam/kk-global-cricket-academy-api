@@ -4,7 +4,7 @@ const {
   sendSuccessResponse,
   sendErrorResponse,
 } = require("../utils/apiResponse");
-const { deletefroms3, uploadToS3 } = require("../utils/s3upload");
+const { deletefroms3, uploadToS3, getSignedVideoUrl } = require("../utils/s3upload");
 
 
 // exports.createPlayerAdmission = async (req, res) => {
@@ -646,41 +646,41 @@ exports.createPlayerAdmission = async (req, res) => {
     // Check duplicate player
     let existingPlayer;
 
-    if (email) {
-      existingPlayer = await client.query(
-        `
-        SELECT 1
-        FROM tbl_players
-        WHERE phone_number = $1
-           OR LOWER(email) = LOWER($2)
-        LIMIT 1
-        `,
-        [
-          phone_number.trim(),
-          email.trim(),
-        ]
-      );
-    } else {
-      existingPlayer = await client.query(
-        `
-        SELECT 1
-        FROM tbl_players
-        WHERE phone_number = $1
-        LIMIT 1
-        `,
-        [phone_number.trim()]
-      );
-    }
+    // if (email) {
+    //   existingPlayer = await client.query(
+    //     `
+    //     SELECT 1
+    //     FROM tbl_players
+    //     WHERE phone_number = $1
+    //        OR LOWER(email) = LOWER($2)
+    //     LIMIT 1
+    //     `,
+    //     [
+    //       phone_number.trim(),
+    //       email.trim(),
+    //     ]
+    //   );
+    // } else {
+    //   existingPlayer = await client.query(
+    //     `
+    //     SELECT 1
+    //     FROM tbl_players
+    //     WHERE phone_number = $1
+    //     LIMIT 1
+    //     `,
+    //     [phone_number.trim()]
+    //   );
+    // }
 
-    if (existingPlayer.rowCount > 0) {
-      await client.query("ROLLBACK");
+    // if (existingPlayer.rowCount > 0) {
+    //   await client.query("ROLLBACK");
 
-      return sendErrorResponse(
-        res,
-        409,
-        "Player already exists."
-      );
-    }
+    //   return sendErrorResponse(
+    //     res,
+    //     409,
+    //     "Player already exists."
+    //   );
+    // }
 
     // Create player
     const result = await client.query(
@@ -763,6 +763,9 @@ exports.createPlayerAdmission = async (req, res) => {
     // ==========================================
     // Upload player documents to S3
     // ==========================================
+
+    console.log("req.files", req.files)
+
     if (req.files && req.files.length > 0) {
       for (const file of req.files) {
         try {
@@ -1360,7 +1363,7 @@ exports.getPlayerById = async (req, res) => {
             }
 
             const signedUrl =
-              await getSignedFileUrl(
+              await getSignedVideoUrl(
                 document.document_url
               );
 
@@ -1380,7 +1383,7 @@ exports.getPlayerById = async (req, res) => {
           ? "Active"
           : "Inactive",
 
-      documents,
+      document_urls: documents,
     };
 
     return sendSuccessResponse(

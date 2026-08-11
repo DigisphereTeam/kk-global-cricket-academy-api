@@ -242,95 +242,101 @@ exports.addStaff = async (req, res) => {
 
 exports.getAllStaff = async (req, res) => {
   try {
-    const [result, statistics] =
-      await Promise.all([
-        pool.query(`
-          SELECT
-            s.*,
+    const [result, statistics] = await Promise.all([
+      // ==========================================
+      // STAFF LIST
+      // ==========================================
+      pool.query(`
+        SELECT
+          s.*,
 
-            COALESCE(
-              JSON_AGG(
-                JSON_BUILD_OBJECT(
-                  'document_id', d.document_id,
-                  'document_url', d.document_url,
-                  'created_at', d.created_at
-                )
-                ORDER BY d.document_id
-              ) FILTER (
-                WHERE d.document_id IS NOT NULL
-              ),
-              '[]'
-            ) AS documents
+          COALESCE(
+            JSON_AGG(
+              JSON_BUILD_OBJECT(
+                'document_id', d.document_id,
+                'document_url', d.document_url,
+                'created_at', d.created_at
+              )
+              ORDER BY d.document_id
+            ) FILTER (
+              WHERE d.document_id IS NOT NULL
+            ),
+            '[]'
+          ) AS documents
 
-          FROM tbl_staff s
+        FROM tbl_staff s
 
-          LEFT JOIN tbl_documents d
-            ON d.staff_id = s.staff_id
+        LEFT JOIN tbl_documents d
+          ON d.staff_id = s.staff_id
 
-          GROUP BY s.staff_id
+        GROUP BY
+          s.staff_id
 
-          ORDER BY s.staff_id DESC
-        `),
+        ORDER BY
+          s.staff_id DESC
+      `),
 
-        pool.query(`
-          SELECT
-            COUNT(*) AS total_staff,
+      // ==========================================
+      // STAFF STATISTICS
+      // ==========================================
+      pool.query(`
+        SELECT
+          COUNT(*) AS total_staff,
 
-            COUNT(*) FILTER (
-              WHERE is_active = TRUE
-            ) AS active_staff,
+          COUNT(*) FILTER (
+            WHERE is_active = TRUE
+          ) AS active_staff,
 
-            COUNT(*) FILTER (
-              WHERE is_active = FALSE
-            ) AS inactive_staff,
+          COUNT(*) FILTER (
+            WHERE is_active = FALSE
+          ) AS inactive_staff,
 
-            COUNT(DISTINCT department)
-              AS total_departments,
+          COUNT(DISTINCT department)
+            AS total_departments,
 
-            0 AS leave_staff
+          0 AS leave_staff
 
-          FROM tbl_staff
-        `),
-      ]);
+        FROM tbl_staff
+      `),
+    ]);
 
     // ==========================================
     // Generate signed S3 URLs
     // ==========================================
-
     const staff = await Promise.all(
       result.rows.map(async (employee) => {
-
         const documents = await Promise.all(
-          employee.documents.map(
-            async (document) => {
-
-              if (!document.document_url) {
-                return {
-                  ...document,
-                  file_url: null,
-                };
-              }
-
-              const signedUrl =
-                await getSignedVideoUrl(
-                  document.document_url
-                );
-
+          employee.documents.map(async (document) => {
+            if (!document.document_url) {
               return {
                 ...document,
-                file_url: signedUrl,
+                document_url: null,
               };
             }
-          )
+
+            const signedUrl = await getSignedVideoUrl(
+              document.document_url
+            );
+
+            return {
+              ...document,
+              // Return signed URL directly
+              // in document_url
+              document_url: signedUrl,
+            };
+          })
         );
 
         return {
           ...employee,
-          documents,
+          document_urls: documents,
         };
       })
     );
 
+    // ==========================================
+    // SUCCESS RESPONSE
+    // ==========================================
     return sendSuccessResponse(
       res,
       200,
@@ -361,7 +367,6 @@ exports.getAllStaff = async (req, res) => {
         staff,
       }
     );
-
   } catch (error) {
     console.error(
       "Get all staff error:",
@@ -376,6 +381,8 @@ exports.getAllStaff = async (req, res) => {
     );
   }
 };
+
+
 
 
 exports.getStaffById = async (req, res) => {

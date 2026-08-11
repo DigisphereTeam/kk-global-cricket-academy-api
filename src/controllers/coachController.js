@@ -336,98 +336,75 @@ exports.addCoach = async (req, res) => {
 };
 
 
-
 exports.getAllCoaches = async (req, res) => {
   try {
-    const [result, statistics] =
-      await Promise.all([
-        pool.query(`
-          SELECT
-            c.*,
+    const [result, statistics] = await Promise.all([
+      pool.query(`
+        SELECT
+          c.*,
 
-            COALESCE(
-              JSON_AGG(
-                JSON_BUILD_OBJECT(
-                  'document_id', d.document_id,
-                  'document_url', d.document_url,
-                  'created_at', d.created_at
-                )
-                ORDER BY d.document_id
-              ) FILTER (
-                WHERE d.document_id IS NOT NULL
-              ),
-              '[]'
-            ) AS documents
+          COALESCE(
+            JSON_AGG(
+              d.document_url
+              ORDER BY d.document_id
+            ) FILTER (
+              WHERE d.document_id IS NOT NULL
+            ),
+            '[]'
+          ) AS documents
 
-          FROM tbl_coach c
+        FROM tbl_coach c
 
-          LEFT JOIN tbl_documents d
-            ON d.coach_id = c.coach_id
+        LEFT JOIN tbl_documents d
+          ON d.coach_id = c.coach_id
 
-          GROUP BY c.coach_id
+        GROUP BY c.coach_id
 
-          ORDER BY c.coach_id DESC
-        `),
+        ORDER BY c.coach_id DESC
+      `),
 
-        pool.query(`
-          SELECT
-            COUNT(*) AS total_trainers,
+      pool.query(`
+        SELECT
+          COUNT(*) AS total_trainers,
 
-            COUNT(*) FILTER (
-              WHERE is_active = TRUE
-            ) AS active_trainers,
+          COUNT(*) FILTER (
+            WHERE is_active = TRUE
+          ) AS active_trainers,
 
-            COUNT(*) FILTER (
-              WHERE is_active = FALSE
-            ) AS inactive_trainers,
+          COUNT(*) FILTER (
+            WHERE is_active = FALSE
+          ) AS inactive_trainers,
 
-            COALESCE(
-              ROUND(
-                AVG(experience::NUMERIC),
-                1
-              ),
-              0
-            ) AS average_experience
+          COALESCE(
+            ROUND(
+              AVG(experience::NUMERIC),
+              1
+            ),
+            0
+          ) AS average_experience
 
-          FROM tbl_coach
-        `),
-      ]);
+        FROM tbl_coach
+      `),
+    ]);
 
     // ==========================================
-    // Generate signed S3 URLs for documents
+    // Generate signed S3 URLs
     // ==========================================
-
     const coaches = await Promise.all(
       result.rows.map(async (coach) => {
-
         const documents = await Promise.all(
-          coach.documents.map(
-            async (document) => {
-
-              // No document key
-              if (!document.document_url) {
-                return {
-                  ...document,
-                  file_url: null,
-                };
-              }
-
-              const signedUrl =
-                await getSignedVideoUrl(
-                  document.document_url
-                );
-
-              return {
-                ...document,
-                file_url: signedUrl,
-              };
+          coach.documents.map(async (documentUrl) => {
+            if (!documentUrl) {
+              return null;
             }
-          )
+
+            return await getSignedVideoUrl(documentUrl);
+          })
         );
 
         return {
           ...coach,
-          documents,
+          documents: documents.filter(Boolean),
         };
       })
     );
@@ -458,7 +435,6 @@ exports.getAllCoaches = async (req, res) => {
         coaches,
       }
     );
-
   } catch (error) {
     console.error(
       "Get all coaches error:",
@@ -473,7 +449,6 @@ exports.getAllCoaches = async (req, res) => {
     );
   }
 };
-
 
 
 exports.getCoachById = async (req, res) => {
