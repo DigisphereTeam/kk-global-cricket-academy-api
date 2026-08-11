@@ -4,7 +4,7 @@ const {
   sendSuccessResponse,
   sendErrorResponse,
 } = require("../utils/apiResponse");
-const { uploadTos3, deletefroms3 } = require("../utils/s3upload");
+const { deletefroms3, uploadToS3 } = require("../utils/s3upload");
 
 
 // exports.createPlayerAdmission = async (req, res) => {
@@ -907,27 +907,8 @@ exports.getAllPlayers = async (req, res) => {
       // =========================
       pool.query(`
         SELECT
-          p.*,
-
-          COALESCE(
-            json_agg(
-              json_build_object(
-                'document_id', d.document_id,
-                'document_url', d.document_url
-              )
-              ORDER BY d.document_id
-            ) FILTER (WHERE d.document_id IS NOT NULL),
-            '[]'
-          ) AS documents
-
+          p.*
         FROM tbl_players p
-
-        LEFT JOIN tbl_player_documents d
-          ON d.player_id = p.player_id
-
-        GROUP BY
-          p.player_id
-
         ORDER BY
           p.player_id DESC;
       `),
@@ -967,6 +948,9 @@ exports.getAllPlayers = async (req, res) => {
           ) AS inactive_players,
 
 
+          /* =========================
+             PENDING FEES
+          ========================= */
           (
             SELECT COUNT(
               DISTINCT pending_players.player_id
@@ -1082,11 +1066,10 @@ exports.getAllPlayers = async (req, res) => {
 
           ) AS pending_fees,
 
+
           /* =========================
              1. ADMISSION FEE
              CURRENT MONTH
-
-             Stored in tbl_players
           ========================= */
           (
             SELECT COALESCE(
@@ -1106,12 +1089,6 @@ exports.getAllPlayers = async (req, res) => {
           /* =========================
              2. REGULAR FEE
              CURRENT MONTH
-
-             First month:
-             tbl_players.regular_fee
-
-             Next months:
-             tbl_player_fees
           ========================= */
           (
             SELECT COALESCE(
@@ -1158,9 +1135,6 @@ exports.getAllPlayers = async (req, res) => {
           /* =========================
              3. ONE-ON-ONE FEE
              CURRENT MONTH
-
-             ALL active
-             one-on-one applications
           ========================= */
           (
             SELECT COALESCE(
@@ -1180,37 +1154,33 @@ exports.getAllPlayers = async (req, res) => {
           /* =========================
              4. ONLY ONE-ON-ONE FEE
              CURRENT MONTH
-
-             Player is enrolled ONLY
-             in one-on-one.
-
-             No Regular Fee.
           ========================= */
           (
-          SELECT COALESCE(
-            SUM(o.fee_amount),
-            0
-          )
-          FROM tbl_one_on_one_applications o
+            SELECT COALESCE(
+              SUM(o.fee_amount),
+              0
+            )
+            FROM tbl_one_on_one_applications o
 
-          INNER JOIN tbl_players p
-            ON p.player_id = o.player_id
+            INNER JOIN tbl_players p
+              ON p.player_id = o.player_id
 
-          WHERE o.is_active = TRUE
+            WHERE o.is_active = TRUE
 
-            AND o.application_date >=
-              DATE_TRUNC('month', CURRENT_DATE)
+              AND o.application_date >=
+                DATE_TRUNC('month', CURRENT_DATE)
 
-            AND o.application_date <
-              DATE_TRUNC('month', CURRENT_DATE)
-              + INTERVAL '1 month'
+              AND o.application_date <
+                DATE_TRUNC('month', CURRENT_DATE)
+                + INTERVAL '1 month'
 
-            /* Player has only admission fee */
-            AND LOWER(TRIM(p.fee_type)) = 'admission fee'
+              /* Player has only admission fee */
+              AND LOWER(TRIM(p.fee_type)) = 'admission fee'
 
-            /* No regular fee */
-            AND p.regular_fee IS NULL
-        ) AS only_one_on_one_fee
+              /* No regular fee */
+              AND p.regular_fee IS NULL
+
+          ) AS only_one_on_one_fee
       `),
     ]);
 
@@ -1265,7 +1235,6 @@ exports.getAllPlayers = async (req, res) => {
         players: players.rows,
       }
     );
-
   } catch (error) {
     console.error(
       "Get All Players Error:",
@@ -1279,6 +1248,7 @@ exports.getAllPlayers = async (req, res) => {
     );
   }
 };
+
 
 exports.getPlayerById = async (req, res) => {
   const { player_id } = req.params;
@@ -1401,10 +1371,6 @@ exports.getPlayerById = async (req, res) => {
           }
         )
       );
-
-    // ==========================================
-    // Final player response
-    // ==========================================
 
     const player = {
       ...playerData,
