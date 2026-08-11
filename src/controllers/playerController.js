@@ -889,9 +889,7 @@ exports.createPlayerAdmission = async (req, res) => {
 exports.getAllPlayers = async (req, res) => {
   try {
     const [players, statistics] = await Promise.all([
-      // =========================
-      // PLAYER LIST
-      // =========================
+
       pool.query(`
         SELECT
           p.*
@@ -900,34 +898,20 @@ exports.getAllPlayers = async (req, res) => {
           p.player_id DESC;
       `),
 
-      // =========================
-      // PLAYER STATISTICS
-      // =========================
       pool.query(`
         SELECT
 
-          /* =========================
-             TOTAL PLAYERS
-          ========================= */
           (
             SELECT COUNT(*)
             FROM tbl_players
           ) AS total_players,
 
-
-          /* =========================
-             ACTIVE PLAYERS
-          ========================= */
           (
             SELECT COUNT(*)
             FROM tbl_players
             WHERE is_active = TRUE
           ) AS active_players,
 
-
-          /* =========================
-             INACTIVE PLAYERS
-          ========================= */
           (
             SELECT COUNT(*)
             FROM tbl_players
@@ -1053,11 +1037,6 @@ exports.getAllPlayers = async (req, res) => {
 
           ) AS pending_fees,
 
-
-          /* =========================
-             1. ADMISSION FEE
-             CURRENT MONTH
-          ========================= */
           (
             SELECT COALESCE(
               SUM(p.admission_fee),
@@ -1073,10 +1052,6 @@ exports.getAllPlayers = async (req, res) => {
           ) AS admission_fee,
 
 
-          /* =========================
-             2. REGULAR FEE
-             CURRENT MONTH
-          ========================= */
           (
             SELECT COALESCE(
               SUM(regular_amount),

@@ -210,12 +210,16 @@ exports.getPlayerMonthlyReport = async (req, res) => {
   } = req.query;
 
   try {
+    // ==========================================
+    // DATE VALIDATION
+    // ==========================================
 
     const isValidDate = (dateString) => {
       if (!dateString) {
         return true;
       }
 
+      // Must be YYYY-MM-DD
       if (!/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
         return false;
       }
@@ -234,8 +238,14 @@ exports.getPlayerMonthlyReport = async (req, res) => {
       );
     };
 
+    // ==========================================
+    // VALIDATE FROM DATE
+    // ==========================================
 
-    if (from_date && !isValidDate(from_date)) {
+    if (
+      from_date &&
+      !isValidDate(from_date)
+    ) {
       return sendErrorResponse(
         res,
         400,
@@ -243,7 +253,14 @@ exports.getPlayerMonthlyReport = async (req, res) => {
       );
     }
 
-    if (to_date && !isValidDate(to_date)) {
+    // ==========================================
+    // VALIDATE TO DATE
+    // ==========================================
+
+    if (
+      to_date &&
+      !isValidDate(to_date)
+    ) {
       return sendErrorResponse(
         res,
         400,
@@ -251,6 +268,9 @@ exports.getPlayerMonthlyReport = async (req, res) => {
       );
     }
 
+    // ==========================================
+    // CURRENT MONTH DEFAULT
+    // ==========================================
 
     const today = new Date();
 
@@ -263,9 +283,13 @@ exports.getPlayerMonthlyReport = async (req, res) => {
     const year = currentDate.getFullYear();
     const month = currentDate.getMonth();
 
+    // First day of current month
     const defaultFromDate =
-      `${year}-${String(month + 1).padStart(2, "0")}-01`;
+      `${year}-${String(
+        month + 1
+      ).padStart(2, "0")}-01`;
 
+    // Last day of current month
     const lastDayDate = new Date(
       year,
       month + 1,
@@ -285,8 +309,13 @@ exports.getPlayerMonthlyReport = async (req, res) => {
     const toDate =
       to_date || defaultToDate;
 
+    // ==========================================
+    // VALIDATE DATE RANGE
+    // ==========================================
+
     if (
-      new Date(fromDate) > new Date(toDate)
+      new Date(fromDate) >
+      new Date(toDate)
     ) {
       return sendErrorResponse(
         res,
@@ -295,6 +324,9 @@ exports.getPlayerMonthlyReport = async (req, res) => {
       );
     }
 
+    // ==========================================
+    // MAIN QUERY
+    // ==========================================
 
     let query = `
       WITH report_months AS (
@@ -343,7 +375,7 @@ exports.getPlayerMonthlyReport = async (req, res) => {
 
       /* ==========================================
          FEE SUMMARY
-         Only total fee paid now
+         PLAYER + MONTH
          ========================================== */
 
       fee_summary AS (
@@ -363,10 +395,99 @@ exports.getPlayerMonthlyReport = async (req, res) => {
           SUM(
             CASE
               WHEN pf.status = 'Paid'
-              THEN COALESCE(pf.amount, 0)
+              THEN COALESCE(
+                pf.amount,
+                0
+              )
               ELSE 0
             END
           ) AS fee_paid,
+
+          /* ======================================
+             ADMISSION FEE
+             ====================================== */
+
+          SUM(
+            CASE
+              WHEN pf.status = 'Paid'
+                AND LOWER(
+                  TRIM(pf.fee_type)
+                ) IN (
+                  'admission',
+                  'admission fee'
+                )
+              THEN COALESCE(
+                pf.amount,
+                0
+              )
+              ELSE 0
+            END
+          ) AS admission_fee,
+
+          /* ======================================
+             REGULAR FEE
+             ====================================== */
+
+          SUM(
+            CASE
+              WHEN pf.status = 'Paid'
+                AND LOWER(
+                  TRIM(pf.fee_type)
+                ) IN (
+                  'regular',
+                  'regular fee'
+                )
+              THEN COALESCE(
+                pf.amount,
+                0
+              )
+              ELSE 0
+            END
+          ) AS regular_fee,
+
+          /* ======================================
+             ONE ON ONE FEE
+             ====================================== */
+
+          SUM(
+            CASE
+              WHEN pf.status = 'Paid'
+                AND LOWER(
+                  TRIM(pf.fee_type)
+                ) IN (
+                  'one on one',
+                  'one-on-one',
+                  'one on one fee'
+                )
+              THEN COALESCE(
+                pf.amount,
+                0
+              )
+              ELSE 0
+            END
+          ) AS one_on_one_fee,
+
+          /* ======================================
+             ONLY ONE ON ONE FEE
+             ====================================== */
+
+          SUM(
+            CASE
+              WHEN pf.status = 'Paid'
+                AND LOWER(
+                  TRIM(pf.fee_type)
+                ) IN (
+                  'only one on one',
+                  'only one-on-one',
+                  'only one on one fee'
+                )
+              THEN COALESCE(
+                pf.amount,
+                0
+              )
+              ELSE 0
+            END
+          ) AS only_one_on_one_fee,
 
           /* ======================================
              LAST PAID DATE
@@ -496,6 +617,42 @@ exports.getPlayerMonthlyReport = async (req, res) => {
         END AS fee_paid,
 
         /* ======================================
+           ADMISSION FEE
+           ====================================== */
+
+        COALESCE(
+          fee.admission_fee,
+          0
+        ) AS admission_fee,
+
+        /* ======================================
+           REGULAR FEE
+           ====================================== */
+
+        COALESCE(
+          fee.regular_fee,
+          0
+        ) AS regular_fee,
+
+        /* ======================================
+           ONE ON ONE FEE
+           ====================================== */
+
+        COALESCE(
+          fee.one_on_one_fee,
+          0
+        ) AS one_on_one_fee,
+
+        /* ======================================
+           ONLY ONE ON ONE FEE
+           ====================================== */
+
+        COALESCE(
+          fee.only_one_on_one_fee,
+          0
+        ) AS only_one_on_one_fee,
+
+        /* ======================================
            LAST PAID DATE
            ====================================== */
 
@@ -611,22 +768,40 @@ exports.getPlayerMonthlyReport = async (req, res) => {
     // CONVERT VALUES TO NUMBERS
     // ==========================================
 
-    const rows = result.rows.map((row) => ({
-      ...row,
+    const rows = result.rows.map(
+      (row) => ({
+        ...row,
 
-      present: Number(
-        row.present || 0
-      ),
+        present: Number(
+          row.present || 0
+        ),
 
-      absent: Number(
-        row.absent || 0
-      ),
+        absent: Number(
+          row.absent || 0
+        ),
 
-      fee_paid:
-        row.fee_paid !== null
-          ? Number(row.fee_paid)
-          : null,
-    }));
+        fee_paid:
+          row.fee_paid !== null
+            ? Number(row.fee_paid)
+            : null,
+
+        admission_fee: Number(
+          row.admission_fee || 0
+        ),
+
+        regular_fee: Number(
+          row.regular_fee || 0
+        ),
+
+        one_on_one_fee: Number(
+          row.one_on_one_fee || 0
+        ),
+
+        only_one_on_one_fee: Number(
+          row.only_one_on_one_fee || 0
+        ),
+      })
+    );
 
     // ==========================================
     // FINAL RESPONSE
