@@ -45,6 +45,7 @@ staffRouter.post(
   checkRole("PRIMARY"),
   addStaff
 );
+
 staffRouter.get("/", getAllStaff);
 
 staffRouter.get("/search", searchStaff);

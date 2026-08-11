@@ -243,9 +243,6 @@ exports.addStaff = async (req, res) => {
 exports.getAllStaff = async (req, res) => {
   try {
     const [result, statistics] = await Promise.all([
-      // ==========================================
-      // STAFF LIST
-      // ==========================================
       pool.query(`
         SELECT
           s.*,
@@ -272,9 +269,6 @@ exports.getAllStaff = async (req, res) => {
           s.staff_id DESC
       `),
 
-      // ==========================================
-      // STAFF STATISTICS
-      // ==========================================
       pool.query(`
         SELECT
           COUNT(*) AS total_staff,

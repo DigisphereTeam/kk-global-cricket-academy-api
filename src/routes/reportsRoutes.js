@@ -8,18 +8,20 @@ const reportsRouter = express.Router();
 
 reportsRouter.use(verifyToken);
 
-reportsRouter.get("/player-wise", checkRole("ADMIN"), getPlayerWiseReport);
+reportsRouter.use(checkRole("ADMIN"));
 
-reportsRouter.get("/player-monthly", checkRole("ADMIN"), getPlayerMonthlyReport);
+reportsRouter.get("/player-wise", getPlayerWiseReport);
 
-reportsRouter.get("/trainer-wise", checkRole("ADMIN"), getTrainerWiseReport);
+reportsRouter.get("/player-monthly", getPlayerMonthlyReport);
 
-reportsRouter.get("/trainer-monthly", checkRole("ADMIN"), getTrainerMonthlyReport);
+reportsRouter.get("/trainer-wise", getTrainerWiseReport);
 
-reportsRouter.get("/staff-wise", checkRole("ADMIN"), getStaffWiseReport);
+reportsRouter.get("/trainer-monthly", getTrainerMonthlyReport);
 
-reportsRouter.get("/staff-monthly", checkRole("ADMIN"), getStaffMonthlyReport);
+reportsRouter.get("/staff-wise", getStaffWiseReport);
 
-reportsRouter.get("/employee/statistics", checkRole("ADMIN"), getEmployeeStatistics);
+reportsRouter.get("/staff-monthly", getStaffMonthlyReport);
+
+reportsRouter.get("/employee/statistics", getEmployeeStatistics);
 
 module.exports = reportsRouter;

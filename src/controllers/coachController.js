@@ -339,9 +339,6 @@ exports.addCoach = async (req, res) => {
 exports.getAllCoaches = async (req, res) => {
   try {
     const [result, statistics] = await Promise.all([
-      // ==========================================
-      // COACH LIST
-      // ==========================================
       pool.query(`
         SELECT
           c.*,
@@ -372,9 +369,6 @@ exports.getAllCoaches = async (req, res) => {
           c.coach_id DESC
       `),
 
-      // ==========================================
-      // COACH STATISTICS
-      // ==========================================
       pool.query(`
         SELECT
           COUNT(*) AS total_trainers,
@@ -399,9 +393,6 @@ exports.getAllCoaches = async (req, res) => {
       `),
     ]);
 
-    // ==========================================
-    // Generate signed S3 URLs
-    // ==========================================
     const coaches = await Promise.all(
       result.rows.map(async (coach) => {
         const document_urls = await Promise.all(
@@ -434,9 +425,6 @@ exports.getAllCoaches = async (req, res) => {
       })
     );
 
-    // ==========================================
-    // SUCCESS RESPONSE
-    // ==========================================
     return sendSuccessResponse(
       res,
       200,
