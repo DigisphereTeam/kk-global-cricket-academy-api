@@ -891,20 +891,16 @@ exports.getAllPlayers = async (req, res) => {
   try {
     const [players, statistics] = await Promise.all([
       pool.query(`
-SELECT
-p.*
-  FROM tbl_players p
-        ORDER BY
-p.player_id DESC;
-`),
+        SELECT
+        p.*
+          FROM tbl_players p
+                ORDER BY
+        p.player_id DESC;
+        `),
 
 
       pool.query(`
-  SELECT
-
-        /* =========================
-           PLAYER COUNTS
-        ========================= */
+       SELECT
 
         (
           SELECT COUNT(*)
@@ -1001,11 +997,6 @@ p.player_id DESC;
     ) AS pending_fees,
 
 
-      /* =========================
-         ADMISSION FEE
-         CURRENT MONTH
-      ========================= */
-
       (
         SELECT COALESCE(
           SUM(p.admission_fee),
@@ -1024,9 +1015,6 @@ p.player_id DESC;
     ) AS admission_fee,
 
 
-      /* =========================================
-           REGULAR REVENUE
-           ========================================= */
 
         (
           SELECT COALESCE(SUM(regular_amount), 0)
@@ -1040,16 +1028,12 @@ p.player_id DESC;
           FROM tbl_player_fees pf
 
           WHERE pf.status = 'Paid'
-            AND pf.is_active = TRUE
 
             AND DATE_TRUNC('month', pf.payment_date)
                 = DATE_TRUNC('month', CURRENT_DATE)
 
-
           UNION ALL
 
-
-          /* Regular fee from players admitted this month */
           SELECT
             COALESCE(p.regular_fee, 0) AS regular_amount
 
@@ -1078,9 +1062,7 @@ p.player_id DESC;
         )
       FROM tbl_one_on_one_applications o
 
-      WHERE o.is_active = TRUE
-
-        AND o.application_date >=
+      WHERE o.application_date >=
       DATE_TRUNC('month', CURRENT_DATE)
 
         AND o.application_date <
@@ -1099,24 +1081,21 @@ p.player_id DESC;
           SUM(o.fee_amount),
           0
         )
-      FROM tbl_one_on_one_applications o
+        FROM tbl_one_on_one_applications o
 
-      INNER JOIN tbl_players p
-        ON p.player_id = o.player_id
+        INNER JOIN tbl_players p
+          ON p.player_id = o.player_id
 
-      WHERE o.is_active = TRUE
+        WHERE o.application_date >= DATE_TRUNC('month', CURRENT_DATE)
 
-        AND o.application_date >=
-      DATE_TRUNC('month', CURRENT_DATE)
+          AND o.application_date <
+              DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
 
-        AND o.application_date <
-      DATE_TRUNC('month', CURRENT_DATE)
-      + INTERVAL '1 month'
+          AND p.regular_fee = 0
 
-        /* No regular fee */
-        AND p.regular_fee IS NULL
+          AND p.fee_type = 'Admission Fee'
 
-        ) AS only_one_on_one_fee
+      ) AS only_one_on_one_fee
       `),
 
     ]);

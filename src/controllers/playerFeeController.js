@@ -109,6 +109,34 @@ exports.createPlayerFee = async (req, res) => {
       );
     }
 
+    // Check if payment date is in player's admission month
+    const admissionMonthResult = await client.query(
+      `
+        SELECT 1
+        FROM tbl_players p
+        WHERE p.player_id = $1
+          AND p.regular_fee > 0
+          AND p.fee_type = 'Regular Fee'
+          AND p.admission_date >= DATE_TRUNC('month', $2::date)
+          AND p.admission_date <
+              DATE_TRUNC('month', $2::date) + INTERVAL '1 month'
+        `,
+      [
+        Number(player_id),
+        formattedPaymentDate,
+      ]
+    );
+
+    if (admissionMonthResult.rowCount > 0) {
+      await client.query("ROLLBACK");
+
+      return sendErrorResponse(
+        res,
+        409,
+        "Regular fee already paid for admission month."
+      );
+    }
+
     // Check duplicate fee for same player and payment date
     const existingFee = await client.query(
       `
@@ -135,6 +163,17 @@ exports.createPlayerFee = async (req, res) => {
       );
     }
 
+    await client.query(
+      `
+        UPDATE tbl_players
+        SET fee_type = 'Regular Fee'
+        WHERE player_id = $1
+          AND fee_type = 'Admission Fee'
+          AND COALESCE(regular_fee, 0) = 0
+        RETURNING player_id
+        `,
+      [Number(player_id)]
+    );
 
     // Insert fee
     const result = await client.query(
@@ -234,76 +273,6 @@ exports.createPlayerFee = async (req, res) => {
 
   }
 };
-
-// exports.getAllPlayerFees = async (req, res) => {
-//   const { date } = req.query;
-
-//   try {
-//     const query = `
-//       SELECT
-//         pf.*,
-//         p.admission_id,
-//         p.full_name
-//       FROM tbl_player_fees pf
-//       INNER JOIN tbl_players p
-//         ON pf.player_id = p.player_id
-//       INNER JOIN (
-//         SELECT
-//           player_id,
-//           MAX(fee_id) AS latest_fee_id
-//         FROM tbl_player_fees
-//         GROUP BY player_id
-//       ) latest
-//         ON latest.latest_fee_id = pf.fee_id
-//       ORDER BY
-//         pf.fee_id DESC;
-//     `;
-
-//     const result = await pool.query(query);
-
-//     const currentDate = date ? new Date(date) : new Date();
-
-//     if (isNaN(currentDate.getTime())) {
-//       return sendErrorResponse(
-//         res,
-//         400,
-//         "Invalid date."
-//       );
-//     }
-
-//     const data = result.rows.map((fee) => {
-//       if (
-//         fee.status === "Paid" &&
-//         fee.due_date &&
-//         currentDate > new Date(fee.due_date)
-//       ) {
-//         return {
-//           ...fee,
-//           status: "Unpaid",
-//         };
-//       }
-
-//       return fee;
-//     });
-
-//     return sendSuccessResponse(
-//       res,
-//       200,
-//       "Player fees fetched successfully.",
-//       data
-//     );
-
-//   } catch (error) {
-//     console.error(error);
-
-//     return sendErrorResponse(
-//       res,
-//       500,
-//       error.message || "Failed to fetch player fees."
-//     );
-//   }
-// };
-
 
 exports.getAllPlayerFees = async (req, res) => {
   const { date } = req.query;

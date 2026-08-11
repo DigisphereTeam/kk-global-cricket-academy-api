@@ -6,8 +6,6 @@ const {
 
 exports.getPlayerWiseReport = async (req, res) => {
   const {
-    search,
-    player_id,
     from_date,
     to_date,
   } = req.query;
@@ -20,7 +18,6 @@ exports.getPlayerWiseReport = async (req, res) => {
         return true;
       }
 
-      // Must be YYYY-MM-DD
       if (!/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
         return false;
       }
@@ -39,10 +36,6 @@ exports.getPlayerWiseReport = async (req, res) => {
       );
     };
 
-    // ==========================================
-    // VALIDATE FROM DATE
-    // ==========================================
-
     if (from_date && !isValidDate(from_date)) {
       return sendErrorResponse(
         res,
@@ -51,10 +44,6 @@ exports.getPlayerWiseReport = async (req, res) => {
       );
     }
 
-    // ==========================================
-    // VALIDATE TO DATE
-    // ==========================================
-
     if (to_date && !isValidDate(to_date)) {
       return sendErrorResponse(
         res,
@@ -62,10 +51,6 @@ exports.getPlayerWiseReport = async (req, res) => {
         "Invalid to_date. Use YYYY-MM-DD format."
       );
     }
-
-    // ==========================================
-    // DEFAULT DATE RANGE — CURRENT MONTH
-    // ==========================================
 
     const today = new Date();
 
@@ -126,28 +111,6 @@ exports.getPlayerWiseReport = async (req, res) => {
 
     const values = [];
     let index = 1;
-
-    if (search) {
-      query += `
-        AND (
-          p.full_name ILIKE $${index}
-          OR p.admission_id ILIKE $${index}
-        )
-      `;
-
-      values.push(`%${search}%`);
-      index++;
-    }
-
-    if (player_id) {
-      query += `
-        AND p.player_id = $${index}
-      `;
-
-      values.push(player_id);
-      index++;
-    }
-
 
     query += `
       AND p.admission_date >= $${index}::date
@@ -2007,10 +1970,6 @@ exports.getEmployeeStatistics = async (req, res) => {
     to_date,
   } = req.query;
 
-  // ==========================================
-  // VALIDATE EMPLOYEE TYPE
-  // ==========================================
-
   if (!employee_type) {
     return sendErrorResponse(
       res,
@@ -2032,10 +1991,6 @@ exports.getEmployeeStatistics = async (req, res) => {
       "Invalid employee type. Allowed values are Player, Coach, Staff."
     );
   }
-
-  // ==========================================
-  // STRICT DATE VALIDATION
-  // ==========================================
 
   const isValidDate = (dateString) => {
     if (!dateString) {
@@ -2129,286 +2084,111 @@ exports.getEmployeeStatistics = async (req, res) => {
   }
 
   try {
-    // ==========================================
-    // PLAYER STATISTICS
-    // ==========================================
 
     if (employee_type === "Player") {
       const result = await pool.query(
         `
-        SELECT
+    SELECT
+      (
+        SELECT COALESCE(
+          SUM(p.admission_fee),
+          0
+        )
+        FROM tbl_players p
 
-          /* =================================
-             PLAYER COUNTS
-          ================================= */
+        WHERE p.admission_date >= $1::date
+          AND p.admission_date <= $2::date
+          AND p.admission_fee IS NOT NULL
 
-          (
-            SELECT COUNT(*)
-            FROM tbl_players p
-            WHERE p.admission_date >= $1::date
-              AND p.admission_date <= $2::date
-          ) AS total_players,
-
-          (
-            SELECT COUNT(*)
-            FROM tbl_players p
-            WHERE p.is_active = TRUE
-              AND p.admission_date >= $1::date
-              AND p.admission_date <= $2::date
-          ) AS active_players,
-
-          (
-            SELECT COUNT(*)
-            FROM tbl_players p
-            WHERE p.is_active = FALSE
-              AND p.admission_date >= $1::date
-              AND p.admission_date <= $2::date
-          ) AS inactive_players,
+      ) AS admission_fee,
 
 
-          /* =================================
-             PENDING FEES
-          ================================= */
+      (
+        SELECT COALESCE(
+          SUM(regular_amount),
+          0
+        )
 
-          (
-            SELECT COUNT(
-              DISTINCT pending_players.player_id
-            )
+        FROM (
 
-            FROM (
-
-              /* =================================
-                 REGULAR PLAYERS
-              ================================= */
-
-              SELECT
-                p.player_id
-
-              FROM tbl_players p
-
-              WHERE p.is_active = TRUE
-
-                /* Player must have joined */
-                AND p.admission_date <= $2::date
-
-                /* Only after the 4th */
-                AND $2::date >
-                  DATE_TRUNC(
-                    'month',
-                    $2::date
-                  ) + INTERVAL '3 day'
-
-                /* Player has NOT paid this month */
-                AND NOT EXISTS (
-                  SELECT 1
-                  FROM tbl_player_fees pf
-
-                  WHERE pf.player_id = p.player_id
-                    AND pf.status = 'Paid'
-                    AND pf.is_active = TRUE
-
-                    AND pf.payment_date >=
-                      DATE_TRUNC(
-                        'month',
-                        $2::date
-                      )
-
-                    AND pf.payment_date <
-                      DATE_TRUNC(
-                        'month',
-                        $2::date
-                      ) + INTERVAL '1 month'
-                )
-
-
-              UNION
-
-
-              /* =================================
-                 ONE-ON-ONE PLAYERS
-              ================================= */
-
-              SELECT
-                o.player_id
-
-              FROM tbl_one_on_one_applications o
-
-              INNER JOIN tbl_players p
-                ON p.player_id = o.player_id
-                AND p.is_active = TRUE
-
-              WHERE o.is_active = TRUE
-                AND o.renewal_status = 'Active'
-
-                /* Player must have joined */
-                AND p.admission_date <= $2::date
-
-                /* Only after the 4th */
-                AND $2::date >
-                  DATE_TRUNC(
-                    'month',
-                    $2::date
-                  ) + INTERVAL '3 day'
-
-                /* Player has NOT paid this month */
-                AND NOT EXISTS (
-                  SELECT 1
-                  FROM tbl_player_fees pf
-
-                  WHERE pf.player_id = o.player_id
-                    AND pf.status = 'Paid'
-                    AND pf.is_active = TRUE
-
-                    AND pf.payment_date >=
-                      DATE_TRUNC(
-                        'month',
-                        $2::date
-                      )
-
-                    AND pf.payment_date <
-                      DATE_TRUNC(
-                        'month',
-                        $2::date
-                      ) + INTERVAL '1 month'
-                )
-
-            ) AS pending_players
-          ) AS pending_fees,
-
-
-          /* =================================
-             ADMISSION FEE
-             SELECTED DATE RANGE
-          ================================= */
-
-          (
-            SELECT COALESCE(
-              SUM(p.admission_fee),
+          SELECT
+            COALESCE(
+              p.regular_fee,
               0
+            ) AS regular_amount
+
+          FROM tbl_players p
+
+          WHERE p.regular_fee > 0
+            AND p.fee_type = 'Regular Fee'
+
+            AND p.admission_date >= $1::date
+            AND p.admission_date < (
+              $2::date + INTERVAL '1 day'
             )
 
-            FROM tbl_players p
 
-            WHERE p.admission_date >= $1::date
-              AND p.admission_date <= $2::date
-              AND p.admission_fee IS NOT NULL
-          ) AS admission_fee,
+          UNION ALL
 
-
-          /* =================================
-             REGULAR FEE
-             SELECTED DATE RANGE
-          ================================= */
-
-          (
-            SELECT COALESCE(
-              SUM(regular_amount),
+          SELECT
+            COALESCE(
+              pf.amount,
               0
+            ) AS regular_amount
+
+          FROM tbl_player_fees pf
+
+          INNER JOIN tbl_players p
+            ON p.player_id = pf.player_id
+
+          WHERE pf.payment_date >= $1::date
+            AND pf.payment_date < (
+              $2::date + INTERVAL '1 day'
             )
 
-            FROM (
+            /* Existing players */
+            AND p.admission_date < $2::date
 
-              /* =================================
-                 PLAYERS ADMITTED IN DATE RANGE
-              ================================= */
+        ) AS regular_fees
+      ) AS regular_fee,
 
-              SELECT
-                COALESCE(
-                  p.regular_fee,
-                  0
-                ) AS regular_amount
+      (
+        SELECT COALESCE(
+          SUM(o.fee_amount),
+          0
+        )
 
-              FROM tbl_players p
+        FROM tbl_one_on_one_applications o
 
-              WHERE p.is_active = TRUE
-                AND p.admission_date >= $1::date
-                AND p.admission_date <= $2::date
+        WHERE o.application_date >= $1::date
+          AND o.application_date < (
+            $2::date + INTERVAL '1 day'
+          )
 
+      ) AS one_on_one_fee,
 
-              UNION ALL
+      (
+        SELECT COALESCE(
+          SUM(o.fee_amount),
+          0
+        )
 
+        FROM tbl_one_on_one_applications o
 
-              /* =================================
-                 EXISTING PLAYERS WHO PAID
-              ================================= */
+        INNER JOIN tbl_players p
+          ON p.player_id = o.player_id
 
-              SELECT
-                COALESCE(
-                  pf.amount,
-                  0
-                ) AS regular_amount
+        WHERE o.application_date >= $1::date
+          AND o.application_date < (
+            $2::date + INTERVAL '1 day'
+          )
 
-              FROM tbl_player_fees pf
+          AND p.fee_type = 'Admission Fee'
 
-              INNER JOIN tbl_players p
-                ON p.player_id = pf.player_id
+          AND p.regular_fee = 0
 
-              WHERE pf.is_active = TRUE
-                AND pf.status = 'Paid'
-                AND p.is_active = TRUE
-
-                AND pf.payment_date >= $1::date
-                AND pf.payment_date < (
-                  $2::date + INTERVAL '1 day'
-                )
-
-                /* Existing players */
-                AND p.admission_date < $1::date
-
-            ) AS regular_fees
-          ) AS regular_fee,
-
-
-          /* =================================
-             ONE-ON-ONE FEE
-             SELECTED DATE RANGE
-          ================================= */
-
-          (
-            SELECT COALESCE(
-              SUM(o.fee_amount),
-              0
-            )
-
-            FROM tbl_one_on_one_applications o
-
-            WHERE o.is_active = TRUE
-
-              AND o.application_date >= $1::date
-              AND o.application_date < (
-                $2::date + INTERVAL '1 day'
-              )
-          ) AS one_on_one_fee,
-
-
-          /* =================================
-             ONLY ONE-ON-ONE FEE
-             SELECTED DATE RANGE
-          ================================= */
-
-          (
-            SELECT COALESCE(
-              SUM(o.fee_amount),
-              0
-            )
-
-            FROM tbl_one_on_one_applications o
-
-            INNER JOIN tbl_players p
-              ON p.player_id = o.player_id
-
-            WHERE o.is_active = TRUE
-
-              AND o.application_date >= $1::date
-              AND o.application_date < (
-                $2::date + INTERVAL '1 day'
-              )
-
-              /* No regular fee */
-              AND p.regular_fee IS NULL
-
-          ) AS only_one_on_one_fee
-        `,
+      ) AS only_one_on_one_fee
+    `,
         [fromDate, toDate]
       );
 
@@ -2420,25 +2200,11 @@ exports.getEmployeeStatistics = async (req, res) => {
         "Player statistics retrieved successfully.",
         {
           employee_type: "Player",
+
           from_date: fromDate,
           to_date: toDate,
 
           statistics: {
-            total_players: Number(
-              row.total_players || 0
-            ),
-
-            active_players: Number(
-              row.active_players || 0
-            ),
-
-            inactive_players: Number(
-              row.inactive_players || 0
-            ),
-
-            pending_fees: Number(
-              row.pending_fees || 0
-            ),
 
             admission_fee: Number(
               row.admission_fee || 0
@@ -2459,11 +2225,6 @@ exports.getEmployeeStatistics = async (req, res) => {
         }
       );
     }
-
-
-    // ==========================================
-    // STAFF STATISTICS
-    // ==========================================
 
     if (employee_type === "Staff") {
       const result = await pool.query(
@@ -2529,11 +2290,6 @@ exports.getEmployeeStatistics = async (req, res) => {
         }
       );
     }
-
-
-    // ==========================================
-    // COACH STATISTICS
-    // ==========================================
 
     if (employee_type === "Coach") {
       const result = await pool.query(

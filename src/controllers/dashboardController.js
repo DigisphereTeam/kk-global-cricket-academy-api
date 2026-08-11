@@ -9,52 +9,33 @@ exports.getDashboardStatistics = async (req, res) => {
     const statisticsQuery = `
       SELECT
 
-        /* =========================================
-           TOTAL PLAYERS
-           ========================================= */
         (
           SELECT COUNT(*)
           FROM tbl_players
         ) AS total_players,
 
-
-        /* =========================================
-           ACTIVE PLAYERS
-           ========================================= */
         (
           SELECT COUNT(*)
           FROM tbl_players
           WHERE is_active = TRUE
         ) AS active_players,
 
-
-        /* =========================================
-           TOTAL TRAINERS
-           ========================================= */
         (
           SELECT COUNT(*)
           FROM tbl_coach
         ) AS total_trainers,
 
-
-        /* =========================================
-           TOTAL GROUND BOOKINGS
-           ========================================= */
         (
           SELECT COUNT(*)
           FROM tbl_ground_booking
         ) AS ground_bookings,
 
-
-        /* =========================================
-           PENDING APPROVALS
-           ========================================= */
         (
           SELECT COUNT(*)
           FROM tbl_ground_booking
           WHERE status = 'Pending'
         ) AS approvals;
-    `;
+      `;
 
 
     const revenueQuery = `
@@ -74,8 +55,8 @@ exports.getDashboardStatistics = async (req, res) => {
             /* Player must have joined */
             AND p.admission_date <= CURRENT_DATE
 
-
             /* Player has NOT paid this month */
+
             AND NOT EXISTS (
               SELECT 1
 
@@ -98,51 +79,31 @@ exports.getDashboardStatistics = async (req, res) => {
         ) AS pending_fees,
 
 
-        /* =========================================
-           REGULAR REVENUE
-           ========================================= */
-
         (
+
           SELECT COALESCE(SUM(regular_amount), 0)
           FROM (
 
-          /* Paid regular fees */
+            SELECT
+              COALESCE(pf.amount, 0) AS regular_amount
+            FROM tbl_player_fees pf
+            WHERE pf.status = 'Paid'
+              AND DATE_TRUNC('month', pf.payment_date)
+                  = DATE_TRUNC('month', CURRENT_DATE)
 
-          SELECT
-            COALESCE(pf.amount, 0) AS regular_amount
+            UNION ALL
 
-          FROM tbl_player_fees pf
+            SELECT
+              COALESCE(p.regular_fee, 0) AS regular_amount
+            FROM tbl_players p
+            WHERE p.regular_fee > 0
+              AND DATE_TRUNC('month', p.admission_date)
+                  = DATE_TRUNC('month', CURRENT_DATE)
 
-          WHERE pf.status = 'Paid'
-            AND pf.is_active = TRUE
+          ) AS regular_revenue_data
 
-            AND DATE_TRUNC('month', pf.payment_date)
-                = DATE_TRUNC('month', CURRENT_DATE)
+        ) AS regular_revenue,
 
-
-          UNION ALL
-
-
-          /* Regular fee from players admitted this month */
-          SELECT
-            COALESCE(p.regular_fee, 0) AS regular_amount
-
-          FROM tbl_players p
-
-          WHERE p.is_active = TRUE
-            AND p.regular_fee IS NOT NULL
-
-            AND DATE_TRUNC('month', p.admission_date)
-                = DATE_TRUNC('month', CURRENT_DATE)
-
-        ) AS regular_revenue_data
-
-      ) AS regular_revenue,
-
-
-        /* =========================================
-           ONE-ON-ONE REVENUE
-           ========================================= */
 
         (
           SELECT COALESCE(SUM(fee_amount), 0)
@@ -154,10 +115,6 @@ exports.getDashboardStatistics = async (req, res) => {
 
         ) AS one_on_one_revenue,
 
-
-        /* =========================================
-           GROUND REVENUE
-           ========================================= */
 
         (
           SELECT COALESCE(SUM(total_amount), 0)
@@ -172,10 +129,6 @@ exports.getDashboardStatistics = async (req, res) => {
         ) AS ground_revenue,
 
 
-        /* =========================================
-           SALARY EXPENSE
-           ========================================= */
-
         (
           SELECT COALESCE(SUM(net_salary), 0)
 
@@ -186,10 +139,6 @@ exports.getDashboardStatistics = async (req, res) => {
 
         ) AS salary_expense,
 
-
-        /* =========================================
-           TOTAL EXPENDITURE
-           ========================================= */
 
         (
           SELECT COALESCE(SUM(amount), 0)
@@ -202,77 +151,56 @@ exports.getDashboardStatistics = async (req, res) => {
         ) AS total_expenditure,
 
 
-        /* =========================================
-           MONTHLY REVENUE
-           ========================================= */
-
         (
           SELECT COALESCE(SUM(amount), 0)
-
           FROM (
 
-            /* Player Fees */
-            SELECT
-              amount,
-              payment_date AS revenue_date
-
+            SELECT amount
             FROM tbl_player_fees
-
             WHERE status = 'Paid'
-
+              AND payment_date >= DATE_TRUNC('month', CURRENT_DATE)
+              AND payment_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
 
             UNION ALL
 
+            SELECT regular_fee
+            FROM tbl_players
+            WHERE regular_fee > 0
+              AND admission_date >= DATE_TRUNC('month', CURRENT_DATE)
+              AND admission_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
 
-            /* One-On-One */
-            SELECT
-              fee_amount,
-              application_date AS revenue_date
+            UNION ALL
 
+            SELECT fee_amount
             FROM tbl_one_on_one_applications
-
+            WHERE application_date >= DATE_TRUNC('month', CURRENT_DATE)
+              AND application_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
 
             UNION ALL
 
-
-            /* Ground Booking */
-            SELECT
-              total_amount,
-              booking_date AS revenue_date
-
+            SELECT total_amount
             FROM tbl_ground_booking
-
             WHERE status = 'Confirmed'
-
+              AND booking_date >= DATE_TRUNC('month', CURRENT_DATE)
+              AND booking_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
 
             UNION ALL
 
-
-            /* Salary */
-            SELECT
-              -net_salary,
-              payment_date AS revenue_date
-
+            SELECT -net_salary
             FROM tbl_employee_salary
-
+            WHERE payment_date >= DATE_TRUNC('month', CURRENT_DATE)
+              AND payment_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
 
             UNION ALL
 
-
-            /* Other Expenses */
-            SELECT
-              -amount,
-              expenditure_date AS revenue_date
-
+            SELECT -amount
             FROM tbl_expenditure
+            WHERE expenditure_date >= DATE_TRUNC('month', CURRENT_DATE)
+              AND expenditure_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
 
           ) revenue
-
-          WHERE DATE_TRUNC('month', revenue_date)
-                = DATE_TRUNC('month', CURRENT_DATE)
-
-        ) AS monthly_revenue;
-    `;
+          ) AS monthly_revenue
+        `;
 
 
     const [
@@ -362,9 +290,6 @@ exports.getDashboardStatistics = async (req, res) => {
 exports.getDashboardCharts = async (req, res) => {
   try {
     const [playerGrowth, feeCollection, attendance] = await Promise.all([
-      // =========================================
-      // Player Growth - Last 6 Months
-      // =========================================
 
       pool.query(`
         WITH months AS (
@@ -402,9 +327,6 @@ exports.getDashboardCharts = async (req, res) => {
           months.month_date;
       `),
 
-      // =========================================
-      // Fee Collection - Current Month
-      // =========================================
 
       pool.query(`
         SELECT
