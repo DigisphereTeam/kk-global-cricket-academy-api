@@ -475,10 +475,7 @@ exports.createPlayerAdmission = async (req, res) => {
     admission_fee === null ||
     admission_fee === "" ||
     !payment_type?.trim() ||
-    !fee_type?.trim() ||
-    regular_fee === undefined ||
-    regular_fee === null ||
-    regular_fee === ""
+    !fee_type?.trim()
   ) {
     return sendErrorResponse(
       res,
@@ -646,41 +643,41 @@ exports.createPlayerAdmission = async (req, res) => {
     // Check duplicate player
     let existingPlayer;
 
-    // if (email) {
-    //   existingPlayer = await client.query(
-    //     `
-    //     SELECT 1
-    //     FROM tbl_players
-    //     WHERE phone_number = $1
-    //        OR LOWER(email) = LOWER($2)
-    //     LIMIT 1
-    //     `,
-    //     [
-    //       phone_number.trim(),
-    //       email.trim(),
-    //     ]
-    //   );
-    // } else {
-    //   existingPlayer = await client.query(
-    //     `
-    //     SELECT 1
-    //     FROM tbl_players
-    //     WHERE phone_number = $1
-    //     LIMIT 1
-    //     `,
-    //     [phone_number.trim()]
-    //   );
-    // }
+    if (email) {
+      existingPlayer = await client.query(
+        `
+        SELECT 1
+        FROM tbl_players
+        WHERE phone_number = $1
+           OR LOWER(email) = LOWER($2)
+        LIMIT 1
+        `,
+        [
+          phone_number.trim(),
+          email.trim(),
+        ]
+      );
+    } else {
+      existingPlayer = await client.query(
+        `
+        SELECT 1
+        FROM tbl_players
+        WHERE phone_number = $1
+        LIMIT 1
+        `,
+        [phone_number.trim()]
+      );
+    }
 
-    // if (existingPlayer.rowCount > 0) {
-    //   await client.query("ROLLBACK");
+    if (existingPlayer.rowCount > 0) {
+      await client.query("ROLLBACK");
 
-    //   return sendErrorResponse(
-    //     res,
-    //     409,
-    //     "Player already exists."
-    //   );
-    // }
+      return sendErrorResponse(
+        res,
+        409,
+        "Player already exists."
+      );
+    }
 
     // Create player
     const result = await client.query(
@@ -763,8 +760,6 @@ exports.createPlayerAdmission = async (req, res) => {
     // ==========================================
     // Upload player documents to S3
     // ==========================================
-
-    console.log("req.files", req.files)
 
     if (req.files && req.files.length > 0) {
       for (const file of req.files) {
