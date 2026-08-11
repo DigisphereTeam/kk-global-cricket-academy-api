@@ -339,13 +339,20 @@ exports.addCoach = async (req, res) => {
 exports.getAllCoaches = async (req, res) => {
   try {
     const [result, statistics] = await Promise.all([
+      // ==========================================
+      // COACH LIST
+      // ==========================================
       pool.query(`
         SELECT
           c.*,
 
           COALESCE(
             JSON_AGG(
-              d.document_url
+              JSON_BUILD_OBJECT(
+                'document_id', d.document_id,
+                'document_url', d.document_url,
+                'created_at', d.created_at
+              )
               ORDER BY d.document_id
             ) FILTER (
               WHERE d.document_id IS NOT NULL
@@ -358,11 +365,16 @@ exports.getAllCoaches = async (req, res) => {
         LEFT JOIN tbl_documents d
           ON d.coach_id = c.coach_id
 
-        GROUP BY c.coach_id
+        GROUP BY
+          c.coach_id
 
-        ORDER BY c.coach_id DESC
+        ORDER BY
+          c.coach_id DESC
       `),
 
+      // ==========================================
+      // COACH STATISTICS
+      // ==========================================
       pool.query(`
         SELECT
           COUNT(*) AS total_trainers,
@@ -392,23 +404,39 @@ exports.getAllCoaches = async (req, res) => {
     // ==========================================
     const coaches = await Promise.all(
       result.rows.map(async (coach) => {
-        const documents = await Promise.all(
-          coach.documents.map(async (documentUrl) => {
-            if (!documentUrl) {
+        const document_urls = await Promise.all(
+          coach.documents.map(async (document) => {
+            if (!document.document_url) {
               return null;
             }
 
-            return await getSignedVideoUrl(documentUrl);
+            const signedUrl =
+              await getSignedVideoUrl(
+                document.document_url
+              );
+
+            return {
+              document_id: document.document_id,
+              document_url: document.document_url,
+              created_at: document.created_at,
+              file_url: signedUrl,
+            };
           })
         );
 
+        // Remove original documents key
+        delete coach.documents;
+
         return {
           ...coach,
-          documents: documents.filter(Boolean),
+          document_urls: document_urls.filter(Boolean),
         };
       })
     );
 
+    // ==========================================
+    // SUCCESS RESPONSE
+    // ==========================================
     return sendSuccessResponse(
       res,
       200,
@@ -435,6 +463,7 @@ exports.getAllCoaches = async (req, res) => {
         coaches,
       }
     );
+
   } catch (error) {
     console.error(
       "Get all coaches error:",

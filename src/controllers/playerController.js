@@ -562,17 +562,6 @@ exports.createPlayerAdmission = async (req, res) => {
     );
   }
 
-  // Regular fee validation
-  if (
-    isNaN(Number(regular_fee)) ||
-    Number(regular_fee) <= 0
-  ) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Regular fee must be greater than 0."
-    );
-  }
 
   // Weight validation
   if (
@@ -1381,6 +1370,9 @@ exports.getPlayerById = async (req, res) => {
       document_urls: documents,
     };
 
+    // Remove the database document aggregation
+    delete player.documents;
+
     return sendSuccessResponse(
       res,
       200,
@@ -1496,8 +1488,7 @@ exports.updatePlayer = async (req, res) => {
     "age",
     "admission_fee",
     "height",
-    "weight",
-    "regular_fee",
+    "weight"
   ];
 
   for (const field of numericFields) {
@@ -1539,18 +1530,6 @@ exports.updatePlayer = async (req, res) => {
     );
   }
 
-  // Regular fee validation
-  if (
-    req.body.regular_fee != null &&
-    Number(req.body.regular_fee) < 0
-  ) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Regular fee cannot be negative."
-    );
-  }
-
   // User validation
   if (!req.user?.user_id) {
     return sendErrorResponse(
@@ -1571,9 +1550,6 @@ exports.updatePlayer = async (req, res) => {
 
     await client.query("BEGIN");
 
-    // ==========================================
-    // Check player exists
-    // ==========================================
 
     const existingPlayer =
       await client.query(
@@ -1596,9 +1572,6 @@ exports.updatePlayer = async (req, res) => {
       );
     }
 
-    // ==========================================
-    // Duplicate phone check
-    // ==========================================
 
     if (req.body.phone_number) {
       const phoneExists =
