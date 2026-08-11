@@ -187,7 +187,7 @@ exports.signIn = async (req, res) => {
       },
       process.env.JWT_SECRET,
       {
-        expiresIn: "2m",
+        expiresIn: "7d",
       }
     );
 

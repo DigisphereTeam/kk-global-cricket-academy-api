@@ -201,6 +201,7 @@ exports.getPlayerWiseReport = async (req, res) => {
   }
 };
 
+
 exports.getPlayerMonthlyReport = async (req, res) => {
   const {
     search,
@@ -210,32 +211,31 @@ exports.getPlayerMonthlyReport = async (req, res) => {
   } = req.query;
 
   try {
-    // ==========================================
-    // DATE CLEANING
-    // ==========================================
+    // ============================================================
+    // NORMALIZE DATE
+    // ============================================================
 
-    const cleanDate = (date) => {
-      if (!date) {
+    const normalizeDate = (value) => {
+      if (!value) {
         return null;
       }
 
-      // Remove leading/trailing spaces
-      // and spaces inside the date
-      return String(date)
+      return String(value)
         .trim()
-        .replace(/\s+/g, "");
+        .replace(/\s+/g, "")
+        .replace(/-+/g, "-");
     };
 
-    const cleanedFromDate = cleanDate(from_date);
-    const cleanedToDate = cleanDate(to_date);
+    const cleanedFromDate = normalizeDate(from_date);
+    const cleanedToDate = normalizeDate(to_date);
 
-    // ==========================================
+    // ============================================================
     // DATE VALIDATION
-    // ==========================================
+    // ============================================================
 
     const isValidDate = (dateString) => {
       if (!dateString) {
-        return true;
+        return false;
       }
 
       // Must be YYYY-MM-DD
@@ -261,9 +261,9 @@ exports.getPlayerMonthlyReport = async (req, res) => {
       );
     };
 
-    // ==========================================
+    // ============================================================
     // VALIDATE FROM DATE
-    // ==========================================
+    // ============================================================
 
     if (
       cleanedFromDate &&
@@ -276,9 +276,9 @@ exports.getPlayerMonthlyReport = async (req, res) => {
       );
     }
 
-    // ==========================================
+    // ============================================================
     // VALIDATE TO DATE
-    // ==========================================
+    // ============================================================
 
     if (
       cleanedToDate &&
@@ -291,53 +291,53 @@ exports.getPlayerMonthlyReport = async (req, res) => {
       );
     }
 
-    // ==========================================
-    // CURRENT MONTH DEFAULT
-    // ==========================================
+    // ============================================================
+    // CURRENT DATE - INDIA
+    // ============================================================
 
-    const today = new Date();
+    const now = new Date();
 
-    const currentDate = new Date(
-      today.toLocaleString("en-US", {
+    const indiaDate = new Date(
+      now.toLocaleString("en-US", {
         timeZone: "Asia/Kolkata",
       })
     );
 
     const currentYear =
-      currentDate.getFullYear();
+      indiaDate.getFullYear();
 
     const currentMonth =
-      currentDate.getMonth();
+      indiaDate.getMonth();
 
-    // ==========================================
-    // FIRST DAY OF CURRENT MONTH
-    // ==========================================
+    const currentDay =
+      indiaDate.getDate();
+
+    // ============================================================
+    // DEFAULT FROM DATE
+    // ============================================================
 
     const defaultFromDate =
       `${currentYear}-${String(
         currentMonth + 1
       ).padStart(2, "0")}-01`;
 
-    // ==========================================
-    // LAST DAY OF CURRENT MONTH
-    // ==========================================
-
-    const lastDayDate = new Date(
-      currentYear,
-      currentMonth + 1,
-      0
-    );
+    // ============================================================
+    // DEFAULT TO DATE
+    //
+    // For current month, use today's date.
+    // This prevents future days from being counted.
+    // ============================================================
 
     const defaultToDate =
-      `${lastDayDate.getFullYear()}-${String(
-        lastDayDate.getMonth() + 1
+      `${currentYear}-${String(
+        currentMonth + 1
       ).padStart(2, "0")}-${String(
-        lastDayDate.getDate()
+        currentDay
       ).padStart(2, "0")}`;
 
-    // ==========================================
+    // ============================================================
     // FINAL DATES
-    // ==========================================
+    // ============================================================
 
     const fromDate =
       cleanedFromDate ||
@@ -347,14 +347,31 @@ exports.getPlayerMonthlyReport = async (req, res) => {
       cleanedToDate ||
       defaultToDate;
 
-    // ==========================================
-    // VALIDATE DATE RANGE
-    // ==========================================
+    // ============================================================
+    // FINAL DATE VALIDATION
+    // ============================================================
 
-    if (
-      new Date(fromDate) >
-      new Date(toDate)
-    ) {
+    if (!isValidDate(fromDate)) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Invalid from_date. Use YYYY-MM-DD format."
+      );
+    }
+
+    if (!isValidDate(toDate)) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Invalid to_date. Use YYYY-MM-DD format."
+      );
+    }
+
+    // ============================================================
+    // DATE RANGE VALIDATION
+    // ============================================================
+
+    if (fromDate > toDate) {
       return sendErrorResponse(
         res,
         400,
@@ -362,12 +379,46 @@ exports.getPlayerMonthlyReport = async (req, res) => {
       );
     }
 
-    // ==========================================
+    // ============================================================
+    // PLAYER ID VALIDATION
+    // ============================================================
+
+    if (player_id) {
+      if (
+        !/^\d+$/.test(
+          String(player_id).trim()
+        )
+      ) {
+        return sendErrorResponse(
+          res,
+          400,
+          "Invalid player_id."
+        );
+      }
+    }
+
+    // ============================================================
     // MAIN QUERY
-    // ==========================================
+    // ============================================================
 
     let query = `
+
       WITH report_months AS (
+
+        /*
+         * Generate one record for every month
+         * between from_date and to_date.
+         *
+         * Example:
+         *
+         * from = 2026-07-01
+         * to   = 2026-09-30
+         *
+         * Result:
+         * July
+         * August
+         * September
+         */
 
         SELECT
           generate_series(
@@ -383,13 +434,14 @@ exports.getPlayerMonthlyReport = async (req, res) => {
           ) AS month_start
       ),
 
-      /* ==========================================
-         ATTENDANCE SUMMARY
-         ========================================== */
+      /* ==========================================================
+         ATTENDANCE
+         ========================================================== */
 
       attendance_summary AS (
 
         SELECT
+
           a.employee_code,
 
           DATE_TRUNC(
@@ -403,22 +455,36 @@ exports.getPlayerMonthlyReport = async (req, res) => {
 
         FROM tbl_attendance a
 
+        WHERE
+          a.payroll_date IS NOT NULL
+
         GROUP BY
+
           a.employee_code,
+
           DATE_TRUNC(
             'month',
             a.payroll_date
           )
       ),
 
-      /* ==========================================
-         FEE SUMMARY
-         PLAYER + MONTH
-         ========================================== */
+      /* ==========================================================
+         REGULAR FEE
 
-      fee_summary AS (
+         Amount:
+         tbl_player_fees.amount
+
+         We DO NOT use:
+         pf.fee_type
+
+         Each payment is grouped by the month
+         in which payment was made.
+         ========================================================== */
+
+      regular_fee_summary AS (
 
         SELECT
+
           pf.player_id,
 
           DATE_TRUNC(
@@ -426,156 +492,51 @@ exports.getPlayerMonthlyReport = async (req, res) => {
             pf.payment_date
           ) AS month_start,
 
-          /* ======================================
-             TOTAL FEE PAID
-             ====================================== */
-
           SUM(
-            CASE
-              WHEN pf.status = 'Paid'
-              THEN COALESCE(
-                pf.amount,
-                0
-              )
-              ELSE 0
-            END
-          ) AS fee_paid,
-
-          /* ======================================
-             ADMISSION FEE
-             ====================================== */
-
-          SUM(
-            CASE
-              WHEN pf.status = 'Paid'
-                AND LOWER(
-                  TRIM(pf.fee_type)
-                ) IN (
-                  'admission',
-                  'admission fee'
-                )
-              THEN COALESCE(
-                pf.amount,
-                0
-              )
-              ELSE 0
-            END
-          ) AS admission_fee,
-
-          /* ======================================
-             REGULAR FEE
-             ====================================== */
-
-          SUM(
-            CASE
-              WHEN pf.status = 'Paid'
-                AND LOWER(
-                  TRIM(pf.fee_type)
-                ) IN (
-                  'regular',
-                  'regular fee'
-                )
-              THEN COALESCE(
-                pf.amount,
-                0
-              )
-              ELSE 0
-            END
+            COALESCE(
+              pf.amount,
+              0
+            )
           ) AS regular_fee,
 
-          /* ======================================
-             ONE ON ONE FEE
-             ====================================== */
-
-          SUM(
-            CASE
-              WHEN pf.status = 'Paid'
-                AND LOWER(
-                  TRIM(pf.fee_type)
-                ) IN (
-                  'one on one',
-                  'one-on-one',
-                  'one on one fee'
-                )
-              THEN COALESCE(
-                pf.amount,
-                0
-              )
-              ELSE 0
-            END
-          ) AS one_on_one_fee,
-
-          /* ======================================
-             ONLY ONE ON ONE FEE
-             ====================================== */
-
-          SUM(
-            CASE
-              WHEN pf.status = 'Paid'
-                AND LOWER(
-                  TRIM(pf.fee_type)
-                ) IN (
-                  'only one on one',
-                  'only one-on-one',
-                  'only one on one fee'
-                )
-              THEN COALESCE(
-                pf.amount,
-                0
-              )
-              ELSE 0
-            END
-          ) AS only_one_on_one_fee,
-
-          /* ======================================
-             LAST PAID DATE
-             ====================================== */
-
           MAX(
-            CASE
-              WHEN pf.status = 'Paid'
-              THEN pf.payment_date
-            END
-          ) AS fee_paid_date,
-
-          /* ======================================
-             REGULAR PAYMENT DATE
-             ====================================== */
-
-          MAX(
-            CASE
-              WHEN pf.status = 'Paid'
-                AND LOWER(
-                  TRIM(pf.fee_type)
-                ) IN (
-                  'regular',
-                  'regular fee'
-                )
-              THEN pf.payment_date
-            END
+            pf.payment_date
           ) AS regular_payment_date
 
         FROM tbl_player_fees pf
 
         WHERE
-          pf.payment_date IS NOT NULL
+
+          pf.status = 'Paid'
+
+          AND pf.payment_date IS NOT NULL
+
+          AND pf.is_active = TRUE
 
         GROUP BY
+
           pf.player_id,
+
           DATE_TRUNC(
             'month',
             pf.payment_date
           )
       ),
 
-      /* ==========================================
-         ONE-TO-ONE SUMMARY
-         PLAYER + MONTH
-         ========================================== */
+      /* ==========================================================
+         ONE-TO-ONE FEE
+
+         Amount:
+         tbl_one_on_one_applications.fee_amount
+
+         Date:
+         tbl_one_on_one_applications.application_date
+         ========================================================== */
 
       one_on_one_summary AS (
 
         SELECT
+
           o.player_id,
 
           DATE_TRUNC(
@@ -583,28 +544,38 @@ exports.getPlayerMonthlyReport = async (req, res) => {
             o.application_date
           ) AS month_start,
 
+          SUM(
+            COALESCE(
+              o.fee_amount,
+              0
+            )
+          ) AS one_on_one_fee,
+
           MAX(
             o.application_date
-          ) AS one_to_one_date
+          ) AS one_on_one_payment_date
 
         FROM tbl_one_on_one_applications o
 
         WHERE
+
           o.is_active = TRUE
 
           AND o.application_date IS NOT NULL
 
         GROUP BY
+
           o.player_id,
+
           DATE_TRUNC(
             'month',
             o.application_date
           )
       )
 
-      /* ==========================================
+      /* ==========================================================
          MAIN REPORT
-         ========================================== */
+         ========================================================== */
 
       SELECT
 
@@ -614,17 +585,36 @@ exports.getPlayerMonthlyReport = async (req, res) => {
 
         p.full_name AS player_name,
 
-        p.fee_type AS fee_type,
+        p.fee_type,
 
-        /* ======================================
+        /* ========================================================
            ADMISSION DATE
-           ====================================== */
+           ======================================================== */
 
-        p.admission_date AS admission_date,
+        p.admission_date,
 
-        /* ======================================
+        /* ========================================================
            MONTH
-           ====================================== */
+
+           Each month gets its own record.
+
+           Example:
+
+           {
+             month: "July",
+             year: 2026
+           }
+
+           {
+             month: "August",
+             year: 2026
+           }
+
+           {
+             month: "September",
+             year: 2026
+           }
+           ======================================================== */
 
         TRIM(
           TO_CHAR(
@@ -637,27 +627,31 @@ exports.getPlayerMonthlyReport = async (req, res) => {
           YEAR FROM rm.month_start
         )::INT AS year,
 
-        /* ======================================
+        /* ========================================================
            PRESENT
-           ====================================== */
+           ======================================================== */
 
         COALESCE(
           att.days_present,
           0
         ) AS present,
 
-        /* ======================================
+        /* ========================================================
            ABSENT
-           ====================================== */
+           ======================================================== */
 
         GREATEST(
 
           (
             CASE
 
-              /* Current Month */
+              /*
+               * Current month:
+               * count only until today
+               */
 
-              WHEN rm.month_start =
+              WHEN
+                rm.month_start =
                 DATE_TRUNC(
                   'month',
                   CURRENT_DATE
@@ -673,7 +667,10 @@ exports.getPlayerMonthlyReport = async (req, res) => {
                 )
                 + 1
 
-              /* Previous Months */
+              /*
+               * Previous month:
+               * count until month end
+               */
 
               ELSE
 
@@ -702,114 +699,135 @@ exports.getPlayerMonthlyReport = async (req, res) => {
 
         ) AS absent,
 
-        /* ======================================
-           TOTAL FEE PAID
-           ====================================== */
-
-        CASE
-          WHEN COALESCE(
-            fee.fee_paid,
-            0
-          ) > 0
-          THEN fee.fee_paid
-          ELSE NULL
-        END AS fee_paid,
-
-        /* ======================================
+        /* ========================================================
            ADMISSION FEE
-           ====================================== */
+
+           ALWAYS from tbl_players.
+
+           It is NOT restricted to admission month.
+           ======================================================== */
 
         COALESCE(
-          fee.admission_fee,
+          p.admission_fee,
           0
         ) AS admission_fee,
 
-        /* ======================================
+        /* ========================================================
            REGULAR FEE
-           ====================================== */
+
+           ONLY THIS MONTH
+           ======================================================== */
 
         COALESCE(
-          fee.regular_fee,
+          regular.regular_fee,
           0
         ) AS regular_fee,
 
-        /* ======================================
-           ONE ON ONE FEE
-           ====================================== */
+        /* ========================================================
+           ONE-TO-ONE FEE
+
+           ONLY THIS MONTH
+           ======================================================== */
 
         COALESCE(
-          fee.one_on_one_fee,
+          one_on_one.one_on_one_fee,
           0
         ) AS one_on_one_fee,
 
-        /* ======================================
-           ONLY ONE ON ONE FEE
-           ====================================== */
+        /* ========================================================
+           TOTAL FEE PAID
 
-        COALESCE(
-          fee.only_one_on_one_fee,
-          0
-        ) AS only_one_on_one_fee,
+           regular_fee + one_on_one_fee
 
-        /* ======================================
-           LAST PAID DATE
-           ====================================== */
+           Admission fee is NOT included.
+           ======================================================== */
 
-        fee.fee_paid_date,
+        (
+          COALESCE(
+            regular.regular_fee,
+            0
+          )
+          +
+          COALESCE(
+            one_on_one.one_on_one_fee,
+            0
+          )
+        ) AS fee_paid,
 
-        /* ======================================
+        /* ========================================================
            REGULAR PAYMENT DATE
-           ====================================== */
 
-        fee.regular_payment_date,
+           Only this month's payment date.
+           ======================================================== */
 
-        /* ======================================
-           ONE TO ONE DATE
-           ====================================== */
+        regular.regular_payment_date::date
+          AS regular_payment_date,
 
-        one_on_one.one_to_one_date
+        /* ========================================================
+           ONE-TO-ONE PAYMENT DATE
+
+           Only this month's payment date.
+           ======================================================== */
+
+        one_on_one.one_on_one_payment_date::date
+          AS one_on_one_payment_date
 
       FROM tbl_players p
 
+      /*
+       * This is important.
+       *
+       * Every player is combined with every
+       * report month.
+       *
+       * Therefore:
+       *
+       * 30 players × 3 months
+       *
+       * gives monthly records for every player.
+       */
+
       CROSS JOIN report_months rm
 
-      /* ==========================================
-         ATTENDANCE
-         ========================================== */
+      /* ==========================================================
+         ATTENDANCE JOIN
+         ========================================================== */
 
       LEFT JOIN attendance_summary att
+
         ON att.employee_code =
            p.admission_id
 
         AND att.month_start =
             rm.month_start
 
-      /* ==========================================
-         FEES
-         ========================================== */
+      /* ==========================================================
+         REGULAR FEE JOIN
+         ========================================================== */
 
-      LEFT JOIN fee_summary fee
-        ON fee.player_id =
+      LEFT JOIN regular_fee_summary regular
+
+        ON regular.player_id =
            p.player_id
 
-        AND fee.month_start =
+        AND regular.month_start =
             rm.month_start
 
-      /* ==========================================
-         ONE-TO-ONE
-         ========================================== */
+      /* ==========================================================
+         ONE-TO-ONE JOIN
+         ========================================================== */
 
       LEFT JOIN one_on_one_summary one_on_one
+
         ON one_on_one.player_id =
            p.player_id
 
         AND one_on_one.month_start =
             rm.month_start
 
-      /* ==========================================
-         PLAYER MUST HAVE JOINED
-         BY END OF REPORT MONTH
-         ========================================== */
+      /* ==========================================================
+         PLAYER MUST HAVE JOINED BY MONTH END
+         ========================================================== */
 
       WHERE
 
@@ -821,9 +839,9 @@ exports.getPlayerMonthlyReport = async (req, res) => {
         )::date
     `;
 
-    // ==========================================
+    // ============================================================
     // QUERY VALUES
-    // ==========================================
+    // ============================================================
 
     const values = [
       fromDate,
@@ -832,100 +850,181 @@ exports.getPlayerMonthlyReport = async (req, res) => {
 
     let index = 3;
 
-    // ==========================================
-    // SEARCH FILTER
-    // ==========================================
+    // ============================================================
+    // SEARCH
+    // ============================================================
 
     if (search) {
       query += `
+
         AND (
           p.full_name ILIKE $${index}
-          OR p.admission_id ILIKE $${index}
+
+          OR
+
+          p.admission_id ILIKE $${index}
         )
+
       `;
 
       values.push(
-        `%${search}%`
+        `%${String(search).trim()}%`
       );
 
       index++;
     }
 
-    // ==========================================
+    // ============================================================
     // PLAYER FILTER
-    // ==========================================
+    // ============================================================
 
     if (player_id) {
+
       query += `
+
         AND p.player_id = $${index}
+
       `;
 
-      values.push(player_id);
+      values.push(
+        Number(player_id)
+      );
 
       index++;
     }
 
-    // ==========================================
+    // ============================================================
     // ORDER
-    // ==========================================
+    // ============================================================
 
     query += `
+
       ORDER BY
+
         rm.month_start DESC,
+
         p.full_name ASC
+
     `;
 
-    // ==========================================
-    // EXECUTE QUERY
-    // ==========================================
+    // ============================================================
+    // EXECUTE
+    // ============================================================
 
-    const result = await pool.query(
-      query,
-      values
+    console.log(
+      "Monthly Report From Date:",
+      fromDate
     );
 
-    // ==========================================
-    // CONVERT VALUES
-    // ==========================================
-
-    const rows = result.rows.map(
-      (row) => ({
-        ...row,
-
-        present: Number(
-          row.present || 0
-        ),
-
-        absent: Number(
-          row.absent || 0
-        ),
-
-        fee_paid:
-          row.fee_paid !== null
-            ? Number(row.fee_paid)
-            : null,
-
-        admission_fee: Number(
-          row.admission_fee || 0
-        ),
-
-        regular_fee: Number(
-          row.regular_fee || 0
-        ),
-
-        one_on_one_fee: Number(
-          row.one_on_one_fee || 0
-        ),
-
-        only_one_on_one_fee: Number(
-          row.only_one_on_one_fee || 0
-        ),
-      })
+    console.log(
+      "Monthly Report To Date:",
+      toDate
     );
 
-    // ==========================================
-    // FINAL RESPONSE
-    // ==========================================
+    const result =
+      await pool.query(
+        query,
+        values
+      );
+
+    // ============================================================
+    // FORMAT RESPONSE
+    // ============================================================
+
+    const rows =
+      result.rows.map(
+        (row) => ({
+
+          admission_id:
+            row.admission_id,
+
+          player_id:
+            Number(
+              row.player_id
+            ),
+
+          player_name:
+            row.player_name,
+
+          fee_type:
+            row.fee_type,
+
+          admission_date:
+            row.admission_date,
+
+          /*
+           * Example:
+           * July
+           * August
+           * September
+           */
+
+          month:
+            row.month,
+
+          year:
+            Number(
+              row.year
+            ),
+
+          present:
+            Number(
+              row.present || 0
+            ),
+
+          absent:
+            Number(
+              row.absent || 0
+            ),
+
+          /*
+           * Admission fee is always
+           * player's admission fee.
+           */
+
+          admission_fee:
+            Number(
+              row.admission_fee || 0
+            ),
+
+          /*
+           * Regular fee for THIS MONTH
+           */
+
+          regular_fee:
+            Number(
+              row.regular_fee || 0
+            ),
+
+          /*
+           * One-to-one fee for THIS MONTH
+           */
+
+          one_on_one_fee:
+            Number(
+              row.one_on_one_fee || 0
+            ),
+
+          /*
+           * Regular + One-to-one
+           */
+
+          fee_paid:
+            Number(
+              row.fee_paid || 0
+            ),
+
+          regular_payment_date:
+            row.regular_payment_date,
+
+          one_on_one_payment_date:
+            row.one_on_one_payment_date,
+        })
+      );
+
+    // ============================================================
+    // RESPONSE
+    // ============================================================
 
     return sendSuccessResponse(
       res,
@@ -939,6 +1038,7 @@ exports.getPlayerMonthlyReport = async (req, res) => {
     );
 
   } catch (error) {
+
     console.error(
       "Monthly Player Report Error:",
       error
@@ -952,6 +1052,18 @@ exports.getPlayerMonthlyReport = async (req, res) => {
     );
   }
 };
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
