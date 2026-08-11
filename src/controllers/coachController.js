@@ -345,11 +345,7 @@ exports.getAllCoaches = async (req, res) => {
 
           COALESCE(
             JSON_AGG(
-              JSON_BUILD_OBJECT(
-                'document_id', d.document_id,
-                'document_url', d.document_url,
-                'created_at', d.created_at
-              )
+              d.document_url
               ORDER BY d.document_id
             ) FILTER (
               WHERE d.document_id IS NOT NULL
@@ -393,29 +389,34 @@ exports.getAllCoaches = async (req, res) => {
       `),
     ]);
 
+    // =========================
+    // GENERATE SIGNED URLS
+    // =========================
     const coaches = await Promise.all(
       result.rows.map(async (coach) => {
         const document_urls = await Promise.all(
-          coach.documents.map(async (document) => {
-            if (!document.document_url) {
+          coach.documents.map(async (documentUrl) => {
+            if (!documentUrl) {
               return null;
             }
 
-            const signedUrl =
-              await getSignedVideoUrl(
-                document.document_url
+            try {
+              const signedUrl =
+                await getSignedVideoUrl(documentUrl);
+
+              return signedUrl;
+            } catch (error) {
+              console.error(
+                "Failed to generate signed URL:",
+                error.message
               );
 
-            return {
-              document_id: document.document_id,
-              document_url: document.document_url,
-              created_at: document.created_at,
-              file_url: signedUrl,
-            };
+              return null;
+            }
           })
         );
 
-        // Remove original documents key
+        // Remove original documents field
         delete coach.documents;
 
         return {
@@ -425,6 +426,9 @@ exports.getAllCoaches = async (req, res) => {
       })
     );
 
+    // =========================
+    // RESPONSE
+    // =========================
     return sendSuccessResponse(
       res,
       200,
@@ -451,7 +455,6 @@ exports.getAllCoaches = async (req, res) => {
         coaches,
       }
     );
-
   } catch (error) {
     console.error(
       "Get all coaches error:",
@@ -466,6 +469,8 @@ exports.getAllCoaches = async (req, res) => {
     );
   }
 };
+
+
 
 
 exports.getCoachById = async (req, res) => {
@@ -490,11 +495,11 @@ exports.getCoachById = async (req, res) => {
   try {
     const result = await pool.query(
       `
-      SELECT
-        c.*
-      FROM tbl_coach c
+SELECT
+c.*
+  FROM tbl_coach c
       WHERE c.coach_id = $1
-      `,
+  `,
       [id]
     );
 
@@ -544,11 +549,11 @@ exports.updateCoach = async (req, res) => {
     const existingCoach =
       await client.query(
         `
-        SELECT *
-        FROM tbl_coach
+SELECT *
+  FROM tbl_coach
         WHERE coach_id = $1
         AND is_active = TRUE
-        `,
+  `,
         [id]
       );
 
@@ -701,7 +706,7 @@ exports.updateCoach = async (req, res) => {
         }
 
         updates.push(
-          `${field} = $${index}`
+          `${field} = $${index} `
         );
 
         values.push(
@@ -727,8 +732,8 @@ exports.updateCoach = async (req, res) => {
         SET ${updates.join(", ")}
         WHERE coach_id = $${index}
         AND is_active = TRUE
-        RETURNING *;
-        `,
+RETURNING *;
+`,
         values
       );
 
@@ -778,12 +783,12 @@ exports.updateCoach = async (req, res) => {
           await client.query(
             `
             INSERT INTO tbl_documents
-            (
-              coach_id,
-              document_url
-            )
-            VALUES
-            ($1, $2)
+  (
+    coach_id,
+    document_url
+  )
+VALUES
+  ($1, $2)
             `,
             [
               coachId,
@@ -798,7 +803,7 @@ exports.updateCoach = async (req, res) => {
           );
 
           throw new Error(
-            `Failed to upload document: ${file.originalname}`
+            `Failed to upload document: ${file.originalname} `
           );
         }
       }
@@ -808,14 +813,14 @@ exports.updateCoach = async (req, res) => {
     const documents =
       await client.query(
         `
-        SELECT
-          document_id,
-          document_url,
-          created_at
+SELECT
+document_id,
+  document_url,
+  created_at
         FROM tbl_documents
         WHERE coach_id = $1
         ORDER BY document_id;
-        `,
+`,
         [coachId]
       );
 
@@ -826,7 +831,7 @@ exports.updateCoach = async (req, res) => {
         SELECT full_name
         FROM tbl_users
         WHERE user_id = $1
-        `,
+  `,
         [req.user.user_id]
       );
 
@@ -842,14 +847,14 @@ exports.updateCoach = async (req, res) => {
     await client.query(
       `
       INSERT INTO tbl_notification_logs
-      (
-        module_name,
-        action,
-        description,
-        performed_by
-      )
-      VALUES
-      ($1,$2,$3,$4)
+  (
+    module_name,
+    action,
+    description,
+    performed_by
+  )
+VALUES
+  ($1, $2, $3, $4)
       `,
       [
         "Coach",
@@ -913,7 +918,7 @@ exports.updateCoach = async (req, res) => {
           );
         } catch (deleteError) {
           console.error(
-            `Failed to delete S3 file ${s3Key}:`,
+            `Failed to delete S3 file ${s3Key}: `,
             deleteError
           );
         }
@@ -963,7 +968,7 @@ exports.deleteCoach = async (req, res) => {
       FROM tbl_one_on_one_applications
       WHERE coach_id = $1
       LIMIT 1
-      `,
+  `,
       [id]
     );
 
@@ -980,8 +985,8 @@ exports.deleteCoach = async (req, res) => {
       `
       DELETE FROM tbl_coach
       WHERE coach_id = $1
-      RETURNING *
-      `,
+RETURNING *
+  `,
       [id]
     );
 
@@ -1054,7 +1059,7 @@ exports.updateCoachStatus = async (req, res) => {
       SELECT coach_id, is_active
       FROM tbl_coach
       WHERE coach_id = $1;
-      `,
+`,
       [id]
     );
 
@@ -1078,11 +1083,11 @@ exports.updateCoachStatus = async (req, res) => {
     const result = await pool.query(
       `
       UPDATE tbl_coach
-      SET
-        is_active = $1
+SET
+is_active = $1
       WHERE coach_id = $2
-      RETURNING *;
-      `,
+RETURNING *;
+`,
       [is_active, id]
     );
 
@@ -1116,18 +1121,18 @@ exports.searchCoaches = async (req, res) => {
   }
 
   try {
-    const searchKeyword = `%${keyword.trim()}%`;
+    const searchKeyword = `% ${keyword.trim()}% `;
 
     const result = await pool.query(
       `
-      SELECT *
-      FROM tbl_coach
-      WHERE
+SELECT *
+  FROM tbl_coach
+WHERE
         full_name ILIKE $1
         OR phone_number ILIKE $1
         OR specialization ILIKE $1
       ORDER BY coach_id DESC
-      `,
+  `,
       [searchKeyword]
     );
 
