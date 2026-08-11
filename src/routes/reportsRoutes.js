@@ -1,7 +1,7 @@
 const express = require("express");
 const verifyToken = require("../middlewares/verifyToken");
 const validateRequestBody = require("../middlewares/validateRequestBody");
-const { getPlayerWiseReport,getPlayerMonthlyReport,getTrainerWiseReport,getTrainerMonthlyReport,getStaffWiseReport,getStaffMonthlyReport } = require("../controllers/reportsController");
+const { getPlayerWiseReport, getPlayerMonthlyReport, getTrainerWiseReport, getTrainerMonthlyReport, getStaffWiseReport, getStaffMonthlyReport, getEmployeeStatistics } = require("../controllers/reportsController");
 const { checkRole } = require("../middlewares/checkRole");
 
 const reportsRouter = express.Router();
@@ -20,6 +20,6 @@ reportsRouter.get("/staff-wise", checkRole("ADMIN"), getStaffWiseReport);
 
 reportsRouter.get("/staff-monthly", checkRole("ADMIN"), getStaffMonthlyReport);
 
-
+reportsRouter.get("/employee/statistics", checkRole("ADMIN"), getEmployeeStatistics);
 
 module.exports = reportsRouter;

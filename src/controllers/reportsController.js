@@ -17,6 +17,7 @@ exports.getPlayerWiseReport = async (req, res) => {
         p.gender,
         p.age,
         p.admission_date,
+        p.date_of_birth,
         p.phone_number AS contact_number,
         p.email,
         p.father_name,
@@ -834,72 +835,68 @@ exports.getTrainerMonthlyReport = async (req, res) => {
 
   try {
     let query = `
-      WITH report_months AS(
-
-  SELECT
+      WITH report_months AS (
+        SELECT
           generate_series(
-    DATE_TRUNC(
-      'month',
-      COALESCE($1:: date, CURRENT_DATE)
-    ),
-    DATE_TRUNC(
-      'month',
-      COALESCE($2:: date, CURRENT_DATE)
-    ),
-    INTERVAL '1 month'
-  ):: date AS month_start
+            DATE_TRUNC(
+              'month',
+              COALESCE($1::date, CURRENT_DATE)
+            ),
+            DATE_TRUNC(
+              'month',
+              COALESCE($2::date, CURRENT_DATE)
+            ),
+            INTERVAL '1 month'
+          )::date AS month_start
+      ),
 
-),
-
-  attendance_summary AS(
-
-    SELECT
+      attendance_summary AS (
+        SELECT
           employee_code,
 
-    DATE_TRUNC(
-      'month',
-      payroll_date
-    ):: date AS month_start,
+          DATE_TRUNC(
+            'month',
+            payroll_date
+          )::date AS month_start,
 
-    COUNT(
-      DISTINCT payroll_date
-    ) AS days_present
+          COUNT(
+            DISTINCT payroll_date
+          ) AS days_present
 
         FROM tbl_attendance
 
         GROUP BY
           employee_code,
-    DATE_TRUNC(
-      'month',
-      payroll_date
-    ):: date
+          DATE_TRUNC(
+            'month',
+            payroll_date
+          )::date
+      )
 
-  )
+      SELECT
 
-SELECT
+        /* Trainer ID */
+        c.coach_code AS trainer_id,
 
-/* Trainer ID */
-c.coach_code AS trainer_id,
+        /* Trainer Primary Key */
+        c.coach_id,
 
-  /* Trainer Primary Key */
-  c.coach_id,
+        /* Trainer Name */
+        c.full_name AS trainer_name,
 
-  /* Trainer Name */
-  c.full_name AS trainer_name,
+        /* Specialization */
+        c.specialization,
 
-    /* Specialization */
-    c.specialization,
+        /* Month */
+        TO_CHAR(
+          rm.month_start,
+          'FMMonth'
+        ) AS month,
 
-    /* Month */
-    TO_CHAR(
-      rm.month_start,
-      'FMMonth'
-    ) AS month,
-
-      /* Year */
-      EXTRACT(
-        YEAR FROM rm.month_start
-      )::INTEGER AS year,
+        /* Year */
+        EXTRACT(
+          YEAR FROM rm.month_start
+        )::INTEGER AS year,
 
         /* Present */
         COALESCE(
@@ -907,17 +904,16 @@ c.coach_code AS trainer_id,
           0
         ) AS present,
 
-          /* Absent */
-          GREATEST(
-
-            CASE
+        /* Absent */
+        GREATEST(
+          CASE
 
             /* Current Month */
             WHEN rm.month_start =
-          DATE_TRUNC(
-            'month',
-            CURRENT_DATE
-          ):: date
+              DATE_TRUNC(
+                'month',
+                CURRENT_DATE
+              )::date
 
             THEN
               (
@@ -926,35 +922,39 @@ c.coach_code AS trainer_id,
                 + 1
               )
 
-            /* Previous Month */
+            /* Previous Months */
             ELSE
               (
                 (
                   rm.month_start
                   + INTERVAL '1 month'
-              - INTERVAL '1 day'
-              ):: date
-              - rm.month_start
-          + 1
-          )
+                  - INTERVAL '1 day'
+                )::date
+                - rm.month_start
+                + 1
+              )
 
-END
-
-  -
-  COALESCE(
-    att.days_present,
-    0
-  ),
-
-  0
-
+          END
+          -
+          COALESCE(
+            att.days_present,
+            0
+          ),
+          0
         ) AS absent,
 
-  /* Salary Paid */
-  salary.net_salary AS salary_paid,
+        /* Salary Paid */
+        salary.net_salary AS salary_paid,
 
-    /* Salary Paid Date */
-    salary.payment_date AS salary_paid_date
+        /* Salary Paid Date */
+        salary.payment_date AS salary_paid_date,
+
+        /* Incentives */
+        salary.incentive_1,
+
+        salary.incentive_2,
+
+        salary.incentive_3
 
       FROM tbl_coach c
 
@@ -962,19 +962,17 @@ END
 
       /* Attendance */
       LEFT JOIN attendance_summary att
-
-        ON att.employee_code =
-  c.coach_code
-
-        AND att.month_start =
-  rm.month_start
+        ON att.employee_code = c.coach_code
+        AND att.month_start = rm.month_start
 
       /* Salary */
-      LEFT JOIN LATERAL(
-
-    SELECT
+      LEFT JOIN LATERAL (
+        SELECT
           es.net_salary,
-    es.payment_date
+          es.payment_date,
+          es.incentive_1,
+          es.incentive_2,
+          es.incentive_3
 
         FROM tbl_employee_salary es
 
@@ -982,24 +980,24 @@ END
           es.coach_id = c.coach_id
 
           AND es.salary_year =
-  EXTRACT(
-    YEAR FROM rm.month_start
-  ):: INTEGER
+            EXTRACT(
+              YEAR FROM rm.month_start
+            )::INTEGER
 
           AND es.salary_month =
-  EXTRACT(
-    MONTH FROM rm.month_start
-  ):: INTEGER
+            EXTRACT(
+              MONTH FROM rm.month_start
+            )::INTEGER
 
         ORDER BY
           es.payment_date DESC NULLS LAST
 
         LIMIT 1
 
-  ) salary ON TRUE
+      ) salary ON TRUE
 
       WHERE 1 = 1
-  `;
+    `;
 
     const values = [
       from_date || null,
@@ -1013,18 +1011,15 @@ END
     ========================= */
 
     if (search && search.trim() !== "") {
-
       query += `
-AND(
-  c.full_name ILIKE $${index}
+        AND (
+          c.full_name ILIKE $${index}
           OR c.coach_code ILIKE $${index}
           OR c.specialization ILIKE $${index}
-)
-  `;
+        )
+      `;
 
-      values.push(
-        `% ${search.trim()}% `
-      );
+      values.push(`%${search.trim()}%`);
 
       index++;
     }
@@ -1038,14 +1033,11 @@ AND(
       coach_id !== "undefined" &&
       coach_id !== "null"
     ) {
-
       query += `
         AND c.coach_id = $${index}
-`;
+      `;
 
-      values.push(
-        Number(coach_id)
-      );
+      values.push(Number(coach_id));
 
       index++;
     }
@@ -1056,9 +1048,9 @@ AND(
 
     query += `
       ORDER BY
-rm.month_start DESC,
-  c.full_name ASC;
-`;
+        rm.month_start DESC,
+        c.full_name ASC;
+    `;
 
     const result = await pool.query(
       query,
@@ -1073,7 +1065,6 @@ rm.month_start DESC,
     );
 
   } catch (error) {
-
     console.error(
       "Trainer Monthly Report Error:",
       error
@@ -1425,6 +1416,434 @@ rm.month_start DESC,
 
     console.error(
       "Staff Monthly Report Error:",
+      error
+    );
+
+    return sendErrorResponse(
+      res,
+      500,
+      error.message ||
+      "Internal Server Error"
+    );
+  }
+};
+
+exports.getEmployeeStatistics = async (req, res) => {
+  const {
+    employee_type,
+    from_date,
+    to_date,
+  } = req.query;
+
+  // ==========================================
+  // VALIDATE EMPLOYEE TYPE
+  // ==========================================
+
+  if (!employee_type) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Employee type is required."
+    );
+  }
+
+  const allowedTypes = [
+    "Player",
+    "Coach",
+    "Staff",
+  ];
+
+  if (!allowedTypes.includes(employee_type)) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Invalid employee type. Allowed values are Player, Coach, Staff."
+    );
+  }
+
+  // ==========================================
+  // STRICT DATE VALIDATION
+  // ==========================================
+
+  const isValidDate = (dateString) => {
+    if (!dateString) {
+      return true;
+    }
+
+    // Must be YYYY-MM-DD
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+      return false;
+    }
+
+    const [year, month, day] =
+      dateString.split("-").map(Number);
+
+    const date = new Date(
+      Date.UTC(year, month - 1, day)
+    );
+
+    return (
+      date.getUTCFullYear() === year &&
+      date.getUTCMonth() === month - 1 &&
+      date.getUTCDate() === day
+    );
+  };
+
+  if (from_date && !isValidDate(from_date)) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Invalid from_date. Use YYYY-MM-DD format."
+    );
+  }
+
+  if (to_date && !isValidDate(to_date)) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Invalid to_date. Use YYYY-MM-DD format."
+    );
+  }
+
+  // ==========================================
+  // DEFAULT DATE RANGE — CURRENT MONTH
+  // ==========================================
+
+  const today = new Date();
+
+  const currentDate = new Date(
+    today.toLocaleString("en-US", {
+      timeZone: "Asia/Kolkata",
+    })
+  );
+
+  const year = currentDate.getFullYear();
+  const month = currentDate.getMonth();
+
+  // First day of current month
+  const defaultFromDate =
+    `${year}-${String(month + 1).padStart(2, "0")}-01`;
+
+  // Get actual last day of current month
+  const lastDayDate = new Date(
+    year,
+    month + 1,
+    0
+  );
+
+  const defaultToDate =
+    `${lastDayDate.getFullYear()}-${String(
+      lastDayDate.getMonth() + 1
+    ).padStart(2, "0")}-${String(
+      lastDayDate.getDate()
+    ).padStart(2, "0")}`;
+
+  const fromDate = from_date || defaultFromDate;
+  const toDate = to_date || defaultToDate;
+
+  // ==========================================
+  // VALIDATE DATE RANGE
+  // ==========================================
+
+  if (
+    new Date(fromDate) > new Date(toDate)
+  ) {
+    return sendErrorResponse(
+      res,
+      400,
+      "from_date cannot be greater than to_date."
+    );
+  }
+
+  try {
+    // ==========================================
+    // PLAYER STATISTICS
+    // ==========================================
+
+    if (employee_type === "Player") {
+      const result = await pool.query(
+        `
+        SELECT
+
+          COUNT(*) AS total_players,
+
+          COUNT(*) FILTER (
+            WHERE p.is_active = TRUE
+          ) AS active_players,
+
+          COUNT(*) FILTER (
+            WHERE p.is_active = FALSE
+          ) AS inactive_players,
+
+          COUNT(
+            DISTINCT pending_players.player_id
+          ) AS pending_fees
+
+        FROM tbl_players p
+
+        LEFT JOIN LATERAL (
+
+          /* =================================
+             REGULAR FEE PLAYERS
+          ================================= */
+
+          SELECT
+            p1.player_id
+
+          FROM tbl_players p1
+
+          WHERE p1.player_id = p.player_id
+
+            AND p1.is_active = TRUE
+
+            AND p1.admission_date <= $2::date
+
+            AND $2::date >
+                DATE_TRUNC(
+                  'month',
+                  $2::date
+                ) + INTERVAL '3 day'
+
+            AND NOT EXISTS (
+
+              SELECT 1
+
+              FROM tbl_player_fees pf
+
+              WHERE pf.player_id =
+                    p1.player_id
+
+                AND pf.status = 'Paid'
+
+                AND pf.is_active = TRUE
+
+                AND pf.payment_date >=
+                    DATE_TRUNC(
+                      'month',
+                      $2::date
+                    )
+
+                AND pf.payment_date <
+                    DATE_TRUNC(
+                      'month',
+                      $2::date
+                    ) + INTERVAL '1 month'
+            )
+
+          UNION
+
+          /* =================================
+             ONE-ON-ONE PLAYERS
+          ================================= */
+
+          SELECT
+            o.player_id
+
+          FROM tbl_one_on_one_applications o
+
+          INNER JOIN tbl_players p2
+            ON p2.player_id = o.player_id
+            AND p2.is_active = TRUE
+
+          WHERE o.is_active = TRUE
+
+            AND o.renewal_status = 'Active'
+
+            AND p2.admission_date <= $2::date
+
+            AND NOT EXISTS (
+
+              SELECT 1
+
+              FROM tbl_player_fees pf
+
+              WHERE pf.player_id =
+                    o.player_id
+
+                AND pf.status = 'Paid'
+
+                AND pf.is_active = TRUE
+
+                AND pf.payment_date >=
+                    DATE_TRUNC(
+                      'month',
+                      $2::date
+                    )
+
+                AND pf.payment_date <
+                    DATE_TRUNC(
+                      'month',
+                      $2::date
+                    ) + INTERVAL '1 month'
+            )
+
+        ) AS pending_players
+          ON pending_players.player_id =
+             p.player_id
+
+        WHERE
+          p.admission_date >= $1::date
+          AND p.admission_date <= $2::date
+        `,
+        [fromDate, toDate]
+      );
+
+      return sendSuccessResponse(
+        res,
+        200,
+        "Player statistics retrieved successfully.",
+        {
+          employee_type: "Player",
+          from_date: fromDate,
+          to_date: toDate,
+          statistics: {
+            total_players: Number(
+              result.rows[0].total_players
+            ),
+            active_players: Number(
+              result.rows[0].active_players
+            ),
+            inactive_players: Number(
+              result.rows[0].inactive_players
+            ),
+            pending_fees: Number(
+              result.rows[0].pending_fees
+            ),
+          },
+        }
+      );
+    }
+
+    // ==========================================
+    // STAFF STATISTICS
+    // ==========================================
+
+    if (employee_type === "Staff") {
+      const result = await pool.query(
+        `
+        SELECT
+
+          COUNT(*) AS total_staff,
+
+          COUNT(*) FILTER (
+            WHERE is_active = TRUE
+          ) AS active_staff,
+
+          COUNT(*) FILTER (
+            WHERE is_active = FALSE
+          ) AS inactive_staff,
+
+          COUNT(
+            DISTINCT department
+          ) AS total_departments,
+
+          0 AS leave_staff
+
+        FROM tbl_staff
+
+        WHERE
+          join_date >= $1::date
+          AND join_date <= $2::date
+        `,
+        [fromDate, toDate]
+      );
+
+      return sendSuccessResponse(
+        res,
+        200,
+        "Staff statistics retrieved successfully.",
+        {
+          employee_type: "Staff",
+          from_date: fromDate,
+          to_date: toDate,
+          statistics: {
+            total_staff: Number(
+              result.rows[0].total_staff
+            ),
+            active_staff: Number(
+              result.rows[0].active_staff
+            ),
+            inactive_staff: Number(
+              result.rows[0].inactive_staff
+            ),
+            total_departments: Number(
+              result.rows[0].total_departments
+            ),
+            leave_staff: Number(
+              result.rows[0].leave_staff
+            ),
+          },
+        }
+      );
+    }
+
+    // ==========================================
+    // COACH STATISTICS
+    // ==========================================
+
+    if (employee_type === "Coach") {
+      const result = await pool.query(
+        `
+        SELECT
+
+          COUNT(*) AS total_trainers,
+
+          COUNT(*) FILTER (
+            WHERE is_active = TRUE
+          ) AS active_trainers,
+
+          COUNT(*) FILTER (
+            WHERE is_active = FALSE
+          ) AS inactive_trainers,
+
+          COALESCE(
+            ROUND(
+              AVG(
+                experience::NUMERIC
+              ),
+              1
+            ),
+            0
+          ) AS average_experience
+
+        FROM tbl_coach
+
+        WHERE
+          join_date >= $1::date
+          AND join_date <= $2::date
+        `,
+        [fromDate, toDate]
+      );
+
+      return sendSuccessResponse(
+        res,
+        200,
+        "Coach statistics retrieved successfully.",
+        {
+          employee_type: "Coach",
+          from_date: fromDate,
+          to_date: toDate,
+          statistics: {
+            total_trainers: Number(
+              result.rows[0].total_trainers
+            ),
+            active_trainers: Number(
+              result.rows[0].active_trainers
+            ),
+            inactive_trainers: Number(
+              result.rows[0].inactive_trainers
+            ),
+            average_experience: Number(
+              result.rows[0].average_experience
+            ),
+          },
+        }
+      );
+    }
+
+  } catch (error) {
+    console.error(
+      "Employee Statistics Error:",
       error
     );
 
