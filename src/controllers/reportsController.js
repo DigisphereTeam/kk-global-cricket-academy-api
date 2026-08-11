@@ -211,6 +211,25 @@ exports.getPlayerMonthlyReport = async (req, res) => {
 
   try {
     // ==========================================
+    // DATE CLEANING
+    // ==========================================
+
+    const cleanDate = (date) => {
+      if (!date) {
+        return null;
+      }
+
+      // Remove leading/trailing spaces
+      // and spaces inside the date
+      return String(date)
+        .trim()
+        .replace(/\s+/g, "");
+    };
+
+    const cleanedFromDate = cleanDate(from_date);
+    const cleanedToDate = cleanDate(to_date);
+
+    // ==========================================
     // DATE VALIDATION
     // ==========================================
 
@@ -228,7 +247,11 @@ exports.getPlayerMonthlyReport = async (req, res) => {
         dateString.split("-").map(Number);
 
       const date = new Date(
-        Date.UTC(year, month - 1, day)
+        Date.UTC(
+          year,
+          month - 1,
+          day
+        )
       );
 
       return (
@@ -243,8 +266,8 @@ exports.getPlayerMonthlyReport = async (req, res) => {
     // ==========================================
 
     if (
-      from_date &&
-      !isValidDate(from_date)
+      cleanedFromDate &&
+      !isValidDate(cleanedFromDate)
     ) {
       return sendErrorResponse(
         res,
@@ -258,8 +281,8 @@ exports.getPlayerMonthlyReport = async (req, res) => {
     // ==========================================
 
     if (
-      to_date &&
-      !isValidDate(to_date)
+      cleanedToDate &&
+      !isValidDate(cleanedToDate)
     ) {
       return sendErrorResponse(
         res,
@@ -280,19 +303,28 @@ exports.getPlayerMonthlyReport = async (req, res) => {
       })
     );
 
-    const year = currentDate.getFullYear();
-    const month = currentDate.getMonth();
+    const currentYear =
+      currentDate.getFullYear();
 
-    // First day of current month
+    const currentMonth =
+      currentDate.getMonth();
+
+    // ==========================================
+    // FIRST DAY OF CURRENT MONTH
+    // ==========================================
+
     const defaultFromDate =
-      `${year}-${String(
-        month + 1
+      `${currentYear}-${String(
+        currentMonth + 1
       ).padStart(2, "0")}-01`;
 
-    // Last day of current month
+    // ==========================================
+    // LAST DAY OF CURRENT MONTH
+    // ==========================================
+
     const lastDayDate = new Date(
-      year,
-      month + 1,
+      currentYear,
+      currentMonth + 1,
       0
     );
 
@@ -303,11 +335,17 @@ exports.getPlayerMonthlyReport = async (req, res) => {
         lastDayDate.getDate()
       ).padStart(2, "0")}`;
 
+    // ==========================================
+    // FINAL DATES
+    // ==========================================
+
     const fromDate =
-      from_date || defaultFromDate;
+      cleanedFromDate ||
+      defaultFromDate;
 
     const toDate =
-      to_date || defaultToDate;
+      cleanedToDate ||
+      defaultToDate;
 
     // ==========================================
     // VALIDATE DATE RANGE
@@ -498,7 +536,24 @@ exports.getPlayerMonthlyReport = async (req, res) => {
               WHEN pf.status = 'Paid'
               THEN pf.payment_date
             END
-          ) AS fee_paid_date
+          ) AS fee_paid_date,
+
+          /* ======================================
+             REGULAR PAYMENT DATE
+             ====================================== */
+
+          MAX(
+            CASE
+              WHEN pf.status = 'Paid'
+                AND LOWER(
+                  TRIM(pf.fee_type)
+                ) IN (
+                  'regular',
+                  'regular fee'
+                )
+              THEN pf.payment_date
+            END
+          ) AS regular_payment_date
 
         FROM tbl_player_fees pf
 
@@ -510,6 +565,40 @@ exports.getPlayerMonthlyReport = async (req, res) => {
           DATE_TRUNC(
             'month',
             pf.payment_date
+          )
+      ),
+
+      /* ==========================================
+         ONE-TO-ONE SUMMARY
+         PLAYER + MONTH
+         ========================================== */
+
+      one_on_one_summary AS (
+
+        SELECT
+          o.player_id,
+
+          DATE_TRUNC(
+            'month',
+            o.application_date
+          ) AS month_start,
+
+          MAX(
+            o.application_date
+          ) AS one_to_one_date
+
+        FROM tbl_one_on_one_applications o
+
+        WHERE
+          o.is_active = TRUE
+
+          AND o.application_date IS NOT NULL
+
+        GROUP BY
+          o.player_id,
+          DATE_TRUNC(
+            'month',
+            o.application_date
           )
       )
 
@@ -526,6 +615,16 @@ exports.getPlayerMonthlyReport = async (req, res) => {
         p.full_name AS player_name,
 
         p.fee_type AS fee_type,
+
+        /* ======================================
+           ADMISSION DATE
+           ====================================== */
+
+        p.admission_date AS admission_date,
+
+        /* ======================================
+           MONTH
+           ====================================== */
 
         TRIM(
           TO_CHAR(
@@ -656,7 +755,19 @@ exports.getPlayerMonthlyReport = async (req, res) => {
            LAST PAID DATE
            ====================================== */
 
-        fee.fee_paid_date
+        fee.fee_paid_date,
+
+        /* ======================================
+           REGULAR PAYMENT DATE
+           ====================================== */
+
+        fee.regular_payment_date,
+
+        /* ======================================
+           ONE TO ONE DATE
+           ====================================== */
+
+        one_on_one.one_to_one_date
 
       FROM tbl_players p
 
@@ -682,6 +793,17 @@ exports.getPlayerMonthlyReport = async (req, res) => {
            p.player_id
 
         AND fee.month_start =
+            rm.month_start
+
+      /* ==========================================
+         ONE-TO-ONE
+         ========================================== */
+
+      LEFT JOIN one_on_one_summary one_on_one
+        ON one_on_one.player_id =
+           p.player_id
+
+        AND one_on_one.month_start =
             rm.month_start
 
       /* ==========================================
@@ -738,9 +860,7 @@ exports.getPlayerMonthlyReport = async (req, res) => {
         AND p.player_id = $${index}
       `;
 
-      values.push(
-        player_id
-      );
+      values.push(player_id);
 
       index++;
     }
@@ -765,7 +885,7 @@ exports.getPlayerMonthlyReport = async (req, res) => {
     );
 
     // ==========================================
-    // CONVERT VALUES TO NUMBERS
+    // CONVERT VALUES
     // ==========================================
 
     const rows = result.rows.map(
@@ -832,6 +952,10 @@ exports.getPlayerMonthlyReport = async (req, res) => {
     );
   }
 };
+
+
+
+
 
 
 
@@ -909,14 +1033,14 @@ exports.getTrainerWiseReport = async (req, res) => {
 
     // First day of current month
     const defaultFromDate =
-      `${year}-${String(month + 1).padStart(2, "0")}-01`;
+      `${year} -${String(month + 1).padStart(2, "0")}-01`;
 
     // Last day of current month
     const lastDay =
       new Date(year, month + 1, 0).getDate();
 
     const defaultToDate =
-      `${year}-${String(month + 1).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+      `${year} -${String(month + 1).padStart(2, "0")} -${String(lastDay).padStart(2, "0")} `;
 
     const fromDate = from_date || defaultFromDate;
     const toDate = to_date || defaultToDate;
@@ -934,33 +1058,33 @@ exports.getTrainerWiseReport = async (req, res) => {
 
 
     let query = `
-      SELECT
-        c.coach_id,
-        c.coach_code AS trainer_id,
-        c.full_name AS trainer_name,
-        c.specialization,
-        c.phone_number AS contact_number,
+SELECT
+c.coach_id,
+  c.coach_code AS trainer_id,
+    c.full_name AS trainer_name,
+      c.specialization,
+      c.phone_number AS contact_number,
         c.experience,
         c.join_date
 
       FROM tbl_coach c
 
       WHERE 1 = 1
-    `;
+  `;
 
     const values = [];
     let index = 1;
 
     if (search) {
       query += `
-        AND (
-          c.full_name ILIKE $${index}
+AND(
+  c.full_name ILIKE $${index}
           OR c.coach_code ILIKE $${index}
           OR c.specialization ILIKE $${index}
-        )
-      `;
+)
+  `;
 
-      values.push(`%${search}%`);
+      values.push(`% ${search}% `);
       index++;
     }
 
@@ -968,30 +1092,30 @@ exports.getTrainerWiseReport = async (req, res) => {
     if (coach_id) {
       query += `
         AND c.coach_id = $${index}
-      `;
+`;
 
       values.push(coach_id);
       index++;
     }
 
     query += `
-      AND c.join_date >= $${index}::date
-    `;
+      AND c.join_date >= $${index}:: date
+  `;
 
     values.push(fromDate);
     index++;
 
     query += `
-      AND c.join_date <= $${index}::date
-    `;
+      AND c.join_date <= $${index}:: date
+  `;
 
     values.push(toDate);
     index++;
 
     query += `
       ORDER BY
-        c.join_date DESC,
-        c.full_name ASC
+c.join_date DESC,
+  c.full_name ASC
     `;
 
 
@@ -1036,68 +1160,68 @@ exports.getTrainerMonthlyReport = async (req, res) => {
 
   try {
     let query = `
-      WITH report_months AS (
-        SELECT
+      WITH report_months AS(
+      SELECT
           generate_series(
-            DATE_TRUNC(
-              'month',
-              COALESCE($1::date, CURRENT_DATE)
-            ),
-            DATE_TRUNC(
-              'month',
-              COALESCE($2::date, CURRENT_DATE)
-            ),
-            INTERVAL '1 month'
-          )::date AS month_start
-      ),
+        DATE_TRUNC(
+          'month',
+          COALESCE($1:: date, CURRENT_DATE)
+        ),
+        DATE_TRUNC(
+          'month',
+          COALESCE($2:: date, CURRENT_DATE)
+        ),
+        INTERVAL '1 month'
+      ):: date AS month_start
+    ),
 
-      attendance_summary AS (
-        SELECT
+  attendance_summary AS(
+    SELECT
           employee_code,
 
-          DATE_TRUNC(
-            'month',
-            payroll_date
-          )::date AS month_start,
+    DATE_TRUNC(
+      'month',
+      payroll_date
+    ):: date AS month_start,
 
-          COUNT(
-            DISTINCT payroll_date
-          ) AS days_present
+    COUNT(
+      DISTINCT payroll_date
+    ) AS days_present
 
         FROM tbl_attendance
 
         GROUP BY
           employee_code,
-          DATE_TRUNC(
-            'month',
-            payroll_date
-          )::date
-      )
+    DATE_TRUNC(
+      'month',
+      payroll_date
+    ):: date
+  )
 
-      SELECT
+SELECT
 
-        /* Trainer ID */
-        c.coach_code AS trainer_id,
+/* Trainer ID */
+c.coach_code AS trainer_id,
 
-        /* Trainer Primary Key */
-        c.coach_id,
+  /* Trainer Primary Key */
+  c.coach_id,
 
-        /* Trainer Name */
-        c.full_name AS trainer_name,
+  /* Trainer Name */
+  c.full_name AS trainer_name,
 
-        /* Specialization */
-        c.specialization,
+    /* Specialization */
+    c.specialization,
 
-        /* Month */
-        TO_CHAR(
-          rm.month_start,
-          'FMMonth'
-        ) AS month,
+    /* Month */
+    TO_CHAR(
+      rm.month_start,
+      'FMMonth'
+    ) AS month,
 
-        /* Year */
-        EXTRACT(
-          YEAR FROM rm.month_start
-        )::INTEGER AS year,
+      /* Year */
+      EXTRACT(
+        YEAR FROM rm.month_start
+      )::INTEGER AS year,
 
         /* Present */
         COALESCE(
@@ -1105,16 +1229,16 @@ exports.getTrainerMonthlyReport = async (req, res) => {
           0
         ) AS present,
 
-        /* Absent */
-        GREATEST(
-          CASE
+          /* Absent */
+          GREATEST(
+            CASE
 
             /* Current Month */
             WHEN rm.month_start =
-              DATE_TRUNC(
-                'month',
-                CURRENT_DATE
-              )::date
+          DATE_TRUNC(
+            'month',
+            CURRENT_DATE
+          ):: date
 
             THEN
               (
@@ -1129,33 +1253,33 @@ exports.getTrainerMonthlyReport = async (req, res) => {
                 (
                   rm.month_start
                   + INTERVAL '1 month'
-                  - INTERVAL '1 day'
-                )::date
-                - rm.month_start
-                + 1
-              )
+              - INTERVAL '1 day'
+              ):: date
+              - rm.month_start
+          + 1
+          )
 
-          END
-          -
-          COALESCE(
-            att.days_present,
-            0
-          ),
-          0
+END
+  -
+  COALESCE(
+    att.days_present,
+    0
+  ),
+  0
         ) AS absent,
 
-        /* Salary Paid */
-        salary.net_salary AS salary_paid,
+  /* Salary Paid */
+  salary.net_salary AS salary_paid,
 
-        /* Salary Paid Date */
-        salary.payment_date AS salary_paid_date,
+    /* Salary Paid Date */
+    salary.payment_date AS salary_paid_date,
 
-        /* Incentives */
-        salary.incentive_1,
+      /* Incentives */
+      salary.incentive_1,
 
-        salary.incentive_2,
+      salary.incentive_2,
 
-        salary.incentive_3
+      salary.incentive_3
 
       FROM tbl_coach c
 
@@ -1167,13 +1291,13 @@ exports.getTrainerMonthlyReport = async (req, res) => {
         AND att.month_start = rm.month_start
 
       /* Salary */
-      LEFT JOIN LATERAL (
+      LEFT JOIN LATERAL(
         SELECT
           es.net_salary,
-          es.payment_date,
-          es.incentive_1,
-          es.incentive_2,
-          es.incentive_3
+        es.payment_date,
+        es.incentive_1,
+        es.incentive_2,
+        es.incentive_3
 
         FROM tbl_employee_salary es
 
@@ -1181,14 +1305,14 @@ exports.getTrainerMonthlyReport = async (req, res) => {
           es.coach_id = c.coach_id
 
           AND es.salary_year =
-            EXTRACT(
-              YEAR FROM rm.month_start
-            )::INTEGER
+      EXTRACT(
+        YEAR FROM rm.month_start
+      ):: INTEGER
 
           AND es.salary_month =
-            EXTRACT(
-              MONTH FROM rm.month_start
-            )::INTEGER
+      EXTRACT(
+        MONTH FROM rm.month_start
+      ):: INTEGER
 
         ORDER BY
           es.payment_date DESC NULLS LAST
@@ -1198,7 +1322,7 @@ exports.getTrainerMonthlyReport = async (req, res) => {
       ) salary ON TRUE
 
       WHERE 1 = 1
-    `;
+  `;
 
     const values = [
       from_date || null,
@@ -1213,14 +1337,14 @@ exports.getTrainerMonthlyReport = async (req, res) => {
 
     if (search && search.trim() !== "") {
       query += `
-        AND (
-          c.full_name ILIKE $${index}
+AND(
+  c.full_name ILIKE $${index}
           OR c.coach_code ILIKE $${index}
           OR c.specialization ILIKE $${index}
-        )
-      `;
+)
+  `;
 
-      values.push(`%${search.trim()}%`);
+      values.push(`% ${search.trim()}% `);
 
       index++;
     }
@@ -1236,7 +1360,7 @@ exports.getTrainerMonthlyReport = async (req, res) => {
     ) {
       query += `
         AND c.coach_id = $${index}
-      `;
+`;
 
       values.push(Number(coach_id));
 
@@ -1249,9 +1373,9 @@ exports.getTrainerMonthlyReport = async (req, res) => {
 
     query += `
       ORDER BY
-        rm.month_start DESC,
-        c.full_name ASC;
-    `;
+rm.month_start DESC,
+  c.full_name ASC;
+`;
 
     const result = await pool.query(
       query,
@@ -1358,14 +1482,14 @@ exports.getStaffWiseReport = async (req, res) => {
 
     // First day of current month
     const defaultFromDate =
-      `${year}-${String(month + 1).padStart(2, "0")}-01`;
+      `${year} -${String(month + 1).padStart(2, "0")}-01`;
 
     // Last day of current month
     const lastDay =
       new Date(year, month + 1, 0).getDate();
 
     const defaultToDate =
-      `${year}-${String(month + 1).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+      `${year} -${String(month + 1).padStart(2, "0")} -${String(lastDay).padStart(2, "0")} `;
 
     const fromDate = from_date || defaultFromDate;
     const toDate = to_date || defaultToDate;
@@ -1389,17 +1513,17 @@ exports.getStaffWiseReport = async (req, res) => {
     // ==========================================
 
     let query = `
-      SELECT
-        s.staff_code,
-        s.full_name AS staff_name,
-        s.designation,
-        s.join_date AS joining_date,
-        s.phone_number AS contact_number
+SELECT
+s.staff_code,
+  s.full_name AS staff_name,
+    s.designation,
+    s.join_date AS joining_date,
+      s.phone_number AS contact_number
 
       FROM tbl_staff s
 
       WHERE 1 = 1
-    `;
+  `;
 
     const values = [];
     let index = 1;
@@ -1410,14 +1534,14 @@ exports.getStaffWiseReport = async (req, res) => {
 
     if (search) {
       query += `
-        AND (
-          s.full_name ILIKE $${index}
+AND(
+  s.full_name ILIKE $${index}
           OR s.staff_code ILIKE $${index}
           OR s.role ILIKE $${index}
-        )
-      `;
+)
+  `;
 
-      values.push(`%${search}%`);
+      values.push(`% ${search}% `);
       index++;
     }
 
@@ -1428,7 +1552,7 @@ exports.getStaffWiseReport = async (req, res) => {
     if (staff_id) {
       query += `
         AND s.staff_id = $${index}
-      `;
+`;
 
       values.push(staff_id);
       index++;
@@ -1439,15 +1563,15 @@ exports.getStaffWiseReport = async (req, res) => {
     // ==========================================
 
     query += `
-      AND s.join_date >= $${index}::date
-    `;
+      AND s.join_date >= $${index}:: date
+  `;
 
     values.push(fromDate);
     index++;
 
     query += `
-      AND s.join_date <= $${index}::date
-    `;
+      AND s.join_date <= $${index}:: date
+  `;
 
     values.push(toDate);
     index++;
@@ -1458,8 +1582,8 @@ exports.getStaffWiseReport = async (req, res) => {
 
     query += `
       ORDER BY
-        s.join_date DESC,
-        s.full_name ASC
+s.join_date DESC,
+  s.full_name ASC
     `;
 
     // ==========================================
@@ -1509,20 +1633,20 @@ exports.getStaffMonthlyReport = async (req, res) => {
     let query = `
       WITH report_months AS(
 
-  SELECT
+      SELECT
           generate_series(
-    DATE_TRUNC(
-      'month',
-      COALESCE($1:: date, CURRENT_DATE)
-    ),
-    DATE_TRUNC(
-      'month',
-      COALESCE($2:: date, CURRENT_DATE)
-    ),
-    INTERVAL '1 month'
-  ):: date AS month_start
+        DATE_TRUNC(
+          'month',
+          COALESCE($1:: date, CURRENT_DATE)
+        ),
+        DATE_TRUNC(
+          'month',
+          COALESCE($2:: date, CURRENT_DATE)
+        ),
+        INTERVAL '1 month'
+      ):: date AS month_start
 
-),
+    ),
 
   attendance_summary AS(
 
@@ -1857,7 +1981,7 @@ exports.getEmployeeStatistics = async (req, res) => {
 
   // First day of current month
   const defaultFromDate =
-    `${year}-${String(month + 1).padStart(2, "0")}-01`;
+    `${year} -${String(month + 1).padStart(2, "0")}-01`;
 
   // Last day of current month
   const lastDayDate = new Date(
@@ -1867,11 +1991,13 @@ exports.getEmployeeStatistics = async (req, res) => {
   );
 
   const defaultToDate =
-    `${lastDayDate.getFullYear()}-${String(
+    `${lastDayDate.getFullYear()} -${String(
       lastDayDate.getMonth() + 1
-    ).padStart(2, "0")}-${String(
+    ).padStart(2, "0")
+    } -${String(
       lastDayDate.getDate()
-    ).padStart(2, "0")}`;
+    ).padStart(2, "0")
+    } `;
 
   const fromDate = from_date || defaultFromDate;
   const toDate = to_date || defaultToDate;
@@ -1898,46 +2024,46 @@ exports.getEmployeeStatistics = async (req, res) => {
     if (employee_type === "Player") {
       const result = await pool.query(
         `
-        SELECT
+SELECT
 
-          /* =================================
-             PLAYER COUNTS
-          ================================= */
+/* =================================
+   PLAYER COUNTS
+================================= */
 
-          COUNT(*) AS total_players,
+COUNT(*) AS total_players,
 
-          COUNT(*) FILTER (
-            WHERE p.is_active = TRUE
-          ) AS active_players,
+  COUNT(*) FILTER(
+    WHERE p.is_active = TRUE
+  ) AS active_players,
 
-          COUNT(*) FILTER (
-            WHERE p.is_active = FALSE
-          ) AS inactive_players,
-
-
-          /* =================================
-             PENDING FEES
-          ================================= */
-
-          COUNT(
-            DISTINCT pending_players.player_id
-          ) AS pending_fees,
+    COUNT(*) FILTER(
+      WHERE p.is_active = FALSE
+    ) AS inactive_players,
 
 
-          /* =================================
-             ADMISSION FEE
-          ================================= */
+      /* =================================
+         PENDING FEES
+      ================================= */
 
-          COALESCE(
-            SUM(
-              CASE
+      COUNT(
+        DISTINCT pending_players.player_id
+      ) AS pending_fees,
+
+
+        /* =================================
+           ADMISSION FEE
+        ================================= */
+
+        COALESCE(
+          SUM(
+            CASE
                 WHEN pf.fee_type = 'Admission'
                 THEN pf.amount
                 ELSE 0
               END
-            ),
-            0
-          ) AS admission_fee,
+          ),
+          0
+        ) AS admission_fee,
 
 
           /* =================================
@@ -1956,36 +2082,36 @@ exports.getEmployeeStatistics = async (req, res) => {
           ) AS regular_fee,
 
 
-          /* =================================
-             ONE-ON-ONE FEE
-          ================================= */
+            /* =================================
+               ONE-ON-ONE FEE
+            ================================= */
 
-          COALESCE(
-            SUM(
-              CASE
+            COALESCE(
+              SUM(
+                CASE
                 WHEN pf.fee_type = 'One-on-One'
                 THEN pf.amount
                 ELSE 0
               END
-            ),
-            0
-          ) AS one_on_one_fee,
+              ),
+              0
+            ) AS one_on_one_fee,
 
 
-          /* =================================
-             ONLY ONE-ON-ONE FEE
-          ================================= */
+              /* =================================
+                 ONLY ONE-ON-ONE FEE
+              ================================= */
 
-          COALESCE(
-            SUM(
-              CASE
+              COALESCE(
+                SUM(
+                  CASE
                 WHEN pf.fee_type = 'Only One-on-One'
                 THEN pf.amount
                 ELSE 0
               END
-            ),
-            0
-          ) AS only_one_on_one_fee
+                ),
+                0
+              ) AS only_one_on_one_fee
 
 
         FROM tbl_players p
@@ -1999,21 +2125,21 @@ exports.getEmployeeStatistics = async (req, res) => {
           ON pf.player_id = p.player_id
           AND pf.status = 'Paid'
           AND pf.is_active = TRUE
-          AND pf.payment_date >= $1::date
-          AND pf.payment_date < ($2::date + INTERVAL '1 day')
+          AND pf.payment_date >= $1:: date
+          AND pf.payment_date < ($2:: date + INTERVAL '1 day')
 
 
         /* =================================
            PENDING FEES
         ================================= */
 
-        LEFT JOIN LATERAL (
+        LEFT JOIN LATERAL(
 
-          /* =================================
-             REGULAR FEE PLAYERS
-          ================================= */
+                /* =================================
+                   REGULAR FEE PLAYERS
+                ================================= */
 
-          SELECT
+                SELECT
             p1.player_id
 
           FROM tbl_players p1
@@ -2022,39 +2148,39 @@ exports.getEmployeeStatistics = async (req, res) => {
 
             AND p1.is_active = TRUE
 
-            AND p1.admission_date <= $2::date
+            AND p1.admission_date <= $2:: date
 
-            AND $2::date >
-                DATE_TRUNC(
-                  'month',
-                  $2::date
-                ) + INTERVAL '3 day'
+            AND $2:: date >
+              DATE_TRUNC(
+                'month',
+                $2:: date
+              ) + INTERVAL '3 day'
 
-            AND NOT EXISTS (
+            AND NOT EXISTS(
 
-              SELECT 1
+                SELECT 1
 
               FROM tbl_player_fees pf1
 
               WHERE pf1.player_id =
-                    p1.player_id
+              p1.player_id
 
                 AND pf1.status = 'Paid'
 
                 AND pf1.is_active = TRUE
 
                 AND pf1.payment_date >=
-                    DATE_TRUNC(
-                      'month',
-                      $2::date
-                    )
+              DATE_TRUNC(
+                'month',
+                $2:: date
+              )
 
                 AND pf1.payment_date <
-                    DATE_TRUNC(
-                      'month',
-                      $2::date
-                    ) + INTERVAL '1 month'
-            )
+              DATE_TRUNC(
+                'month',
+                $2:: date
+              ) + INTERVAL '1 month'
+              )
 
           UNION
 
@@ -2075,47 +2201,47 @@ exports.getEmployeeStatistics = async (req, res) => {
 
             AND o.renewal_status = 'Active'
 
-            AND p2.admission_date <= $2::date
+            AND p2.admission_date <= $2:: date
 
-            AND NOT EXISTS (
+            AND NOT EXISTS(
 
-              SELECT 1
+                SELECT 1
 
               FROM tbl_player_fees pf2
 
               WHERE pf2.player_id =
-                    o.player_id
+              o.player_id
 
                 AND pf2.status = 'Paid'
 
                 AND pf2.is_active = TRUE
 
                 AND pf2.payment_date >=
-                    DATE_TRUNC(
-                      'month',
-                      $2::date
-                    )
+              DATE_TRUNC(
+                'month',
+                $2:: date
+              )
 
                 AND pf2.payment_date <
-                    DATE_TRUNC(
-                      'month',
-                      $2::date
-                    ) + INTERVAL '1 month'
-            )
+              DATE_TRUNC(
+                'month',
+                $2:: date
+              ) + INTERVAL '1 month'
+              )
 
-        ) AS pending_players
+              ) AS pending_players
           ON pending_players.player_id =
-             p.player_id
+  p.player_id
 
 
-        /* =================================
-           PLAYER DATE RANGE
-        ================================= */
+/* =================================
+   PLAYER DATE RANGE
+================================= */
 
-        WHERE
-          p.admission_date >= $1::date
-          AND p.admission_date <= $2::date
-        `,
+WHERE
+p.admission_date >= $1:: date
+          AND p.admission_date <= $2:: date
+  `,
         [fromDate, toDate]
       );
 
@@ -2174,30 +2300,30 @@ exports.getEmployeeStatistics = async (req, res) => {
     if (employee_type === "Staff") {
       const result = await pool.query(
         `
-        SELECT
+SELECT
 
-          COUNT(*) AS total_staff,
+COUNT(*) AS total_staff,
 
-          COUNT(*) FILTER (
-            WHERE is_active = TRUE
-          ) AS active_staff,
+  COUNT(*) FILTER(
+    WHERE is_active = TRUE
+  ) AS active_staff,
 
-          COUNT(*) FILTER (
-            WHERE is_active = FALSE
-          ) AS inactive_staff,
+    COUNT(*) FILTER(
+      WHERE is_active = FALSE
+    ) AS inactive_staff,
 
-          COUNT(
-            DISTINCT department
-          ) AS total_departments,
+      COUNT(
+        DISTINCT department
+      ) AS total_departments,
 
-          0 AS leave_staff
+        0 AS leave_staff
 
         FROM tbl_staff
 
-        WHERE
-          join_date >= $1::date
-          AND join_date <= $2::date
-        `,
+WHERE
+join_date >= $1:: date
+          AND join_date <= $2:: date
+  `,
         [fromDate, toDate]
       );
 
@@ -2244,34 +2370,34 @@ exports.getEmployeeStatistics = async (req, res) => {
     if (employee_type === "Coach") {
       const result = await pool.query(
         `
-        SELECT
+SELECT
 
-          COUNT(*) AS total_trainers,
+COUNT(*) AS total_trainers,
 
-          COUNT(*) FILTER (
-            WHERE is_active = TRUE
-          ) AS active_trainers,
+  COUNT(*) FILTER(
+    WHERE is_active = TRUE
+  ) AS active_trainers,
 
-          COUNT(*) FILTER (
-            WHERE is_active = FALSE
-          ) AS inactive_trainers,
+    COUNT(*) FILTER(
+      WHERE is_active = FALSE
+    ) AS inactive_trainers,
 
-          COALESCE(
-            ROUND(
-              AVG(
-                experience::NUMERIC
-              ),
-              1
-            ),
-            0
-          ) AS average_experience
+      COALESCE(
+        ROUND(
+          AVG(
+            experience:: NUMERIC
+          ),
+          1
+        ),
+        0
+      ) AS average_experience
 
         FROM tbl_coach
 
-        WHERE
-          join_date >= $1::date
-          AND join_date <= $2::date
-        `,
+WHERE
+join_date >= $1:: date
+          AND join_date <= $2:: date
+  `,
         [fromDate, toDate]
       );
 
