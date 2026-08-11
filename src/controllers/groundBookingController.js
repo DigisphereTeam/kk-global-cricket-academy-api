@@ -277,26 +277,40 @@ exports.createGroundBooking = async (req, res) => {
 exports.getAllGroundBookings = async (req, res) => {
     try {
         const [bookings, statistics] = await Promise.all([
-            pool.query(
-                `
-                SELECT *
-                FROM tbl_ground_booking
-                ORDER BY booking_id DESC
-                `
-            ),
+            // Get all ground bookings
+            pool.query(`
+        SELECT *
+        FROM tbl_ground_booking
+        ORDER BY booking_id DESC
+      `),
 
-            pool.query(
-                `
-            SELECT
-                COUNT(*) AS total_bookings,
-                COUNT(*) FILTER ( WHERE LOWER(status) = 'confirmed') AS confirmed_bookings,
-                COUNT(*) FILTER ( WHERE LOWER(status) = 'pending' ) AS pending_bookings,
-                COUNT(*) FILTER ( WHERE LOWER(status) = 'completed' ) AS completed_bookings,
-                COUNT(*) FILTER ( WHERE booking_date >= CURRENT_DATE AND WHERE LOWER(status) = 'confirmed') AS upcoming_bookings
-            FROM tbl_ground_booking
-            `
-            ),
+            // Get booking statistics
+            pool.query(`
+        SELECT
+          COUNT(*) AS total_bookings,
+
+          COUNT(*) FILTER (
+            WHERE LOWER(status) = 'confirmed'
+          ) AS confirmed_bookings,
+
+          COUNT(*) FILTER (
+            WHERE LOWER(status) = 'pending'
+          ) AS pending_bookings,
+
+          COUNT(*) FILTER (
+            WHERE LOWER(status) = 'completed'
+          ) AS completed_bookings,
+
+          COUNT(*) FILTER (
+            WHERE booking_date >= CURRENT_DATE
+            AND LOWER(status) = 'confirmed'
+          ) AS upcoming_bookings
+
+        FROM tbl_ground_booking
+      `),
         ]);
+
+        const stats = statistics.rows[0];
 
         return sendSuccessResponse(
             res,
@@ -304,17 +318,19 @@ exports.getAllGroundBookings = async (req, res) => {
             "Ground bookings fetched successfully.",
             {
                 statistics: {
-                    total_bookings: Number(statistics.rows[0].total_bookings),
-                    confirmed_bookings: Number(statistics.rows[0].confirmed_bookings),
-                    pending_bookings: Number(statistics.rows[0].pending_bookings),
-                    completed_bookings: Number(statistics.rows[0].completed_bookings),
-                    upcoming_bookings: Number(statistics.rows[0].upcoming_bookings),
+                    total_bookings: Number(stats.total_bookings),
+                    confirmed_bookings: Number(stats.confirmed_bookings),
+                    pending_bookings: Number(stats.pending_bookings),
+                    completed_bookings: Number(stats.completed_bookings),
+                    upcoming_bookings: Number(stats.upcoming_bookings),
                 },
+
                 bookings: bookings.rows,
             }
         );
-
     } catch (error) {
+        console.error("Get All Ground Bookings Error:", error);
+
         return sendErrorResponse(
             res,
             500,
