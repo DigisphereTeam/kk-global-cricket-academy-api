@@ -269,7 +269,7 @@ exports.renewOneOnOne = async (req, res) => {
     if (
       latestApplication.rowCount === 0 ||
       latestApplication.rows[0].application_id !==
-        Number(application_id)
+      Number(application_id)
     ) {
       return sendErrorResponse(
         res,
@@ -406,7 +406,7 @@ exports.renewOneOnOne = async (req, res) => {
       res,
       500,
       error.message ||
-        "Internal Server Error"
+      "Internal Server Error"
     );
   }
 };
@@ -562,7 +562,7 @@ exports.getAllApplications = async (req, res) => {
         totalApplications.rows[0].total_applications,
 
       active_sessions: data.filter(
-        (item) => item.payment_status === "Paid"
+        (item) => item.is_active === true
       ).length,
 
       pending_renewal: data.filter(
