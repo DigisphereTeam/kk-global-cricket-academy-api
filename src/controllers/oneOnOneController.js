@@ -171,7 +171,10 @@ exports.renewOneOnOne = async (req, res) => {
     );
   }
 
-  if (isNaN(application_id) || Number(application_id) <= 0) {
+  if (
+    isNaN(application_id) ||
+    Number(application_id) <= 0
+  ) {
     return sendErrorResponse(
       res,
       400,
@@ -210,7 +213,6 @@ exports.renewOneOnOne = async (req, res) => {
       );
     }
 
-    // Get selected application
     const applicationResult = await pool.query(
       `
       SELECT
@@ -220,6 +222,7 @@ exports.renewOneOnOne = async (req, res) => {
         oa.application_date,
         oa.application_type,
         p.full_name AS player_name,
+        p.is_active AS player_is_active,
         c.full_name AS coach_name
       FROM tbl_one_on_one_applications oa
       INNER JOIN tbl_players p
@@ -241,22 +244,32 @@ exports.renewOneOnOne = async (req, res) => {
 
     const application = applicationResult.rows[0];
 
-    // Allow renewal only for latest application
+    if (application.player_is_active !== true) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Inactive player cannot be renewed."
+      );
+    }
+
     const latestApplication = await pool.query(
       `
       SELECT
         application_id
       FROM tbl_one_on_one_applications
       WHERE player_id = $1
-      ORDER BY application_date DESC, application_id DESC
+      ORDER BY
+        application_date DESC,
+        application_id DESC
       LIMIT 1
       `,
       [application.player_id]
     );
 
     if (
+      latestApplication.rowCount === 0 ||
       latestApplication.rows[0].application_id !==
-      Number(application_id)
+        Number(application_id)
     ) {
       return sendErrorResponse(
         res,
@@ -265,10 +278,8 @@ exports.renewOneOnOne = async (req, res) => {
       );
     }
 
-    // Renewal is always for next month
     const renewalDate = new Date();
 
-    // Prevent duplicate renewal/application for the renewal month
     const existingApplication = await pool.query(
       `
       SELECT
@@ -277,10 +288,16 @@ exports.renewOneOnOne = async (req, res) => {
         application_date
       FROM tbl_one_on_one_applications
       WHERE player_id = $1
-        AND EXTRACT(MONTH FROM application_date) =
-            EXTRACT(MONTH FROM $2::date)
-        AND EXTRACT(YEAR FROM application_date) =
-            EXTRACT(YEAR FROM $2::date)
+        AND EXTRACT(
+          MONTH FROM application_date
+        ) = EXTRACT(
+          MONTH FROM $2::date
+        )
+        AND EXTRACT(
+          YEAR FROM application_date
+        ) = EXTRACT(
+          YEAR FROM $2::date
+        )
       LIMIT 1
       `,
       [
@@ -297,7 +314,6 @@ exports.renewOneOnOne = async (req, res) => {
       );
     }
 
-    // Create renewal
     const renewal = await pool.query(
       `
       INSERT INTO tbl_one_on_one_applications
@@ -341,19 +357,19 @@ exports.renewOneOnOne = async (req, res) => {
       ]
     );
 
-    // Logged-in user
     const userResult = await pool.query(
       `
-      SELECT full_name
+      SELECT
+        full_name
       FROM tbl_users
       WHERE user_id = $1
       `,
       [req.user.user_id]
     );
 
-    const performedBy = userResult.rows[0].full_name;
+    const performedBy =
+      userResult.rows[0]?.full_name || "System";
 
-    // Notification
     await pool.query(
       `
       INSERT INTO tbl_notification_logs
@@ -364,7 +380,7 @@ exports.renewOneOnOne = async (req, res) => {
         performed_by
       )
       VALUES
-      ($1,$2,$3,$4)
+      ($1, $2, $3, $4)
       `,
       [
         "One-on-One Training",
@@ -381,10 +397,16 @@ exports.renewOneOnOne = async (req, res) => {
       renewal.rows[0]
     );
   } catch (error) {
+    console.error(
+      "Renew One-on-One Error:",
+      error
+    );
+
     return sendErrorResponse(
       res,
       500,
-      error.message || "Internal Server Error"
+      error.message ||
+        "Internal Server Error"
     );
   }
 };
