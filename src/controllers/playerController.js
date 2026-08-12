@@ -1154,7 +1154,10 @@ exports.getAllPlayers = async (req, res) => {
 
           admission_fee: Number(stats.admission_fee),
           regular_fee: Number(stats.regular_fee),
-          one_on_one_fee: Number(stats.one_on_one_fee),
+          // one_on_one_fee: Number(stats.one_on_one_fee),
+          one_on_one_fee: Number(stats.one_on_one_fee) - Number(
+            stats.only_one_on_one_fee
+          ),
           only_one_on_one_fee: Number(
             stats.only_one_on_one_fee
           ),
