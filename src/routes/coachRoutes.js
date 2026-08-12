@@ -4,12 +4,46 @@ const { addCoach, getAllCoaches, searchCoaches, getCoachById, updateCoach, delet
 const verifyToken = require("../middlewares/verifyToken");
 const { checkRole } = require("../middlewares/checkRole");
 const fileUpload = require("../middlewares/uploadMiddleware");
+const multer = require("multer");
+const { sendErrorResponse } = require("../utils/apiResponse");
 
 const coachRouter = express.Router();
 
 coachRouter.use(verifyToken);
 
-coachRouter.post("/", fileUpload.array("document_urls", 10), validateRequestBody, checkRole("PRIMARY"), addCoach);
+coachRouter.post(
+  "/",
+  (req, res, next) => {
+    fileUpload.array("document_urls", 10)(req, res, (err) => {
+      if (err) {
+        if (
+          err instanceof multer.MulterError &&
+          (
+            err.code === "LIMIT_UNEXPECTED_FILE" ||
+            err.code === "LIMIT_FILE_COUNT"
+          )
+        ) {
+          return sendErrorResponse(
+            res,
+            400,
+            "Only 10 files are allowed."
+          );
+        }
+
+        return sendErrorResponse(
+          res,
+          400,
+          err.message || "File upload failed."
+        );
+      }
+
+      next();
+    });
+  },
+  validateRequestBody,
+  checkRole("PRIMARY"),
+  addCoach
+);
 
 coachRouter.get("/", getAllCoaches);
 

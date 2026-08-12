@@ -8,16 +8,45 @@ const { checkRole } = require("../middlewares/checkRole");
 const { createPlayerAdmission, getAllPlayers, searchPlayers, getPlayerById, updatePlayer, deletePlayer, getPlayersAndCoaches, generateDues, updatePlayerStatus } = require("../controllers/playerController");
 const fileUpload = require("../middlewares/uploadMiddleware");
 const { generateMonthlyDues } = require("../jobs/generateMonthlyDues");
+const multer = require("multer");
+const { sendErrorResponse } = require("../utils/apiResponse");
 
 playerRouter.use(verifyToken);
 
 playerRouter.post(
   "/",
-  fileUpload.array("document_urls", 5), // Max 5 files
+  (req, res, next) => {
+    fileUpload.array("document_urls", 5)(req, res, (err) => {
+      if (err) {
+        if (
+          err instanceof multer.MulterError &&
+          (
+            err.code === "LIMIT_UNEXPECTED_FILE" ||
+            err.code === "LIMIT_FILE_COUNT"
+          )
+        ) {
+          return sendErrorResponse(
+            res,
+            400,
+            "Only 5 files are allowed."
+          );
+        }
+
+        return sendErrorResponse(
+          res,
+          400,
+          err.message || "File upload failed."
+        );
+      }
+
+      next();
+    });
+  },
   validateRequestBody,
   checkRole("PRIMARY"),
   createPlayerAdmission
 );
+
 playerRouter.get("/", getAllPlayers);
 
 playerRouter.get("/players-coaches", getPlayersAndCoaches);

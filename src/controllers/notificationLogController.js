@@ -30,18 +30,10 @@ exports.getNotifications = async (req, res) => {
         SELECT *
         FROM tbl_notification_logs
         WHERE
-          (
+          module_name <> 'Ground Booking'
+          OR (
             module_name = 'Ground Booking'
-            AND action = 'Pending'
-          )
-          OR
-          (
-            module_name = 'Fee Due'
-          )
-          OR
-          (
-            module_name <> 'Ground Booking'
-            AND module_name <> 'Fee Due'
+            AND action IN ('Created', 'Updated')
           )
         ORDER BY created_at DESC;
       `;

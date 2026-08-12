@@ -243,20 +243,13 @@ exports.addStaff = async (req, res) => {
 exports.getAllStaff = async (req, res) => {
   try {
     const [result, statistics] = await Promise.all([
-      // ==========================================
-      // STAFF LIST
-      // ==========================================
       pool.query(`
         SELECT
           s.*,
 
           COALESCE(
             JSON_AGG(
-              JSON_BUILD_OBJECT(
-                'document_id', d.document_id,
-                'document_url', d.document_url,
-                'created_at', d.created_at
-              )
+              d.document_url
               ORDER BY d.document_id
             ) FILTER (
               WHERE d.document_id IS NOT NULL
@@ -276,9 +269,6 @@ exports.getAllStaff = async (req, res) => {
           s.staff_id DESC
       `),
 
-      // ==========================================
-      // STAFF STATISTICS
-      // ==========================================
       pool.query(`
         SELECT
           COUNT(*) AS total_staff,
@@ -291,8 +281,7 @@ exports.getAllStaff = async (req, res) => {
             WHERE is_active = FALSE
           ) AS inactive_staff,
 
-          COUNT(DISTINCT department)
-            AS total_departments,
+          COUNT(DISTINCT department) AS total_departments,
 
           0 AS leave_staff
 
@@ -305,31 +294,31 @@ exports.getAllStaff = async (req, res) => {
     // ==========================================
     const staff = await Promise.all(
       result.rows.map(async (employee) => {
-        const documents = await Promise.all(
-          employee.documents.map(async (document) => {
-            if (!document.document_url) {
-              return {
-                ...document,
-                document_url: null,
-              };
+        const document_urls = await Promise.all(
+          employee.documents.map(async (documentKey) => {
+            if (!documentKey) {
+              return null;
             }
 
-            const signedUrl = await getSignedVideoUrl(
-              document.document_url
-            );
+            try {
+              return await getSignedVideoUrl(documentKey);
+            } catch (error) {
+              console.error(
+                `Failed to generate signed URL for ${documentKey}:`,
+                error
+              );
 
-            return {
-              ...document,
-              // Return signed URL directly
-              // in document_url
-              document_url: signedUrl,
-            };
+              return null;
+            }
           })
         );
 
+        // Remove DB document key from response
+        delete employee.documents;
+
         return {
           ...employee,
-          document_urls: documents,
+          document_urls: document_urls.filter(Boolean),
         };
       })
     );
@@ -376,8 +365,7 @@ exports.getAllStaff = async (req, res) => {
     return sendErrorResponse(
       res,
       500,
-      error.message ||
-      "Internal Server Error"
+      error.message || "Internal Server Error"
     );
   }
 };

@@ -55,18 +55,17 @@ exports.applyOneOnOne = async (req, res) => {
 
     const existingApplication = await pool.query(
       `SELECT 1
-       FROM tbl_one_on_one_applications
-       WHERE player_id = $1
-       AND coach_id = $2
-       AND preferred_slot = $3`,
-      [player_id, coach_id, preferred_slot],
+      FROM tbl_one_on_one_applications
+      WHERE player_id = $1
+      LIMIT 1`,
+      [player_id],
     );
 
     if (existingApplication.rowCount > 0) {
       return sendErrorResponse(
         res,
         409,
-        "An application already exists for the selected coach and preferred slot.",
+        "An application already exists for this player.",
       );
     }
 
@@ -716,11 +715,12 @@ exports.getApplicationById = async (req, res) => {
   }
 };
 
+
 exports.updateOneOnOneApplicationStatus = async (req, res) => {
   const { id } = req.params;
   const { is_active } = req.body;
 
-  // Validate Application ID
+  // Validate application ID
   if (!id) {
     return sendErrorResponse(
       res,
@@ -729,7 +729,10 @@ exports.updateOneOnOneApplicationStatus = async (req, res) => {
     );
   }
 
-  if (!Number.isInteger(Number(id)) || Number(id) <= 0) {
+  if (
+    !Number.isInteger(Number(id)) ||
+    Number(id) <= 0
+  ) {
     return sendErrorResponse(
       res,
       400,
@@ -754,24 +757,28 @@ exports.updateOneOnOneApplicationStatus = async (req, res) => {
     );
   }
 
-  const client = await pool.connect();
-
   try {
-    await client.query("BEGIN");
+    // ==========================================
+    // CHECK APPLICATION AND PLAYER STATUS
+    // ==========================================
 
-    // Get selected application
-    const applicationResult = await client.query(
+    const applicationResult = await pool.query(
       `
-      SELECT *
-      FROM tbl_one_on_one_applications
-      WHERE application_id = $1
+      SELECT
+        o.*,
+        p.is_active AS player_is_active
+
+      FROM tbl_one_on_one_applications o
+
+      INNER JOIN tbl_players p
+        ON p.player_id = o.player_id
+
+      WHERE o.application_id = $1
       `,
       [id]
     );
 
     if (applicationResult.rowCount === 0) {
-      await client.query("ROLLBACK");
-
       return sendErrorResponse(
         res,
         404,
@@ -781,180 +788,68 @@ exports.updateOneOnOneApplicationStatus = async (req, res) => {
 
     const application = applicationResult.rows[0];
 
-    // ===========================
-    // DEACTIVATE
-    // ===========================
-    if (!is_active) {
-
-      if (!application.is_active) {
-        await client.query("ROLLBACK");
-
-        return sendErrorResponse(
-          res,
-          409,
-          "Application is already inactive."
-        );
-      }
-
-      const updateResult = await client.query(
-        `
-        UPDATE tbl_one_on_one_applications
-        SET
-          is_active = FALSE,
-          updated_at = CURRENT_TIMESTAMP
-        WHERE application_id = $1
-        RETURNING *;
-        `,
-        [id]
-      );
-
-      await client.query("COMMIT");
-
-      return sendSuccessResponse(
+    if (application.player_is_active !== true) {
+      return sendErrorResponse(
         res,
-        200,
-        "Application deactivated successfully.",
-        updateResult.rows[0]
+        400,
+        "Cannot activate or deactivate the application because the player is inactive."
       );
     }
 
-    // ===========================
-    // ACTIVATE
-    // ===========================
+    // ==========================================
+    // CHECK CURRENT APPLICATION STATUS
+    // ==========================================
 
-    const currentMonthApplication = await client.query(
-      `
-      SELECT *
-      FROM tbl_one_on_one_applications
-      WHERE
-        player_id = $1
-        AND DATE_TRUNC('month', application_date) =
-            DATE_TRUNC('month', CURRENT_DATE)
-      ORDER BY application_id DESC
-      LIMIT 1
-      `,
-      [application.player_id]
-    );
-
-    // ----------------------------------------------------
-    // Current month record already exists
-    // ----------------------------------------------------
-    if (currentMonthApplication.rowCount > 0) {
-
-      const currentRecord = currentMonthApplication.rows[0];
-
-      if (currentRecord.is_active) {
-        await client.query("ROLLBACK");
-
-        return sendErrorResponse(
-          res,
-          409,
-          "Current month application is already active."
-        );
-      }
-
-      const updateResult = await client.query(
-        `
-        UPDATE tbl_one_on_one_applications
-        SET
-          is_active = TRUE,
-          payment_status = 'Pending',
-          updated_at = CURRENT_TIMESTAMP
-        WHERE application_id = $1
-        RETURNING *;
-        `,
-        [currentRecord.application_id]
-      );
-
-      await client.query("COMMIT");
-
-      return sendSuccessResponse(
+    if (application.is_active === is_active) {
+      return sendErrorResponse(
         res,
-        200,
-        "Application activated successfully.",
-        updateResult.rows[0]
+        409,
+        `Application is already ${is_active ? "active" : "inactive"
+        }.`
       );
     }
 
-    // ----------------------------------------------------
-    // Create new current month record
-    // ----------------------------------------------------
+    // ==========================================
+    // UPDATE APPLICATION STATUS
+    // ==========================================
 
-    const insertResult = await client.query(
+    const updateResult = await pool.query(
       `
-      INSERT INTO tbl_one_on_one_applications
-      (
-        player_id,
-        coach_id,
-        focus_area,
-        payment_type,
-        fee_amount,
-        preferred_slot,
-        application_date,
-        remarks,
-        application_type,
-        monthly_performance_review,
-        payment_status,
-        renewal_status,
-        is_active
-      )
-      VALUES
-      (
-        $1,
-        $2,
-        $3,
-        $4,
-        $5,
-        $6,
-        CURRENT_DATE,
-        $7,
-        'Renew',
-        $8,
-        'Pending',
-        'Active',
-        TRUE
-      )
+      UPDATE tbl_one_on_one_applications
+
+      SET
+        is_active = $1,
+        updated_at = CURRENT_TIMESTAMP
+
+      WHERE application_id = $2
+
       RETURNING *;
       `,
-      [
-        application.player_id,
-        application.coach_id,
-        application.focus_area,
-        application.payment_type,
-        application.fee_amount,
-        application.preferred_slot,
-        application.remarks,
-        application.monthly_performance_review
-      ]
+      [is_active, id]
     );
-
-    await client.query("COMMIT");
 
     return sendSuccessResponse(
       res,
-      201,
-      "New application created successfully.",
-      insertResult.rows[0]
+      200,
+      `Application ${is_active ? "activated" : "deactivated"
+      } successfully.`,
+      updateResult.rows[0]
     );
-
   } catch (error) {
-
-    await client.query("ROLLBACK");
-
-    console.error(error);
+    console.error(
+      "Update One-on-One Application Status Error:",
+      error
+    );
 
     return sendErrorResponse(
       res,
       500,
-      error.message || "Internal Server Error"
+      error.message ||
+      "Internal Server Error"
     );
-
-  } finally {
-
-    client.release();
-
   }
 };
+
 
 exports.updateApplication = async (req, res) => {
   const { application_id } = req.params;

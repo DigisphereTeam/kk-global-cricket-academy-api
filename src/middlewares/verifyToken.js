@@ -60,10 +60,19 @@ const verifyToken = async (req, res, next) => {
 
     next();
   } catch (error) {
+    // Handle expired token separately
+    if (error.name === "TokenExpiredError") {
+      return sendErrorResponse(
+        res,
+        401,
+        "Your session has expired. Please sign in again."
+      );
+    }
+
     return sendErrorResponse(
       res,
       401,
-      error.message || "Invalid or expired token."
+      "Invalid or expired token."
     );
   }
 };

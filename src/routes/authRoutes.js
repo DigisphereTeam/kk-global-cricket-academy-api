@@ -6,7 +6,7 @@ const verifyToken = require("../middlewares/verifyToken");
 
 const authRouter = express.Router();
 
-authRouter.post("/signup", validateRequestBody, signUp);
+// authRouter.post("/signup", validateRequestBody, signUp);
 
 authRouter.post("/signin", validateRequestBody, signIn);
 
