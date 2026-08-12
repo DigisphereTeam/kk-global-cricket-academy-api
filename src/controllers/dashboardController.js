@@ -41,42 +41,127 @@ exports.getDashboardStatistics = async (req, res) => {
     const revenueQuery = `
       SELECT
 
-        /* =========================================
-           PENDING FEES - PLAYER COUNT
-           ========================================= */
-
         (
-          SELECT COUNT(DISTINCT p.player_id)
+          SELECT COUNT(*) AS pending_fee_count
+        FROM (
 
-          FROM tbl_players p
+    /* =========================
+       REGULAR PLAYERS
+       ========================= */
 
-          WHERE p.is_active = TRUE
+    SELECT DISTINCT p.player_id
+    FROM tbl_players p
+    WHERE p.is_active = TRUE
+      AND p.fee_type = 'Regular Fee'
+      AND p.regular_fee >= 0
+      AND p.admission_date <= CURRENT_DATE
 
-            /* Player must have joined */
-            AND p.admission_date <= CURRENT_DATE
+      -- Paid/covered last month
+      AND (
+          -- First month payment was stored in tbl_players
+          (
+              DATE_TRUNC('month', p.admission_date) =
+                  DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
+              AND p.fee_status = 'Paid'
+          )
 
-            /* Player has NOT paid this month */
+          OR
 
-            AND NOT EXISTS (
+          -- Subsequent month payment was stored in tbl_player_fees
+          EXISTS (
               SELECT 1
-
-              FROM tbl_player_fees pf
-
-              WHERE pf.player_id = p.player_id
-
-                AND pf.status = 'Paid'
-
-                AND pf.is_active = TRUE
-
-                AND pf.payment_date >=
+              FROM tbl_player_fees pf_last
+              WHERE pf_last.player_id = p.player_id
+                AND pf_last.status = 'Paid'
+                AND pf_last.is_active = TRUE
+                AND pf_last.payment_date >=
+                    DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
+                AND pf_last.payment_date <
                     DATE_TRUNC('month', CURRENT_DATE)
+          )
+      )
 
-                AND pf.payment_date <
+      -- Has NOT paid this month
+      AND NOT EXISTS (
+          SELECT 1
+          FROM tbl_player_fees pf_current
+          WHERE pf_current.player_id = p.player_id
+            AND pf_current.status = 'Paid'
+            AND pf_current.is_active = TRUE
+            AND pf_current.payment_date >=
+                DATE_TRUNC('month', CURRENT_DATE)
+            AND pf_current.payment_date <
+                DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+      )
+
+
+    UNION
+
+
+    /* =========================
+       PLAYERS FROM FEE TABLE
+       ========================= */
+
+    SELECT DISTINCT pf_last.player_id
+    FROM tbl_player_fees pf_last
+    WHERE pf_last.status = 'Paid'
+      AND pf_last.is_active = TRUE
+
+      -- Paid last month
+      AND pf_last.payment_date >=
+          DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
+      AND pf_last.payment_date <
+          DATE_TRUNC('month', CURRENT_DATE)
+
+      -- Has NOT paid this month
+      AND NOT EXISTS (
+          SELECT 1
+          FROM tbl_player_fees pf_current
+          WHERE pf_current.player_id = pf_last.player_id
+            AND pf_current.status = 'Paid'
+            AND pf_current.is_active = TRUE
+            AND pf_current.payment_date >=
+                DATE_TRUNC('month', CURRENT_DATE)
+            AND pf_current.payment_date <
+                DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+      )
+
+
+    UNION
+
+
+    /* =========================
+       ONE-ON-ONE PLAYERS
+       ========================= */
+
+        SELECT DISTINCT last_month.player_id
+        FROM tbl_one_on_one_applications last_month
+        WHERE last_month.is_active = TRUE
+          AND last_month.payment_status = 'Paid'
+
+          -- Paid last month
+        AND last_month.application_date >=
+              DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
+        AND last_month.application_date <
+              DATE_TRUNC('month', CURRENT_DATE)
+
+          -- Has NOT paid this month
+        AND NOT EXISTS (
+              SELECT 1
+              FROM tbl_one_on_one_applications this_month
+              WHERE this_month.player_id = last_month.player_id
+                AND this_month.is_active = TRUE
+                AND this_month.payment_status = 'Paid'
+                AND this_month.application_date >=
                     DATE_TRUNC('month', CURRENT_DATE)
-                    + INTERVAL '1 month'
-            )
+                AND this_month.application_date <
+                    DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+          )
 
-        ) AS pending_fees,
+          ) AS pending_players
+
+          ) AS pending_fees,
+
 
 
         (
