@@ -18,6 +18,7 @@ exports.getPlayerWiseReport = async (req, res) => {
       SELECT
         p.admission_id,
         p.full_name AS player_name,
+        p.status,
 
         CASE
           WHEN oo.player_id IS NOT NULL
@@ -1262,6 +1263,9 @@ exports.getTrainerWiseReport = async (req, res) => {
   } = req.query;
 
   try {
+    // ==========================================
+    // DATE VALIDATION
+    // ==========================================
 
     const isValidDate = (dateString) => {
       if (!dateString) {
@@ -1311,6 +1315,9 @@ exports.getTrainerWiseReport = async (req, res) => {
       );
     }
 
+    // ==========================================
+    // CURRENT DATE - INDIA
+    // ==========================================
 
     const today = new Date();
 
@@ -1323,20 +1330,28 @@ exports.getTrainerWiseReport = async (req, res) => {
     const year = currentDate.getFullYear();
     const month = currentDate.getMonth();
 
+    // ==========================================
+    // DEFAULT DATE RANGE
+    // Current month
+    // ==========================================
+
     // First day of current month
     const defaultFromDate =
-      `${year} -${String(month + 1).padStart(2, "0")}-01`;
+      `${year}-${String(month + 1).padStart(2, "0")}-01`;
 
     // Last day of current month
     const lastDay =
       new Date(year, month + 1, 0).getDate();
 
     const defaultToDate =
-      `${year} -${String(month + 1).padStart(2, "0")} -${String(lastDay).padStart(2, "0")} `;
+      `${year}-${String(month + 1).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
 
     const fromDate = from_date || defaultFromDate;
     const toDate = to_date || defaultToDate;
 
+    // ==========================================
+    // DATE RANGE VALIDATION
+    // ==========================================
 
     if (
       new Date(fromDate) > new Date(toDate)
@@ -1348,73 +1363,104 @@ exports.getTrainerWiseReport = async (req, res) => {
       );
     }
 
+    // ==========================================
+    // BASE QUERY
+    // ==========================================
 
     let query = `
-SELECT
-c.coach_id,
-  c.coach_code AS trainer_id,
-    c.full_name AS trainer_name,
-      c.specialization,
-      c.phone_number AS contact_number,
+      SELECT
+        c.coach_id,
+        c.coach_code AS trainer_id,
+        c.full_name AS trainer_name,
+
+        CASE
+          WHEN c.is_active = TRUE THEN 'Active'
+          ELSE 'Inactive'
+        END AS status,
+
+        c.specialization,
+        c.phone_number AS contact_number,
         c.experience,
         c.join_date
 
       FROM tbl_coach c
 
       WHERE 1 = 1
-  `;
+    `;
 
     const values = [];
     let index = 1;
 
+    // ==========================================
+    // SEARCH
+    // ==========================================
+
     if (search) {
       query += `
-AND(
-  c.full_name ILIKE $${index}
+        AND (
+          c.full_name ILIKE $${index}
           OR c.coach_code ILIKE $${index}
           OR c.specialization ILIKE $${index}
-)
-  `;
+        )
+      `;
 
-      values.push(`% ${search}% `);
+      values.push(`%${search}%`);
       index++;
     }
 
+    // ==========================================
+    // COACH FILTER
+    // ==========================================
 
     if (coach_id) {
       query += `
         AND c.coach_id = $${index}
-`;
+      `;
 
       values.push(coach_id);
       index++;
     }
 
+    // ==========================================
+    // DATE FILTER
+    // ==========================================
+
     query += `
-      AND c.join_date >= $${index}:: date
-  `;
+      AND c.join_date >= $${index}::date
+    `;
 
     values.push(fromDate);
     index++;
 
     query += `
-      AND c.join_date <= $${index}:: date
-  `;
+      AND c.join_date <= $${index}::date
+    `;
 
     values.push(toDate);
     index++;
 
+    // ==========================================
+    // ORDER
+    // ==========================================
+
     query += `
       ORDER BY
-c.join_date DESC,
-  c.full_name ASC
+        c.join_date DESC,
+        c.full_name ASC
     `;
 
+    // ==========================================
+    // EXECUTE QUERY
+    // ==========================================
 
     const result = await pool.query(
       query,
       values
     );
+
+    // ==========================================
+    // RESPONSE
+    // ==========================================
 
     return sendSuccessResponse(
       res,
@@ -1444,76 +1490,78 @@ c.join_date DESC,
 
 exports.getTrainerMonthlyReport = async (req, res) => {
   const {
-    search,
-    coach_id,
     from_date,
     to_date,
   } = req.query;
 
   try {
-    let query = `
-      WITH report_months AS(
-      SELECT
-          generate_series(
-        DATE_TRUNC(
-          'month',
-          COALESCE($1:: date, CURRENT_DATE)
-        ),
-        DATE_TRUNC(
-          'month',
-          COALESCE($2:: date, CURRENT_DATE)
-        ),
-        INTERVAL '1 month'
-      ):: date AS month_start
-    ),
+    // ==========================================
+    // QUERY
+    // ==========================================
 
-  attendance_summary AS(
-    SELECT
+    const query = `
+      WITH report_months AS (
+
+        SELECT
+          generate_series(
+            DATE_TRUNC(
+              'month',
+              COALESCE($1::date, CURRENT_DATE)
+            ),
+            DATE_TRUNC(
+              'month',
+              COALESCE($2::date, CURRENT_DATE)
+            ),
+            INTERVAL '1 month'
+          )::date AS month_start
+
+      ),
+
+      attendance_summary AS (
+
+        SELECT
           employee_code,
 
-    DATE_TRUNC(
-      'month',
-      payroll_date
-    ):: date AS month_start,
+          DATE_TRUNC(
+            'month',
+            payroll_date
+          )::date AS month_start,
 
-    COUNT(
-      DISTINCT payroll_date
-    ) AS days_present
+          COUNT(
+            DISTINCT payroll_date
+          ) AS days_present
 
         FROM tbl_attendance
 
         GROUP BY
           employee_code,
-    DATE_TRUNC(
-      'month',
-      payroll_date
-    ):: date
-  )
+          DATE_TRUNC(
+            'month',
+            payroll_date
+          )::date
+      )
 
-SELECT
+      SELECT
 
-/* Trainer ID */
-c.coach_code AS trainer_id,
+        /* Trainer ID */
+        c.coach_code AS trainer_id,
 
-  /* Trainer Primary Key */
-  c.coach_id,
+        /* Trainer Name */
+        c.full_name AS trainer_name,
 
-  /* Trainer Name */
-  c.full_name AS trainer_name,
+        /* Specialization */
+        c.specialization,
 
-    /* Specialization */
-    c.specialization,
+        /* Month */
+        TO_CHAR(
+          rm.month_start,
+          'FMMonth'
+        ) AS month,
 
-    /* Month */
-    TO_CHAR(
-      rm.month_start,
-      'FMMonth'
-    ) AS month,
-
-      /* Year */
-      EXTRACT(
-        YEAR FROM rm.month_start
-      )::INTEGER AS year,
+        /* Year */
+        EXTRACT(
+          YEAR FROM rm.month_start
+        )::INTEGER AS year,
 
         /* Present */
         COALESCE(
@@ -1521,16 +1569,16 @@ c.coach_code AS trainer_id,
           0
         ) AS present,
 
-          /* Absent */
-          GREATEST(
-            CASE
+        /* Absent */
+        GREATEST(
+          CASE
 
             /* Current Month */
             WHEN rm.month_start =
-          DATE_TRUNC(
-            'month',
-            CURRENT_DATE
-          ):: date
+              DATE_TRUNC(
+                'month',
+                CURRENT_DATE
+              )::date
 
             THEN
               (
@@ -1545,66 +1593,71 @@ c.coach_code AS trainer_id,
                 (
                   rm.month_start
                   + INTERVAL '1 month'
-              - INTERVAL '1 day'
-              ):: date
-              - rm.month_start
-          + 1
-          )
+                  - INTERVAL '1 day'
+                )::date
+                - rm.month_start
+                + 1
+              )
 
-END
-  -
-  COALESCE(
-    att.days_present,
-    0
-  ),
-  0
+          END
+          - COALESCE(
+              att.days_present,
+              0
+            ),
+          0
         ) AS absent,
 
-  /* Salary Paid */
-  salary.net_salary AS salary_paid,
+        /* Salary Paid */
+        salary.net_salary AS salary_paid,
 
-    /* Salary Paid Date */
-    salary.payment_date AS salary_paid_date,
+        /* Salary Paid Date */
+        salary.payment_date AS salary_paid_date,
 
-      /* Incentives */
-      salary.incentive_1,
+        /* Incentives */
+        salary.incentive_1,
 
-      salary.incentive_2,
+        salary.incentive_2,
 
-      salary.incentive_3
+        salary.incentive_3
 
       FROM tbl_coach c
 
       CROSS JOIN report_months rm
 
-      /* Attendance */
+      /* ==========================================
+         ATTENDANCE
+         ========================================== */
+
       LEFT JOIN attendance_summary att
         ON att.employee_code = c.coach_code
         AND att.month_start = rm.month_start
 
-      /* Salary */
-      LEFT JOIN LATERAL(
+      /* ==========================================
+         SALARY
+         ========================================== */
+
+      LEFT JOIN LATERAL (
+
         SELECT
           es.net_salary,
-        es.payment_date,
-        es.incentive_1,
-        es.incentive_2,
-        es.incentive_3
+          es.payment_date,
+          es.incentive_1,
+          es.incentive_2,
+          es.incentive_3
 
         FROM tbl_employee_salary es
 
-        WHERE
-          es.coach_id = c.coach_id
+        WHERE es.coach_id = c.coach_id
 
           AND es.salary_year =
-      EXTRACT(
-        YEAR FROM rm.month_start
-      ):: INTEGER
+            EXTRACT(
+              YEAR FROM rm.month_start
+            )::INTEGER
 
           AND es.salary_month =
-      EXTRACT(
-        MONTH FROM rm.month_start
-      ):: INTEGER
+            EXTRACT(
+              MONTH FROM rm.month_start
+            )::INTEGER
 
         ORDER BY
           es.payment_date DESC NULLS LAST
@@ -1613,66 +1666,32 @@ END
 
       ) salary ON TRUE
 
-      WHERE 1 = 1
-  `;
+      ORDER BY
+        rm.month_start DESC,
+        c.full_name ASC;
+    `;
+
+    // ==========================================
+    // VALUES
+    // ==========================================
 
     const values = [
       from_date || null,
       to_date || null,
     ];
 
-    let index = 3;
-
-    /* =========================
-       SEARCH
-    ========================= */
-
-    if (search && search.trim() !== "") {
-      query += `
-AND(
-  c.full_name ILIKE $${index}
-          OR c.coach_code ILIKE $${index}
-          OR c.specialization ILIKE $${index}
-)
-  `;
-
-      values.push(`% ${search.trim()}% `);
-
-      index++;
-    }
-
-    /* =========================
-       TRAINER FILTER
-    ========================= */
-
-    if (
-      coach_id &&
-      coach_id !== "undefined" &&
-      coach_id !== "null"
-    ) {
-      query += `
-        AND c.coach_id = $${index}
-`;
-
-      values.push(Number(coach_id));
-
-      index++;
-    }
-
-    /* =========================
-       ORDER
-    ========================= */
-
-    query += `
-      ORDER BY
-rm.month_start DESC,
-  c.full_name ASC;
-`;
+    // ==========================================
+    // EXECUTE QUERY
+    // ==========================================
 
     const result = await pool.query(
       query,
       values
     );
+
+    // ==========================================
+    // RESPONSE
+    // ==========================================
 
     return sendSuccessResponse(
       res,
@@ -1714,7 +1733,6 @@ exports.getStaffWiseReport = async (req, res) => {
         return true;
       }
 
-      // Must be YYYY-MM-DD
       if (!/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
         return false;
       }
@@ -1734,7 +1752,7 @@ exports.getStaffWiseReport = async (req, res) => {
     };
 
     // ==========================================
-    // VALIDATE FROM DATE
+    // VALIDATE DATES
     // ==========================================
 
     if (from_date && !isValidDate(from_date)) {
@@ -1744,10 +1762,6 @@ exports.getStaffWiseReport = async (req, res) => {
         "Invalid from_date. Use YYYY-MM-DD format."
       );
     }
-
-    // ==========================================
-    // VALIDATE TO DATE
-    // ==========================================
 
     if (to_date && !isValidDate(to_date)) {
       return sendErrorResponse(
@@ -1774,14 +1788,14 @@ exports.getStaffWiseReport = async (req, res) => {
 
     // First day of current month
     const defaultFromDate =
-      `${year} -${String(month + 1).padStart(2, "0")}-01`;
+      `${year}-${String(month + 1).padStart(2, "0")}-01`;
 
     // Last day of current month
     const lastDay =
       new Date(year, month + 1, 0).getDate();
 
     const defaultToDate =
-      `${year} -${String(month + 1).padStart(2, "0")} -${String(lastDay).padStart(2, "0")} `;
+      `${year}-${String(month + 1).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
 
     const fromDate = from_date || defaultFromDate;
     const toDate = to_date || defaultToDate;
@@ -1790,9 +1804,7 @@ exports.getStaffWiseReport = async (req, res) => {
     // VALIDATE DATE RANGE
     // ==========================================
 
-    if (
-      new Date(fromDate) > new Date(toDate)
-    ) {
+    if (fromDate > toDate) {
       return sendErrorResponse(
         res,
         400,
@@ -1805,17 +1817,19 @@ exports.getStaffWiseReport = async (req, res) => {
     // ==========================================
 
     let query = `
-SELECT
-s.staff_code,
-  s.full_name AS staff_name,
-    s.designation,
-    s.join_date AS joining_date,
-      s.phone_number AS contact_number
+      SELECT
+        s.staff_id,
+        s.staff_code,
+        s.full_name AS staff_name,
+        s.status,
+        s.designation,
+        s.join_date AS joining_date,
+        s.phone_number AS contact_number
 
       FROM tbl_staff s
 
       WHERE 1 = 1
-  `;
+    `;
 
     const values = [];
     let index = 1;
@@ -1826,14 +1840,15 @@ s.staff_code,
 
     if (search) {
       query += `
-AND(
-  s.full_name ILIKE $${index}
+        AND (
+          s.full_name ILIKE $${index}
           OR s.staff_code ILIKE $${index}
           OR s.role ILIKE $${index}
-)
-  `;
+          OR s.designation ILIKE $${index}
+        )
+      `;
 
-      values.push(`% ${search}% `);
+      values.push(`%${search}%`);
       index++;
     }
 
@@ -1844,7 +1859,7 @@ AND(
     if (staff_id) {
       query += `
         AND s.staff_id = $${index}
-`;
+      `;
 
       values.push(staff_id);
       index++;
@@ -1855,18 +1870,13 @@ AND(
     // ==========================================
 
     query += `
-      AND s.join_date >= $${index}:: date
-  `;
+      AND s.join_date >= $${index}::date
+      AND s.join_date <= $${index + 1}::date
+    `;
 
     values.push(fromDate);
-    index++;
-
-    query += `
-      AND s.join_date <= $${index}:: date
-  `;
-
     values.push(toDate);
-    index++;
+    index += 2;
 
     // ==========================================
     // ORDER
@@ -1874,8 +1884,8 @@ AND(
 
     query += `
       ORDER BY
-s.join_date DESC,
-  s.full_name ASC
+        s.join_date DESC,
+        s.full_name ASC
     `;
 
     // ==========================================
@@ -1886,6 +1896,10 @@ s.join_date DESC,
       query,
       values
     );
+
+    // ==========================================
+    // RESPONSE
+    // ==========================================
 
     return sendSuccessResponse(
       res,
