@@ -735,12 +735,13 @@ exports.getAttendanceTimeline = async (req, res) => {
 
       currentMonthStart.setDate(1);
 
-      fromDate = currentMonthStart.toLocaleDateString(
-        "en-CA",
-        {
-          timeZone: "Asia/Kolkata",
-        }
-      );
+      fromDate =
+        currentMonthStart.toLocaleDateString(
+          "en-CA",
+          {
+            timeZone: "Asia/Kolkata",
+          }
+        );
 
       toDate = today;
     } else {
@@ -761,8 +762,12 @@ exports.getAttendanceTimeline = async (req, res) => {
       // ==========================================================
 
       if (
-        !/^\d{4}-\d{2}-\d{2}$/.test(from_date) ||
-        !/^\d{4}-\d{2}-\d{2}$/.test(to_date)
+        !/^\d{4}-\d{2}-\d{2}$/.test(
+          from_date
+        ) ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(
+          to_date
+        )
       ) {
         return sendErrorResponse(
           res,
@@ -863,7 +868,8 @@ exports.getAttendanceTimeline = async (req, res) => {
       );
     }
 
-    const employeeData = employee.rows[0];
+    const employeeData =
+      employee.rows[0];
 
     const employeeCode =
       employeeData.employee_code;
@@ -886,10 +892,10 @@ exports.getAttendanceTimeline = async (req, res) => {
      */
 
     const regularMorningStart =
-      5 * 60 + 35; // 05:35
+      5 * 60 + 35;
 
     const regularMorningEnd =
-      8 * 60; // 08:00
+      8 * 60;
 
     /*
      * REGULAR EVENING
@@ -905,13 +911,19 @@ exports.getAttendanceTimeline = async (req, res) => {
      */
 
     const regularEveningStart =
-      16 * 60 + 5; // 16:05
+      16 * 60 + 5;
 
     const regularEveningEnd =
-      18 * 60 + 30; // 18:30
+      18 * 60 + 30;
 
     // ============================================================
-    // GET ALL ATTENDANCE + ALL PUNCHES
+    // ATTENDANCE QUERY
+    //
+    // IMPORTANT:
+    // Every punch is fetched.
+    //
+    // We DO NOT use MIN()
+    // We DO NOT use MAX()
     // ============================================================
 
     const result = await pool.query(
@@ -965,12 +977,14 @@ exports.getAttendanceTimeline = async (req, res) => {
     const dateMap = new Map();
 
     for (const row of result.rows) {
-      const dateKey = row.payroll_date;
+      const dateKey =
+        row.payroll_date;
 
       if (!dateMap.has(dateKey)) {
         dateMap.set(dateKey, {
           attendance_id:
-            row.attendance_id || null,
+            row.attendance_id ||
+            null,
 
           punches: [],
         });
@@ -992,7 +1006,7 @@ exports.getAttendanceTimeline = async (req, res) => {
       }
 
       // ==========================================================
-      // KEEP EVERY PUNCH
+      // ADD EVERY PUNCH
       // ==========================================================
 
       if (
@@ -1016,7 +1030,7 @@ exports.getAttendanceTimeline = async (req, res) => {
     }
 
     // ============================================================
-    // FINAL RESPONSE ARRAY
+    // FINAL ATTENDANCE
     // ============================================================
 
     const attendance = [];
@@ -1035,7 +1049,9 @@ exports.getAttendanceTimeline = async (req, res) => {
       // ==========================================================
       // STATUS
       //
-      // ONLY Present / Absent
+      // ONLY:
+      // Present
+      // Absent
       // ==========================================================
 
       let status;
@@ -1058,7 +1074,8 @@ exports.getAttendanceTimeline = async (req, res) => {
       if (punches.length === 0) {
         attendance.push({
           attendance_id:
-            dateData.attendance_id || null,
+            dateData.attendance_id ||
+            null,
 
           employee_id:
             Number(employee_id),
@@ -1079,9 +1096,9 @@ exports.getAttendanceTimeline = async (req, res) => {
 
           status,
 
-          punch_type: null,
+          time_in: null,
 
-          punch_time: null,
+          time_out: null,
 
           branch_name: null,
 
@@ -1096,7 +1113,7 @@ exports.getAttendanceTimeline = async (req, res) => {
       }
 
       // ==========================================================
-      // CONVERT ALL PUNCHES TO IST
+      // CONVERT PUNCH TIMES TO IST
       // ==========================================================
 
       const punchesWithTime =
@@ -1112,6 +1129,7 @@ exports.getAttendanceTimeline = async (req, res) => {
               {
                 timeZone:
                   "Asia/Kolkata",
+
                 hour12: false,
               }
             );
@@ -1139,18 +1157,7 @@ exports.getAttendanceTimeline = async (req, res) => {
         });
 
       // ==========================================================
-      // SESSION TRACKING
-      //
-      // IMPORTANT:
-      //
-      // IN -> starts a new session ONLY if there is
-      //       no currently active session.
-      //
-      // IN -> IN -> OUT
-      // is treated as ONE session.
-      //
-      // IN -> OUT -> IN -> OUT
-      // is treated as TWO sessions.
+      // SESSION VARIABLES
       // ==========================================================
 
       let sessionCounter = 0;
@@ -1168,24 +1175,31 @@ exports.getAttendanceTimeline = async (req, res) => {
             : "";
 
         // ========================================================
-        // IN PUNCH
+        // IN
         // ========================================================
 
         if (punchType === "in") {
           /*
-           * If there is NO active session,
-           * create a new session.
+           * Only create a new session when
+           * there is currently NO active session.
+           *
+           * Therefore:
+           *
+           * IN
+           * IN
+           * OUT
+           *
+           * remains ONE session.
            */
 
           if (!currentSession) {
             sessionCounter++;
 
-            // ====================================================
-            // DETERMINE BATCH FROM FIRST IN
-            // ====================================================
+            let batch =
+              "One-on-One";
 
-            let batch = "One-on-One";
-            let session = sessionCounter;
+            let session =
+              sessionCounter;
 
             // ====================================================
             // REGULAR MORNING
@@ -1216,133 +1230,234 @@ exports.getAttendanceTimeline = async (req, res) => {
             }
 
             // ====================================================
-            // CREATE ACTIVE SESSION
+            // CREATE SESSION
             // ====================================================
 
             currentSession = {
+              attendance_id:
+                dateData.attendance_id,
+
+              employee_id:
+                Number(employee_id),
+
+              employee_type,
+
+              employee_code:
+                employeeCode,
+
+              employee_name:
+                employeeData.employee_name,
+
+              date: attendanceDate,
+
               batch,
+
               session,
-              sessionNumber:
-                sessionCounter,
+
+              status,
+
+              time_in:
+                punch.punch_time,
+
+              time_out: null,
+
+              branch_name:
+                punch.branch_name ||
+                null,
+
+              device_id:
+                punch.device_id ||
+                null,
+
+              marked_by,
+
+              remarks,
             };
           }
 
-          /*
-           * IMPORTANT:
-           *
-           * If another IN arrives before OUT,
-           * DO NOT create another session.
-           *
-           * Example:
-           *
-           * IN 05:56
-           * IN 06:00
-           *
-           * Both belong to same session.
-           */
+          // ======================================================
+          // IMPORTANT:
+          //
+          // If currentSession already exists,
+          // this IN does NOT create another session.
+          //
+          // Example:
+          //
+          // 05:56 IN
+          // 06:00 IN
+          //
+          // Both belong to session 2.
+          // ======================================================
+
+          continue;
         }
 
         // ========================================================
-        // OUT PUNCH
-        // ========================================================
-
-        else if (punchType === "out") {
-          /*
-           * If OUT exists without an IN,
-           * create a fallback session.
-           */
-
-          if (!currentSession) {
-            sessionCounter++;
-
-            currentSession = {
-              batch: "One-on-One",
-
-              session: sessionCounter,
-
-              sessionNumber:
-                sessionCounter,
-            };
-          }
-        }
-
-        // ========================================================
-        // IF SOMETHING UNKNOWN
-        // ========================================================
-
-        else {
-          /*
-           * Unknown punch type.
-           * Keep current session if available.
-           */
-
-          if (!currentSession) {
-            sessionCounter++;
-
-            currentSession = {
-              batch: "One-on-One",
-
-              session: sessionCounter,
-
-              sessionNumber:
-                sessionCounter,
-            };
-          }
-        }
-
-        // ========================================================
-        // ADD RECORD
-        // ========================================================
-
-        attendance.push({
-          attendance_id:
-            dateData.attendance_id,
-
-          employee_id:
-            Number(employee_id),
-
-          employee_type,
-
-          employee_code:
-            employeeCode,
-
-          employee_name:
-            employeeData.employee_name,
-
-          date: attendanceDate,
-
-          batch:
-            currentSession.batch,
-
-          session:
-            currentSession.session,
-
-          status,
-
-          punch_type:
-            punch.punch_type,
-
-          punch_time:
-            punch.punch_time,
-
-          branch_name:
-            punch.branch_name || null,
-
-          device_id:
-            punch.device_id || null,
-
-          marked_by,
-
-          remarks,
-        });
-
-        // ========================================================
-        // CLOSE SESSION AFTER OUT
+        // OUT
         // ========================================================
 
         if (punchType === "out") {
-          currentSession = null;
+          // ======================================================
+          // OUT WITH ACTIVE SESSION
+          // ======================================================
+
+          if (currentSession) {
+            currentSession.time_out =
+              punch.punch_time;
+
+            // ====================================================
+            // Keep OUT branch/device information if available
+            // ====================================================
+
+            if (
+              !currentSession.branch_name &&
+              punch.branch_name
+            ) {
+              currentSession.branch_name =
+                punch.branch_name;
+            }
+
+            if (
+              !currentSession.device_id &&
+              punch.device_id
+            ) {
+              currentSession.device_id =
+                punch.device_id;
+            }
+
+            // ====================================================
+            // ADD ONE COMPLETE SESSION RECORD
+            // ====================================================
+
+            attendance.push(
+              currentSession
+            );
+
+            // ====================================================
+            // CLOSE SESSION
+            // ====================================================
+
+            currentSession = null;
+          } else {
+            // ====================================================
+            // OUT WITHOUT IN
+            // ====================================================
+
+            sessionCounter++;
+
+            attendance.push({
+              attendance_id:
+                dateData.attendance_id,
+
+              employee_id:
+                Number(employee_id),
+
+              employee_type,
+
+              employee_code:
+                employeeCode,
+
+              employee_name:
+                employeeData.employee_name,
+
+              date: attendanceDate,
+
+              batch: "One-on-One",
+
+              session:
+                sessionCounter,
+
+              status,
+
+              time_in: null,
+
+              time_out:
+                punch.punch_time,
+
+              branch_name:
+                punch.branch_name ||
+                null,
+
+              device_id:
+                punch.device_id ||
+                null,
+
+              marked_by,
+
+              remarks,
+            });
+          }
+
+          continue;
         }
+
+        // ========================================================
+        // UNKNOWN PUNCH TYPE
+        // ========================================================
+
+        if (!currentSession) {
+          sessionCounter++;
+
+          currentSession = {
+            attendance_id:
+              dateData.attendance_id,
+
+            employee_id:
+              Number(employee_id),
+
+            employee_type,
+
+            employee_code:
+              employeeCode,
+
+            employee_name:
+              employeeData.employee_name,
+
+            date: attendanceDate,
+
+            batch: "One-on-One",
+
+            session:
+              sessionCounter,
+
+            status,
+
+            time_in: null,
+
+            time_out: null,
+
+            branch_name:
+              punch.branch_name ||
+              null,
+
+            device_id:
+              punch.device_id ||
+              null,
+
+            marked_by,
+
+            remarks,
+          };
+        }
+      }
+
+      // ==========================================================
+      // IN WITHOUT OUT
+      //
+      // Example:
+      //
+      // IN 10:00
+      //
+      // Return:
+      //
+      // time_in  = 10:00
+      // time_out = null
+      // ==========================================================
+
+      if (currentSession) {
+        attendance.push(
+          currentSession
+        );
       }
     }
 
@@ -1350,38 +1465,43 @@ exports.getAttendanceTimeline = async (req, res) => {
     // SORT
     //
     // Latest date first
-    // Earliest punch first within date
+    // Earliest session first
     // ============================================================
 
     attendance.sort(
       (a, b) => {
-        // Date descending
+        // ========================================================
+        // DATE DESCENDING
+        // ========================================================
+
         if (a.date !== b.date) {
           return b.date.localeCompare(
             a.date
           );
         }
 
-        // No punch
+        // ========================================================
+        // TIME IN ASCENDING
+        // ========================================================
+
         if (
-          !a.punch_time &&
-          !b.punch_time
+          !a.time_in &&
+          !b.time_in
         ) {
           return 0;
         }
 
-        if (!a.punch_time) {
+        if (!a.time_in) {
           return 1;
         }
 
-        if (!b.punch_time) {
+        if (!b.time_in) {
           return -1;
         }
 
-        // Punch ascending
         return (
-          new Date(a.punch_time) -
-          new Date(b.punch_time)
+          new Date(a.time_in) -
+          new Date(b.time_in)
         );
       }
     );
