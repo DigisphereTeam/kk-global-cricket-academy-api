@@ -206,11 +206,7 @@ exports.getPlayerMonthlyReport = async (req, res) => {
         dateString.split("-").map(Number);
 
       const date = new Date(
-        Date.UTC(
-          year,
-          month - 1,
-          day
-        )
+        Date.UTC(year, month - 1, day)
       );
 
       return (
@@ -272,9 +268,19 @@ exports.getPlayerMonthlyReport = async (req, res) => {
       indiaDate.getDate();
 
     // ============================================================
+    // TODAY IN YYYY-MM-DD
+    // ============================================================
+
+    const todayDate =
+      `${currentYear}-${String(
+        currentMonth + 1
+      ).padStart(2, "0")}-${String(
+        currentDay
+      ).padStart(2, "0")}`;
+
+    // ============================================================
     // DEFAULT DATE RANGE
     //
-    // Default:
     // Current month first day -> today
     // ============================================================
 
@@ -284,11 +290,7 @@ exports.getPlayerMonthlyReport = async (req, res) => {
       ).padStart(2, "0")}-01`;
 
     const defaultToDate =
-      `${currentYear}-${String(
-        currentMonth + 1
-      ).padStart(2, "0")}-${String(
-        currentDay
-      ).padStart(2, "0")}`;
+      todayDate;
 
     const fromDate =
       cleanedFromDate ||
@@ -327,18 +329,6 @@ exports.getPlayerMonthlyReport = async (req, res) => {
         res,
         400,
         "from_date cannot be greater than to_date."
-      );
-    }
-
-    // ============================================================
-    // DON'T ALLOW FUTURE DATE
-    // ============================================================
-
-    if (toDate > defaultToDate) {
-      return sendErrorResponse(
-        res,
-        400,
-        "to_date cannot be a future date."
       );
     }
 
@@ -391,13 +381,6 @@ exports.getPlayerMonthlyReport = async (req, res) => {
 
       /* ========================================================
          FIRST PUNCH FOR EACH PLAYER
-
-         IMPORTANT:
-
-         We use punch_time from tbl_attendance_logs.
-
-         Multiple punches on the same day do NOT create
-         multiple attendance days.
          ======================================================== */
 
       first_punch AS (
@@ -420,37 +403,19 @@ exports.getPlayerMonthlyReport = async (req, res) => {
         FROM tbl_attendance a
 
         INNER JOIN tbl_attendance_logs l
-
           ON l.attendance_id =
              a.attendance_id
 
         WHERE
-
           l.punch_time IS NOT NULL
 
         GROUP BY
-
           a.employee_code
 
       ),
 
       /* ========================================================
          ATTENDANCE DAYS
-
-         IMPORTANT:
-
-         DISTINCT employee + payroll date.
-
-         If player has:
-
-         IN
-         OUT
-         IN
-         OUT
-
-         on the same date,
-
-         it counts as ONE Present day.
          ======================================================== */
 
       attendance_days AS (
@@ -465,17 +430,12 @@ exports.getPlayerMonthlyReport = async (req, res) => {
         FROM tbl_attendance a
 
         WHERE
-
           a.payroll_date IS NOT NULL
 
       ),
 
       /* ========================================================
          MONTHLY ATTENDANCE
-
-         Count DISTINCT attendance dates.
-
-         NOT attendance records.
          ======================================================== */
 
       attendance_summary AS (
@@ -622,10 +582,6 @@ exports.getPlayerMonthlyReport = async (req, res) => {
 
         p.admission_date,
 
-        /* ======================================================
-           MONTH
-           ====================================================== */
-
         TRIM(
           TO_CHAR(
             rm.month_start,
@@ -637,24 +593,10 @@ exports.getPlayerMonthlyReport = async (req, res) => {
           YEAR FROM rm.month_start
         )::int AS year,
 
-        /* ======================================================
-           FIRST PUNCH DATE
-
-           This is the actual first punch date for player.
-           ====================================================== */
-
         fp.first_punch_date,
 
         /* ======================================================
-           ATTENDANCE START DATE
-
-           For this month:
-
-           max(
-             month start,
-             from date,
-             first punch date
-           )
+           ATTENDANCE START
            ====================================================== */
 
         GREATEST(
@@ -671,11 +613,16 @@ exports.getPlayerMonthlyReport = async (req, res) => {
         ) AS attendance_start_date,
 
         /* ======================================================
-           ATTENDANCE END DATE
+           ATTENDANCE END
 
-           Current/report end date.
+           IMPORTANT:
+           Cannot go beyond TODAY.
 
-           Never future.
+           If toDate is future:
+             toDate = 2026-08-31
+             today  = 2026-08-12
+
+           attendance_end_date = 2026-08-12
            ====================================================== */
 
         LEAST(
@@ -686,14 +633,14 @@ exports.getPlayerMonthlyReport = async (req, res) => {
             - INTERVAL '1 day'
           )::date,
 
-          $2::date
+          $2::date,
+
+          CURRENT_DATE
 
         ) AS attendance_end_date,
 
         /* ======================================================
            PRESENT
-
-           DISTINCT ATTENDANCE DAYS ONLY.
            ====================================================== */
 
         COALESCE(
@@ -704,19 +651,7 @@ exports.getPlayerMonthlyReport = async (req, res) => {
         /* ======================================================
            TOTAL WORKING DAYS
 
-           Number of calendar dates between:
-
-           first punch / report start
-
-           and
-
-           report end.
-
-           IMPORTANT:
-
-           We don't start from January 1.
-
-           We start from the player's first punch.
+           NEVER COUNTS FUTURE DAYS.
            ====================================================== */
 
         GREATEST(
@@ -731,7 +666,9 @@ exports.getPlayerMonthlyReport = async (req, res) => {
                 - INTERVAL '1 day'
               )::date,
 
-              $2::date
+              $2::date,
+
+              CURRENT_DATE
 
             )
 
@@ -760,10 +697,6 @@ exports.getPlayerMonthlyReport = async (req, res) => {
 
         /* ======================================================
            ABSENT
-
-           total_working_days - present
-
-           Never below zero.
            ====================================================== */
 
         GREATEST(
@@ -782,7 +715,9 @@ exports.getPlayerMonthlyReport = async (req, res) => {
                     - INTERVAL '1 day'
                   )::date,
 
-                  $2::date
+                  $2::date,
+
+                  CURRENT_DATE
 
                 )
 
@@ -824,8 +759,6 @@ exports.getPlayerMonthlyReport = async (req, res) => {
 
         /* ======================================================
            ATTENDANCE PERCENTAGE
-
-           NEVER GREATER THAN 100%.
            ====================================================== */
 
         CASE
@@ -844,7 +777,9 @@ exports.getPlayerMonthlyReport = async (req, res) => {
                     - INTERVAL '1 day'
                   )::date,
 
-                  $2::date
+                  $2::date,
+
+                  CURRENT_DATE
 
                 )
 
@@ -900,7 +835,9 @@ exports.getPlayerMonthlyReport = async (req, res) => {
                         - INTERVAL '1 day'
                       )::date,
 
-                      $2::date
+                      $2::date,
+
+                      CURRENT_DATE
 
                     )
 
@@ -966,10 +903,6 @@ exports.getPlayerMonthlyReport = async (req, res) => {
 
         /* ======================================================
            TOTAL FEE PAID
-
-           Regular + One-on-One
-
-           Admission fee NOT included.
            ====================================================== */
 
         (
@@ -999,63 +932,32 @@ exports.getPlayerMonthlyReport = async (req, res) => {
 
       FROM tbl_players p
 
-      /* ========================================================
-         EVERY PLAYER × EVERY REPORT MONTH
-         ======================================================== */
-
       CROSS JOIN report_months rm
 
-      /* ========================================================
-         FIRST PUNCH
-         ======================================================== */
-
       LEFT JOIN first_punch fp
-
         ON fp.employee_code =
            p.admission_id
 
-      /* ========================================================
-         ATTENDANCE
-         ======================================================== */
-
       LEFT JOIN attendance_summary att
-
         ON att.employee_code =
            p.admission_id
 
         AND att.month_start =
             rm.month_start
 
-      /* ========================================================
-         REGULAR FEE
-         ======================================================== */
-
       LEFT JOIN regular_fee_summary regular
-
         ON regular.player_id =
            p.player_id
 
         AND regular.month_start =
             rm.month_start
 
-      /* ========================================================
-         ONE-ON-ONE FEE
-         ======================================================== */
-
       LEFT JOIN one_on_one_summary one_on_one
-
         ON one_on_one.player_id =
            p.player_id
 
         AND one_on_one.month_start =
             rm.month_start
-
-      /* ========================================================
-         PLAYER MUST HAVE FIRST PUNCH BY MONTH
-
-         This prevents players with no attendance from being
-         shown as having attendance days before their first punch.
-         ======================================================== */
 
       WHERE
 
@@ -1071,11 +973,12 @@ exports.getPlayerMonthlyReport = async (req, res) => {
               - INTERVAL '1 day'
             )::date,
 
-            $2::date
+            $2::date,
+
+            CURRENT_DATE
 
           )
     `;
-
 
     const values = [
       fromDate,
@@ -1083,6 +986,10 @@ exports.getPlayerMonthlyReport = async (req, res) => {
     ];
 
     let index = 3;
+
+    // ============================================================
+    // SEARCH
+    // ============================================================
 
     if (search) {
       query += `
@@ -1106,6 +1013,10 @@ exports.getPlayerMonthlyReport = async (req, res) => {
       index++;
     }
 
+    // ============================================================
+    // PLAYER ID
+    // ============================================================
+
     if (player_id) {
       query += `
 
@@ -1120,6 +1031,9 @@ exports.getPlayerMonthlyReport = async (req, res) => {
       index++;
     }
 
+    // ============================================================
+    // ORDER
+    // ============================================================
 
     query += `
 
@@ -1137,6 +1051,9 @@ exports.getPlayerMonthlyReport = async (req, res) => {
         values
       );
 
+    // ============================================================
+    // RESPONSE
+    // ============================================================
 
     const rows =
       result.rows.map(
@@ -1146,9 +1063,7 @@ exports.getPlayerMonthlyReport = async (req, res) => {
             row.admission_id,
 
           player_id:
-            Number(
-              row.player_id
-            ),
+            Number(row.player_id),
 
           player_name:
             row.player_name,
@@ -1163,9 +1078,7 @@ exports.getPlayerMonthlyReport = async (req, res) => {
             row.month,
 
           year:
-            Number(
-              row.year
-            ),
+            Number(row.year),
 
           first_punch_date:
             row.first_punch_date,
@@ -1177,14 +1090,10 @@ exports.getPlayerMonthlyReport = async (req, res) => {
             row.attendance_end_date,
 
           present:
-            Number(
-              row.present || 0
-            ),
+            Number(row.present || 0),
 
           absent:
-            Number(
-              row.absent || 0
-            ),
+            Number(row.absent || 0),
 
           total_working_days:
             Number(
@@ -1230,9 +1139,7 @@ exports.getPlayerMonthlyReport = async (req, res) => {
       "Monthly player report fetched successfully.",
       {
         from_date: fromDate,
-
         to_date: toDate,
-
         data: rows,
       }
     );
