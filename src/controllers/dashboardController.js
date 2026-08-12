@@ -950,14 +950,21 @@ exports.getDashboardCharts = async (req, res) => {
 exports.getDashboardRevenueAndActivities = async (req, res) => {
   try {
     const [revenueTrend, activities] = await Promise.all([
-      // Revenue Trend - Last 6 Months (Net Revenue)
+
+      // =========================================
+      // Revenue Trend - Last 6 Months
+      // Net Revenue
+      // =========================================
+
       pool.query(`
         WITH months AS (
 
           SELECT
             DATE_TRUNC('month', CURRENT_DATE)
-            - (INTERVAL '1 month' * generate_series(5, 0, -1))
-            AS month_date
+            - (
+                INTERVAL '1 month'
+                * generate_series(5, 0, -1)
+              ) AS month_date
 
         )
 
@@ -977,44 +984,58 @@ exports.getDashboardRevenueAndActivities = async (req, res) => {
 
         LEFT JOIN (
 
-          -- Regular Player Fee Revenue
           SELECT
             amount,
             payment_date AS transaction_date
+
           FROM tbl_player_fees
+
           WHERE status = 'Paid'
 
           UNION ALL
 
-          -- One-On-One Revenue
+          SELECT
+            regular_fee AS amount,
+            admission_date AS transaction_date
+
+          FROM tbl_players
+
+          WHERE regular_fee > 0
+
+
+          UNION ALL
+
           SELECT
             fee_amount AS amount,
             application_date AS transaction_date
+
           FROM tbl_one_on_one_applications
 
           UNION ALL
 
-          -- Ground Booking Revenue
           SELECT
             total_amount AS amount,
             booking_date AS transaction_date
+
           FROM tbl_ground_booking
+
           WHERE status = 'Confirmed'
 
           UNION ALL
 
-          -- Salary Expense
           SELECT
             -net_salary AS amount,
             payment_date AS transaction_date
+
           FROM tbl_employee_salary
+
 
           UNION ALL
 
-          -- Other Expenditure
           SELECT
             -amount AS amount,
             expenditure_date AS transaction_date
+
           FROM tbl_expenditure
 
         ) transactions
@@ -1029,9 +1050,10 @@ exports.getDashboardRevenueAndActivities = async (req, res) => {
 
         ORDER BY
           months.month_date;
+
       `),
 
-      // Recent Activities
+
       pool.query(`
         SELECT
           module_name,
@@ -1039,12 +1061,20 @@ exports.getDashboardRevenueAndActivities = async (req, res) => {
           description,
           performed_by,
           created_at
+
         FROM tbl_notification_logs
+
         WHERE NOT (
           module_name = 'Ground Booking'
-          AND action IN ('Confirmed', 'Cancelled')
+          AND action IN (
+            'Confirmed',
+            'Cancelled'
+          )
         )
-        ORDER BY created_at DESC
+
+        ORDER BY
+          created_at DESC
+
         LIMIT 4;
       `),
     ]);
@@ -1068,13 +1098,19 @@ exports.getDashboardRevenueAndActivities = async (req, res) => {
         })),
       },
     );
+
   } catch (error) {
-    console.error(error);
+
+    console.error(
+      "Revenue Trend Error:",
+      error
+    );
 
     return sendErrorResponse(
       res,
       500,
-      error.message || "Failed to fetch dashboard data.",
+      error.message ||
+      "Failed to fetch dashboard data.",
     );
   }
 };
