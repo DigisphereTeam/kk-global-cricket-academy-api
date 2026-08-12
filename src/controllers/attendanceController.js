@@ -673,6 +673,10 @@ exports.getAttendanceTimeline = async (req, res) => {
   } = req.query;
 
   try {
+    // ============================================================
+    // VALIDATE EMPLOYEE TYPE
+    // ============================================================
+
     if (
       !employee_type ||
       !["Player", "Coach", "Staff"].includes(employee_type)
@@ -683,6 +687,10 @@ exports.getAttendanceTimeline = async (req, res) => {
         "Employee type must be Player, Coach or Staff."
       );
     }
+
+    // ============================================================
+    // VALIDATE EMPLOYEE ID
+    // ============================================================
 
     if (!employee_id) {
       return sendErrorResponse(
@@ -700,18 +708,9 @@ exports.getAttendanceTimeline = async (req, res) => {
       );
     }
 
-    /*
-     * ============================================================
-     * DATE RANGE
-     * ============================================================
-     *
-     * If dates are not provided:
-     * from_date = first day of current month
-     * to_date   = today
-     *
-     * If dates are provided:
-     * use the provided date range.
-     */
+    // ============================================================
+    // DATE RANGE
+    // ============================================================
 
     const now = new Date();
 
@@ -722,8 +721,12 @@ exports.getAttendanceTimeline = async (req, res) => {
     let fromDate;
     let toDate;
 
+    // ============================================================
+    // DEFAULT:
+    // FIRST DAY OF CURRENT MONTH -> TODAY
+    // ============================================================
+
     if (!from_date && !to_date) {
-      // First day of current month
       const currentMonthStart = new Date(
         now.toLocaleString("en-US", {
           timeZone: "Asia/Kolkata",
@@ -741,7 +744,10 @@ exports.getAttendanceTimeline = async (req, res) => {
 
       toDate = today;
     } else {
-      // If one is provided, both are required
+      // ==========================================================
+      // BOTH DATES REQUIRED
+      // ==========================================================
+
       if (!from_date || !to_date) {
         return sendErrorResponse(
           res,
@@ -750,7 +756,10 @@ exports.getAttendanceTimeline = async (req, res) => {
         );
       }
 
-      // Validate date format
+      // ==========================================================
+      // VALIDATE DATE FORMAT
+      // ==========================================================
+
       if (
         !/^\d{4}-\d{2}-\d{2}$/.test(from_date) ||
         !/^\d{4}-\d{2}-\d{2}$/.test(to_date)
@@ -766,7 +775,10 @@ exports.getAttendanceTimeline = async (req, res) => {
       toDate = to_date;
     }
 
-    // Validate date range
+    // ============================================================
+    // VALIDATE DATE RANGE
+    // ============================================================
+
     if (fromDate > toDate) {
       return sendErrorResponse(
         res,
@@ -775,7 +787,10 @@ exports.getAttendanceTimeline = async (req, res) => {
       );
     }
 
-    // Don't allow future to_date
+    // ============================================================
+    // DON'T ALLOW FUTURE DATE
+    // ============================================================
+
     if (toDate > today) {
       return sendErrorResponse(
         res,
@@ -784,36 +799,55 @@ exports.getAttendanceTimeline = async (req, res) => {
       );
     }
 
-    /*
-     * ============================================================
-     * GET EMPLOYEE CODE
-     * ============================================================
-     */
+    // ============================================================
+    // GET EMPLOYEE CODE
+    // ============================================================
 
     let employeeCodeQuery = "";
 
+    // ============================================================
+    // PLAYER
+    // ============================================================
+
     if (employee_type === "Player") {
       employeeCodeQuery = `
-        SELECT admission_id AS employee_code
+        SELECT
+          player_id AS employee_id,
+          admission_id AS employee_code,
+          full_name AS employee_name
         FROM tbl_players
         WHERE player_id = $1
-  `;
+      `;
     }
+
+    // ============================================================
+    // COACH
+    // ============================================================
 
     if (employee_type === "Coach") {
       employeeCodeQuery = `
-        SELECT coach_code AS employee_code
+        SELECT
+          coach_id AS employee_id,
+          coach_code AS employee_code,
+          full_name AS employee_name
         FROM tbl_coach
         WHERE coach_id = $1
-  `;
+      `;
     }
+
+    // ============================================================
+    // STAFF
+    // ============================================================
 
     if (employee_type === "Staff") {
       employeeCodeQuery = `
-        SELECT staff_code AS employee_code
+        SELECT
+          staff_id AS employee_id,
+          staff_code AS employee_code,
+          full_name AS employee_name
         FROM tbl_staff
         WHERE staff_id = $1
-  `;
+      `;
     }
 
     const employee = await pool.query(
@@ -829,42 +863,80 @@ exports.getAttendanceTimeline = async (req, res) => {
       );
     }
 
+    const employeeData = employee.rows[0];
+
     const employeeCode =
-      employee.rows[0].employee_code;
+      employeeData.employee_code;
+
+    // ============================================================
+    // REGULAR TIME SLOTS
+    // ============================================================
 
     /*
-     * ============================================================
-     * ATTENDANCE TIMELINE
-     * ============================================================
+     * REGULAR MORNING
+     *
+     * Actual:
+     * 06:00 AM - 08:00 AM
+     *
+     * Buffer:
+     * 25 minutes before
+     *
+     * Final:
+     * 05:35 AM - 08:00 AM
      */
+
+    const regularMorningStart =
+      5 * 60 + 35; // 05:35
+
+    const regularMorningEnd =
+      8 * 60; // 08:00
+
+    /*
+     * REGULAR EVENING
+     *
+     * Actual:
+     * 04:30 PM - 06:30 PM
+     *
+     * Buffer:
+     * 25 minutes before
+     *
+     * Final:
+     * 04:05 PM - 06:30 PM
+     */
+
+    const regularEveningStart =
+      16 * 60 + 5; // 16:05
+
+    const regularEveningEnd =
+      18 * 60 + 30; // 18:30
+
+    // ============================================================
+    // GET ALL ATTENDANCE + ALL PUNCHES
+    // ============================================================
 
     const result = await pool.query(
       `
-      WITH dates AS(
-    SELECT generate_series(
-      $2:: date,
-      $3:: date,
-      interval '1 day'
-    ):: date AS attendance_date
-  )
+      WITH dates AS (
+        SELECT
+          generate_series(
+            $2::date,
+            $3::date,
+            interval '1 day'
+          )::date AS attendance_date
+      )
 
-SELECT
-d.attendance_date AS payroll_date,
-  a.attendance_id,
+      SELECT
+        d.attendance_date AS payroll_date,
 
-  MIN(
-    CASE
-            WHEN LOWER(l.punch_type) = 'in'
-            THEN l.punch_time
-          END
-  ) AS time_in,
+        a.attendance_id,
 
-    MAX(
-      CASE
-            WHEN LOWER(l.punch_type) = 'out'
-            THEN l.punch_time
-          END
-    ) AS time_out
+        l.punch_type,
+
+        l.punch_time,
+
+        l.branch_name,
+
+        l.device_id
 
       FROM dates d
 
@@ -875,13 +947,10 @@ d.attendance_date AS payroll_date,
       LEFT JOIN tbl_attendance_logs l
         ON l.attendance_id = a.attendance_id
 
-      GROUP BY
-d.attendance_date,
-  a.attendance_id
-
       ORDER BY
-d.attendance_date DESC;
-`,
+        d.attendance_date DESC,
+        l.punch_time ASC;
+      `,
       [
         employeeCode,
         fromDate,
@@ -889,135 +958,437 @@ d.attendance_date DESC;
       ]
     );
 
-    /*
-     * ============================================================
-     * FORMAT RESPONSE
-     * ============================================================
-     */
+    // ============================================================
+    // GROUP DATABASE ROWS BY DATE
+    // ============================================================
 
-    const attendance = result.rows.map((row) => {
+    const dateMap = new Map();
+
+    for (const row of result.rows) {
+      const dateKey = row.payroll_date;
+
+      if (!dateMap.has(dateKey)) {
+        dateMap.set(dateKey, {
+          attendance_id:
+            row.attendance_id || null,
+
+          punches: [],
+        });
+      }
+
+      const dateData =
+        dateMap.get(dateKey);
+
+      // ==========================================================
+      // KEEP ATTENDANCE ID
+      // ==========================================================
+
+      if (
+        row.attendance_id &&
+        !dateData.attendance_id
+      ) {
+        dateData.attendance_id =
+          row.attendance_id;
+      }
+
+      // ==========================================================
+      // KEEP EVERY PUNCH
+      // ==========================================================
+
+      if (
+        row.punch_type &&
+        row.punch_time
+      ) {
+        dateData.punches.push({
+          punch_type:
+            row.punch_type,
+
+          punch_time:
+            row.punch_time,
+
+          branch_name:
+            row.branch_name,
+
+          device_id:
+            row.device_id,
+        });
+      }
+    }
+
+    // ============================================================
+    // FINAL RESPONSE ARRAY
+    // ============================================================
+
+    const attendance = [];
+
+    // ============================================================
+    // PROCESS EACH DATE
+    // ============================================================
+
+    for (const [
+      attendanceDate,
+      dateData,
+    ] of dateMap.entries()) {
+      const punches =
+        dateData.punches || [];
+
+      // ==========================================================
+      // STATUS
+      //
+      // ONLY Present / Absent
+      // ==========================================================
+
       let status;
       let remarks;
       let marked_by = "-";
 
-      if (row.attendance_id) {
+      if (dateData.attendance_id) {
         status = "Present";
         remarks = "On Time";
         marked_by = "Coach";
-
-        if (
-          row.time_in &&
-          row.time_in > "09:00:00"
-        ) {
-          status = "Late";
-          remarks = "Late Entry";
-        }
-      } else if (row.payroll_date === today) {
-        status = "Pending";
-        remarks = "Attendance Yet to be Marked";
       } else {
         status = "Absent";
         remarks = "Not Attended";
       }
 
-      /*
-       * ----------------------------------------------------------
-       * BATCH / SESSION
-       * ----------------------------------------------------------
-       */
+      // ==========================================================
+      // NO PUNCHES
+      // ==========================================================
 
-      let batch = "One-to-One";
-      let session = 0;
+      if (punches.length === 0) {
+        attendance.push({
+          attendance_id:
+            dateData.attendance_id || null,
 
-      let regularSession = null;
+          employee_id:
+            Number(employee_id),
 
-      const inPunches = row.in_punches || [];
+          employee_type,
 
-      /*
-       * Check every IN punch.
-       *
-       * PetPooja gives UTC timestamps, so convert each
-       * punch to IST before checking the time.
-       */
+          employee_code:
+            employeeCode,
 
-      for (const punchTime of inPunches) {
-        if (!punchTime) continue;
+          employee_name:
+            employeeData.employee_name,
 
-        const punchDate = new Date(punchTime);
+          date: attendanceDate,
 
-        const istTime = punchDate.toLocaleTimeString(
-          "en-GB",
-          {
-            timeZone: "Asia/Kolkata",
-            hour12: false,
+          batch: null,
+
+          session: null,
+
+          status,
+
+          punch_type: null,
+
+          punch_time: null,
+
+          branch_name: null,
+
+          device_id: null,
+
+          marked_by,
+
+          remarks,
+        });
+
+        continue;
+      }
+
+      // ==========================================================
+      // CONVERT ALL PUNCHES TO IST
+      // ==========================================================
+
+      const punchesWithTime =
+        punches.map((punch) => {
+          const punchDate =
+            new Date(
+              punch.punch_time
+            );
+
+          const istTime =
+            punchDate.toLocaleTimeString(
+              "en-GB",
+              {
+                timeZone:
+                  "Asia/Kolkata",
+                hour12: false,
+              }
+            );
+
+          const [
+            hours,
+            minutes,
+            seconds = 0,
+          ] = istTime
+            .split(":")
+            .map(Number);
+
+          const punchMinutes =
+            hours * 60 +
+            minutes +
+            seconds / 60;
+
+          return {
+            ...punch,
+
+            punchMinutes,
+
+            punchDate,
+          };
+        });
+
+      // ==========================================================
+      // SESSION TRACKING
+      //
+      // IMPORTANT:
+      //
+      // IN -> starts a new session ONLY if there is
+      //       no currently active session.
+      //
+      // IN -> IN -> OUT
+      // is treated as ONE session.
+      //
+      // IN -> OUT -> IN -> OUT
+      // is treated as TWO sessions.
+      // ==========================================================
+
+      let sessionCounter = 0;
+
+      let currentSession = null;
+
+      // ==========================================================
+      // PROCESS EVERY PUNCH
+      // ==========================================================
+
+      for (const punch of punchesWithTime) {
+        const punchType =
+          punch.punch_type
+            ? punch.punch_type.toLowerCase()
+            : "";
+
+        // ========================================================
+        // IN PUNCH
+        // ========================================================
+
+        if (punchType === "in") {
+          /*
+           * If there is NO active session,
+           * create a new session.
+           */
+
+          if (!currentSession) {
+            sessionCounter++;
+
+            // ====================================================
+            // DETERMINE BATCH FROM FIRST IN
+            // ====================================================
+
+            let batch = "One-on-One";
+            let session = sessionCounter;
+
+            // ====================================================
+            // REGULAR MORNING
+            // ====================================================
+
+            if (
+              punch.punchMinutes >=
+              regularMorningStart &&
+              punch.punchMinutes <=
+              regularMorningEnd
+            ) {
+              batch = "Regular";
+              session = "Morning";
+            }
+
+            // ====================================================
+            // REGULAR EVENING
+            // ====================================================
+
+            else if (
+              punch.punchMinutes >=
+              regularEveningStart &&
+              punch.punchMinutes <=
+              regularEveningEnd
+            ) {
+              batch = "Regular";
+              session = "Evening";
+            }
+
+            // ====================================================
+            // CREATE ACTIVE SESSION
+            // ====================================================
+
+            currentSession = {
+              batch,
+              session,
+              sessionNumber:
+                sessionCounter,
+            };
           }
+
+          /*
+           * IMPORTANT:
+           *
+           * If another IN arrives before OUT,
+           * DO NOT create another session.
+           *
+           * Example:
+           *
+           * IN 05:56
+           * IN 06:00
+           *
+           * Both belong to same session.
+           */
+        }
+
+        // ========================================================
+        // OUT PUNCH
+        // ========================================================
+
+        else if (punchType === "out") {
+          /*
+           * If OUT exists without an IN,
+           * create a fallback session.
+           */
+
+          if (!currentSession) {
+            sessionCounter++;
+
+            currentSession = {
+              batch: "One-on-One",
+
+              session: sessionCounter,
+
+              sessionNumber:
+                sessionCounter,
+            };
+          }
+        }
+
+        // ========================================================
+        // IF SOMETHING UNKNOWN
+        // ========================================================
+
+        else {
+          /*
+           * Unknown punch type.
+           * Keep current session if available.
+           */
+
+          if (!currentSession) {
+            sessionCounter++;
+
+            currentSession = {
+              batch: "One-on-One",
+
+              session: sessionCounter,
+
+              sessionNumber:
+                sessionCounter,
+            };
+          }
+        }
+
+        // ========================================================
+        // ADD RECORD
+        // ========================================================
+
+        attendance.push({
+          attendance_id:
+            dateData.attendance_id,
+
+          employee_id:
+            Number(employee_id),
+
+          employee_type,
+
+          employee_code:
+            employeeCode,
+
+          employee_name:
+            employeeData.employee_name,
+
+          date: attendanceDate,
+
+          batch:
+            currentSession.batch,
+
+          session:
+            currentSession.session,
+
+          status,
+
+          punch_type:
+            punch.punch_type,
+
+          punch_time:
+            punch.punch_time,
+
+          branch_name:
+            punch.branch_name || null,
+
+          device_id:
+            punch.device_id || null,
+
+          marked_by,
+
+          remarks,
+        });
+
+        // ========================================================
+        // CLOSE SESSION AFTER OUT
+        // ========================================================
+
+        if (punchType === "out") {
+          currentSession = null;
+        }
+      }
+    }
+
+    // ============================================================
+    // SORT
+    //
+    // Latest date first
+    // Earliest punch first within date
+    // ============================================================
+
+    attendance.sort(
+      (a, b) => {
+        // Date descending
+        if (a.date !== b.date) {
+          return b.date.localeCompare(
+            a.date
+          );
+        }
+
+        // No punch
+        if (
+          !a.punch_time &&
+          !b.punch_time
+        ) {
+          return 0;
+        }
+
+        if (!a.punch_time) {
+          return 1;
+        }
+
+        if (!b.punch_time) {
+          return -1;
+        }
+
+        // Punch ascending
+        return (
+          new Date(a.punch_time) -
+          new Date(b.punch_time)
         );
-
-        const [
-          hours,
-          minutes,
-          seconds = 0,
-        ] = istTime.split(":").map(Number);
-
-        const punchMinutes =
-          hours * 60 +
-          minutes +
-          seconds / 60;
-
-        /*
-         * Regular Morning
-         */
-
-        if (
-          punchMinutes >= regularMorningStart &&
-          punchMinutes <= regularMorningEnd
-        ) {
-          regularSession = "Morning";
-          break;
-        }
-
-        /*
-         * Regular Evening
-         */
-
-        if (
-          punchMinutes >= regularEveningStart &&
-          punchMinutes <= regularEveningEnd
-        ) {
-          regularSession = "Evening";
-          break;
-        }
       }
+    );
 
-      /*
-       * If a regular punch was found:
-       *
-       * Regular + Morning/Evening
-       *
-       * Otherwise:
-       *
-       * One-to-One + number of IN punches
-       */
-
-      if (regularSession) {
-        batch = "Regular";
-        session = regularSession;
-      } else {
-        batch = "One-on-One";
-        session = inPunches.length;
-      }
-
-      return {
-        attendance_id: row.attendance_id,
-        date: row.payroll_date,
-        session: "Morning",
-        status,
-        time_in: row.time_in || "-",
-        time_out: row.time_out || "-",
-        marked_by,
-        remarks,
-      };
-    });
+    // ============================================================
+    // RESPONSE
+    // ============================================================
 
     return sendSuccessResponse(
       res,
@@ -1025,14 +1396,35 @@ d.attendance_date DESC;
       "Attendance timeline fetched successfully.",
       {
         from_date: fromDate,
+
         to_date: toDate,
+
         employee_type,
-        employee_id: Number(employee_id),
+
+        employee_id:
+          Number(employee_id),
+
+        employee: {
+          id:
+            Number(
+              employeeData.employee_id
+            ),
+
+          code:
+            employeeCode,
+
+          name:
+            employeeData.employee_name,
+        },
+
         attendance,
       }
     );
   } catch (error) {
-    console.error(error);
+    console.error(
+      "Get attendance timeline error:",
+      error
+    );
 
     return sendErrorResponse(
       res,
