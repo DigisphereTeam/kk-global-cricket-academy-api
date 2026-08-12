@@ -550,9 +550,7 @@ exports.getMonthlyAttendanceSummary = async (req, res) => {
         [employee_id]
       );
 
-    if (
-      employeeResult.rowCount === 0
-    ) {
+    if (employeeResult.rowCount === 0) {
       return sendErrorResponse(
         res,
         404,
@@ -567,7 +565,7 @@ exports.getMonthlyAttendanceSummary = async (req, res) => {
       employee.employee_code;
 
     // ============================================================
-    // GET CURRENT DATE IN IST
+    // CURRENT DATE IN IST
     // ============================================================
 
     const istToday =
@@ -587,43 +585,19 @@ exports.getMonthlyAttendanceSummary = async (req, res) => {
       .map(Number);
 
     // ============================================================
-    // DETERMINE LAST MONTH
-    //
-    // Current year:
-    // January -> current month
-    //
-    // Previous year:
-    // January -> December
-    //
-    // Future year:
-    // No months
-    // ============================================================
-
-    let lastMonth = 12;
-
-    if (year === currentYear) {
-      lastMonth = currentMonth;
-    }
-
-    if (year > currentYear) {
-      lastMonth = 0;
-    }
-
-    // ============================================================
     // FUTURE YEAR
     // ============================================================
 
-    if (lastMonth === 0) {
+    if (year > currentYear) {
       return sendSuccessResponse(
         res,
         200,
         "Monthly attendance fetched successfully.",
         {
           employee: {
-            id:
-              Number(
-                employee.employee_id
-              ),
+            id: Number(
+              employee.employee_id
+            ),
 
             code:
               employeeCode,
@@ -641,7 +615,8 @@ exports.getMonthlyAttendanceSummary = async (req, res) => {
             absent: 0,
             late: 0,
             total_working_days: 0,
-            attendance_percentage: "0%",
+            attendance_percentage:
+              "0%",
           },
 
           monthly_attendance: [],
@@ -650,156 +625,402 @@ exports.getMonthlyAttendanceSummary = async (req, res) => {
     }
 
     // ============================================================
-    // MONTHLY ATTENDANCE QUERY
+    // DETERMINE END DATE
+    //
+    // Current year:
+    //     Today
+    //
+    // Previous year:
+    //     December 31
+    // ============================================================
+
+    let endDate;
+
+    if (year === currentYear) {
+      endDate = istToday;
+    } else {
+      endDate = `${year}-12-31`;
+    }
+
+    // ============================================================
+    // GET FIRST PUNCH DATE
     //
     // IMPORTANT:
     //
-    // We generate EVERY DATE.
+    // We use the employee's FIRST EVER PUNCH.
     //
     // Example:
     //
-    // August 1
-    // August 2
-    // August 3
-    // ...
-    // August 12
+    // First punch:
+    // 2026-07-15 05:27 AM IST
     //
-    // Then we check whether attendance exists.
+    // Attendance starts:
+    // 2026-07-15
     //
-    // Attendance exists:
-    //     Present
+    // July 1 - July 14 are NOT counted as absent.
+    // ============================================================
+
+    const firstPunchResult =
+      await pool.query(
+        `
+        SELECT
+          MIN(l.punch_time) AS first_punch_time
+
+        FROM tbl_attendance a
+
+        INNER JOIN tbl_attendance_logs l
+          ON l.attendance_id =
+             a.attendance_id
+
+        WHERE a.employee_code = $1
+
+          AND l.punch_time IS NOT NULL
+        `,
+        [employeeCode]
+      );
+
+    // ============================================================
+    // NO PUNCH FOUND
+    // ============================================================
+
+    if (
+      !firstPunchResult.rows[0] ||
+      !firstPunchResult.rows[0]
+        .first_punch_time
+    ) {
+      return sendSuccessResponse(
+        res,
+        200,
+        "Monthly attendance fetched successfully.",
+        {
+          employee: {
+            id: Number(
+              employee.employee_id
+            ),
+
+            code:
+              employeeCode,
+
+            name:
+              employee.employee_name,
+
+            employee_type,
+          },
+
+          year,
+
+          statistics: {
+            present: 0,
+            absent: 0,
+            late: 0,
+            total_working_days: 0,
+            attendance_percentage:
+              "0%",
+          },
+
+          monthly_attendance: [],
+        }
+      );
+    }
+
+    // ============================================================
+    // CONVERT FIRST PUNCH TO IST DATE
+    // ============================================================
+
+    const firstPunchTime =
+      firstPunchResult.rows[0]
+        .first_punch_time;
+
+    const firstPunchDate =
+      new Date(
+        firstPunchTime
+      ).toLocaleDateString(
+        "en-CA",
+        {
+          timeZone:
+            "Asia/Kolkata",
+        }
+      );
+
+    // ============================================================
+    // IF EMPLOYEE'S FIRST PUNCH IS AFTER REQUESTED YEAR
     //
-    // Attendance does not exist:
-    //     Absent
+    // Example:
+    //
+    // First punch = 2027
+    // Requested year = 2026
+    //
+    // No attendance for 2026.
+    // ============================================================
+
+    const firstPunchYear =
+      Number(
+        firstPunchDate
+          .split("-")[0]
+      );
+
+    if (firstPunchYear > year) {
+      return sendSuccessResponse(
+        res,
+        200,
+        "Monthly attendance fetched successfully.",
+        {
+          employee: {
+            id: Number(
+              employee.employee_id
+            ),
+
+            code:
+              employeeCode,
+
+            name:
+              employee.employee_name,
+
+            employee_type,
+          },
+
+          year,
+
+          statistics: {
+            present: 0,
+            absent: 0,
+            late: 0,
+            total_working_days: 0,
+            attendance_percentage:
+              "0%",
+          },
+
+          monthly_attendance: [],
+        }
+      );
+    }
+
+    // ============================================================
+    // START DATE
+    //
+    // If requested year is the same as first punch year:
+    //
+    //     first punch date
+    //
+    // Otherwise:
+    //
+    //     January 1 of requested year
+    //
+    // Example:
+    //
+    // First punch = 2026-07-15
+    //
+    // Request 2026:
+    //     2026-07-15 -> today
+    //
+    // Request 2027:
+    //     2027-01-01 -> 2027-12-31
+    // ============================================================
+
+    let startDate;
+
+    if (year === firstPunchYear) {
+      startDate = firstPunchDate;
+    } else {
+      startDate = `${year}-01-01`;
+    }
+
+    // ============================================================
+    // SAFETY CHECK
+    // ============================================================
+
+    if (startDate > endDate) {
+      return sendSuccessResponse(
+        res,
+        200,
+        "Monthly attendance fetched successfully.",
+        {
+          employee: {
+            id: Number(
+              employee.employee_id
+            ),
+
+            code:
+              employeeCode,
+
+            name:
+              employee.employee_name,
+
+            employee_type,
+          },
+
+          year,
+
+          statistics: {
+            present: 0,
+            absent: 0,
+            late: 0,
+            total_working_days: 0,
+            attendance_percentage:
+              "0%",
+          },
+
+          monthly_attendance: [],
+        }
+      );
+    }
+
+    // ============================================================
+    // MAIN ATTENDANCE QUERY
+    //
+    // LOGIC:
+    //
+    // 1. Generate dates from first punch date.
+    //
+    // 2. Get all punch dates for employee.
+    //
+    // 3. If at least one punch exists:
+    //       Present
+    //
+    // 4. If no punch:
+    //       Absent
+    //
+    // 5. Multiple punches on same date:
+    //       Still ONE present day.
     // ============================================================
 
     const attendanceResult =
       await pool.query(
         `
-        WITH months AS (
+        WITH calendar AS (
 
           SELECT
             generate_series(
-              1,
-              $3::int
-            )::int AS month_number
-
-        ),
-
-        calendar AS (
-
-          SELECT
-            generate_series(
-              make_date(
-                $2::int,
-                1,
-                1
-              ),
-
-              CASE
-                WHEN $2::int =
-                  EXTRACT(
-                    YEAR FROM CURRENT_DATE
-                  )::int
-
-                THEN CURRENT_DATE
-
-                ELSE make_date(
-                  $2::int,
-                  12,
-                  31
-                )
-              END,
-
+              $2::date,
+              $3::date,
               interval '1 day'
-
             )::date AS attendance_date
 
         ),
 
-        attendance_days AS (
+        /*
+         * ========================================================
+         * ALL PUNCH DATES
+         * ========================================================
+         *
+         * We only need DISTINCT dates here.
+         *
+         * Example:
+         *
+         * 05:27 IN
+         * 05:56 OUT
+         * 05:56 IN
+         * 06:05 OUT
+         *
+         * becomes:
+         *
+         * 2026-08-12
+         *
+         * ONE present day.
+         */
+
+        punch_dates AS (
 
           SELECT DISTINCT
 
-            payroll_date::date
+            (
+              l.punch_time
+              AT TIME ZONE
+              'Asia/Kolkata'
+            )::date
               AS attendance_date
 
-          FROM tbl_attendance
+          FROM tbl_attendance a
 
-          WHERE employee_code = $1
+          INNER JOIN tbl_attendance_logs l
+            ON l.attendance_id =
+               a.attendance_id
 
-            AND payroll_date::date >=
-              make_date(
-                $2::int,
-                1,
-                1
-              )
+          WHERE a.employee_code = $1
 
-            AND payroll_date::date <=
+            AND l.punch_time IS NOT NULL
 
-              CASE
-                WHEN $2::int =
-                  EXTRACT(
-                    YEAR FROM CURRENT_DATE
-                  )::int
+            AND (
+              l.punch_time
+              AT TIME ZONE
+              'Asia/Kolkata'
+            )::date >= $2::date
 
-                THEN CURRENT_DATE
-
-                ELSE make_date(
-                  $2::int,
-                  12,
-                  31
-                )
-              END
+            AND (
+              l.punch_time
+              AT TIME ZONE
+              'Asia/Kolkata'
+            )::date <= $3::date
 
         ),
+
+        /*
+         * ========================================================
+         * MONTHLY SUMMARY
+         * ========================================================
+         */
 
         monthly_summary AS (
 
           SELECT
 
             EXTRACT(
-              MONTH FROM c.attendance_date
+              MONTH FROM
+              c.attendance_date
             )::int AS month_number,
 
+            /*
+             * Every date between first punch
+             * and end date is counted.
+             */
+
             COUNT(*)::int
-              AS working_days,
+              AS total_dates,
+
+            /*
+             * Date has at least one punch.
+             */
 
             COUNT(
-              ad.attendance_date
+              pd.attendance_date
             )::int
               AS present,
+
+            /*
+             * Date has no punch.
+             */
 
             (
               COUNT(*)
               -
               COUNT(
-                ad.attendance_date
+                pd.attendance_date
               )
             )::int
               AS absent
 
           FROM calendar c
 
-          LEFT JOIN attendance_days ad
-            ON ad.attendance_date =
+          LEFT JOIN punch_dates pd
+            ON pd.attendance_date =
                c.attendance_date
 
           GROUP BY
             EXTRACT(
-              MONTH FROM c.attendance_date
+              MONTH FROM
+              c.attendance_date
             )
 
         )
 
         SELECT
 
-          m.month_number,
+          ms.month_number,
 
           TRIM(
             TO_CHAR(
               TO_DATE(
-                m.month_number::text,
+                ms.month_number::text,
                 'MM'
               ),
               'Month'
@@ -807,7 +1028,7 @@ exports.getMonthlyAttendanceSummary = async (req, res) => {
           ) AS month,
 
           COALESCE(
-            ms.working_days,
+            ms.total_dates,
             0
           ) AS working_days,
 
@@ -828,7 +1049,7 @@ exports.getMonthlyAttendanceSummary = async (req, res) => {
           CASE
 
             WHEN COALESCE(
-              ms.working_days,
+              ms.total_dates,
               0
             ) = 0
 
@@ -841,26 +1062,22 @@ exports.getMonthlyAttendanceSummary = async (req, res) => {
                   0
                 )::numeric
                 /
-                ms.working_days::numeric
+                ms.total_dates::numeric
               ) * 100,
               0
             )
 
           END AS attendance_percentage
 
-        FROM months m
-
-        LEFT JOIN monthly_summary ms
-          ON ms.month_number =
-             m.month_number
+        FROM monthly_summary ms
 
         ORDER BY
-          m.month_number DESC;
+          ms.month_number DESC;
         `,
         [
           employeeCode,
-          year,
-          lastMonth,
+          startDate,
+          endDate,
         ]
       );
 
@@ -912,7 +1129,7 @@ exports.getMonthlyAttendanceSummary = async (req, res) => {
       );
 
     // ============================================================
-    // CALCULATE OVERALL STATISTICS
+    // OVERALL STATISTICS
     // ============================================================
 
     const statistics =
@@ -941,7 +1158,7 @@ exports.getMonthlyAttendanceSummary = async (req, res) => {
       );
 
     // ============================================================
-    // OVERALL ATTENDANCE PERCENTAGE
+    // ATTENDANCE PERCENTAGE
     // ============================================================
 
     const attendancePercentage =
@@ -964,10 +1181,9 @@ exports.getMonthlyAttendanceSummary = async (req, res) => {
       "Monthly attendance fetched successfully.",
       {
         employee: {
-          id:
-            Number(
-              employee.employee_id
-            ),
+          id: Number(
+            employee.employee_id
+          ),
 
           code:
             employeeCode,
@@ -979,6 +1195,21 @@ exports.getMonthlyAttendanceSummary = async (req, res) => {
         },
 
         year,
+
+        /*
+         * This is useful for frontend.
+         *
+         * Example:
+         *
+         * attendance_start_date:
+         * 2026-07-15
+         */
+
+        attendance_start_date:
+          startDate,
+
+        attendance_end_date:
+          endDate,
 
         statistics: {
           present:
