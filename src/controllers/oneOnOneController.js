@@ -623,7 +623,10 @@ exports.getPlayerApplications = async (req, res) => {
         c.full_name AS coach_name,
         oa.focus_area,
         oa.payment_type,
-        'Active' AS status,
+        CASE
+          WHEN oa.is_active = TRUE THEN 'Active'
+          ELSE 'Inactive'
+        END AS status,
         2 AS sessions,
         oa.payment_status,
         oa.fee_amount,
