@@ -6,125 +6,131 @@ const {
 
 exports.getPlayerWiseReport = async (req, res) => {
   const {
+    search,
+    player_id,
     from_date,
     to_date,
+    player_type,
   } = req.query;
 
   try {
-
-
-    const isValidDate = (dateString) => {
-      if (!dateString) {
-        return true;
-      }
-
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
-        return false;
-      }
-
-      const [year, month, day] =
-        dateString.split("-").map(Number);
-
-      const date = new Date(
-        Date.UTC(year, month - 1, day)
-      );
-
-      return (
-        date.getUTCFullYear() === year &&
-        date.getUTCMonth() === month - 1 &&
-        date.getUTCDate() === day
-      );
-    };
-
-    if (from_date && !isValidDate(from_date)) {
-      return sendErrorResponse(
-        res,
-        400,
-        "Invalid from_date. Use YYYY-MM-DD format."
-      );
-    }
-
-    if (to_date && !isValidDate(to_date)) {
-      return sendErrorResponse(
-        res,
-        400,
-        "Invalid to_date. Use YYYY-MM-DD format."
-      );
-    }
-
-    const today = new Date();
-
-    const currentDate = new Date(
-      today.toLocaleString("en-US", {
-        timeZone: "Asia/Kolkata",
-      })
-    );
-
-    const year = currentDate.getFullYear();
-    const month = currentDate.getMonth();
-
-    // First day of current month
-    const defaultFromDate =
-      `${year}-${String(month + 1).padStart(2, "0")}-01`;
-
-    // Last day of current month
-    const lastDay =
-      new Date(year, month + 1, 0).getDate();
-
-    const defaultToDate =
-      `${year}-${String(month + 1).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
-
-    const fromDate = from_date || defaultFromDate;
-    const toDate = to_date || defaultToDate;
-
-
-    if (
-      new Date(fromDate) > new Date(toDate)
-    ) {
-      return sendErrorResponse(
-        res,
-        400,
-        "from_date cannot be greater than to_date."
-      );
-    }
-
-
     let query = `
       SELECT
-        p.player_id,
         p.admission_id,
-        p.full_name,
-        p.batch,
+        p.full_name AS player_name,
+
+        CASE
+          WHEN oo.player_id IS NOT NULL
+            THEN 'One-on-One'
+          ELSE 'Regular'
+        END AS batch,
+
         p.gender,
         p.age,
-        p.admission_date,
         p.date_of_birth,
+        p.admission_date,
         p.phone_number AS contact_number,
-        p.email,
         p.father_name,
         p.address
 
       FROM tbl_players p
 
-      WHERE 1=1
+      LEFT JOIN LATERAL (
+        SELECT
+          pf.player_id
+        FROM tbl_player_fees pf
+        WHERE pf.player_id = p.player_id
+          AND pf.is_active = TRUE
+          AND LOWER(pf.fee_type) = 'regular'
+          AND LOWER(pf.status) = 'paid'
+        ORDER BY
+          pf.payment_date DESC NULLS LAST,
+          pf.fee_id DESC
+        LIMIT 1
+      ) regular_fee ON TRUE
+
+      LEFT JOIN LATERAL (
+        SELECT
+          o.player_id
+        FROM tbl_one_on_one_applications o
+        WHERE o.player_id = p.player_id
+          AND o.is_active = TRUE
+          AND o.renewal_status = 'Active'
+          AND LOWER(o.payment_status) = 'paid'
+        ORDER BY
+          o.application_date DESC,
+          o.application_id DESC
+        LIMIT 1
+      ) oo ON TRUE
+
+      WHERE p.is_active = TRUE
     `;
 
     const values = [];
     let index = 1;
 
-    query += `
-      AND p.admission_date >= $${index}::date
-    `;
+    if (
+      player_type &&
+      player_type !== "undefined" &&
+      player_type !== "null"
+    ) {
+      query += `
+        AND (
+          CASE
+            WHEN oo.player_id IS NOT NULL
+              THEN 'One-on-One'
+            ELSE 'Regular'
+          END
+        ) = $${index}
+      `;
 
-    values.push(fromDate);
-    index++;
+      values.push(player_type);
+      index++;
+    }
 
-    query += `
-      AND p.admission_date <= $${index}::date
-    `;
+    if (search && search.trim() !== "") {
+      query += `
+        AND (
+          p.full_name ILIKE $${index}
+          OR p.admission_id ILIKE $${index}
+          OR p.phone_number ILIKE $${index}
+        )
+      `;
 
-    values.push(toDate);
-    index++;
+      values.push(`%${search.trim()}%`);
+      index++;
+    }
+
+    if (
+      player_id &&
+      player_id !== "undefined" &&
+      player_id !== "null"
+    ) {
+      query += `
+        AND p.player_id = $${index}
+      `;
+
+      values.push(Number(player_id));
+      index++;
+    }
+
+    if (from_date) {
+      query += `
+        AND p.admission_date >= $${index}::date
+      `;
+
+      values.push(from_date);
+      index++;
+    }
+
+    if (to_date) {
+      query += `
+        AND p.admission_date <= $${index}::date
+      `;
+
+      values.push(to_date);
+      index++;
+    }
 
     query += `
       ORDER BY
@@ -132,23 +138,14 @@ exports.getPlayerWiseReport = async (req, res) => {
         p.full_name ASC
     `;
 
-
-    const result = await pool.query(
-      query,
-      values
-    );
+    const result = await pool.query(query, values);
 
     return sendSuccessResponse(
       res,
       200,
       "Player report fetched successfully.",
-      {
-        from_date: fromDate,
-        to_date: toDate,
-        data: result.rows,
-      }
+      result.rows
     );
-
   } catch (error) {
     console.error(
       "Player Wise Report Error:",
@@ -158,8 +155,7 @@ exports.getPlayerWiseReport = async (req, res) => {
     return sendErrorResponse(
       res,
       500,
-      error.message ||
-      "Internal Server Error"
+      error.message || "Internal Server Error"
     );
   }
 };
