@@ -412,32 +412,36 @@ exports.getAllApplications = async (req, res) => {
     const [applications, totalApplications] = await Promise.all([
       pool.query(
         `
-    WITH ranked_applications AS (
-        SELECT
-            oa.*,
-            ROW_NUMBER() OVER (
-                PARTITION BY oa.player_id
-                ORDER BY
-                    CASE
-                        WHEN date_trunc('month', oa.application_date) =
-                             make_date($2, $1, 1)
-                        THEN 0
+        WITH ranked_applications AS (
+    SELECT
+        oa.*,
 
-                        WHEN date_trunc('month', oa.application_date) =
-                             make_date($2, $1, 1) - interval '1 month'
-                        THEN 1
+        ROW_NUMBER() OVER (
+            PARTITION BY oa.player_id
+            ORDER BY
+                CASE
+                    WHEN date_trunc('month', oa.application_date) =
+                         make_date($2, $1, 1)
+                    THEN 1
 
-                        WHEN oa.is_active = FALSE
-                        THEN 2
+                    WHEN date_trunc('month', oa.application_date) =
+                         make_date($2, $1, 1) - interval '1 month'
+                    THEN 2
 
-                        ELSE 3
-                    END,
-                    oa.application_date DESC,
-                    oa.application_id DESC
-            ) AS rn
-        FROM tbl_one_on_one_applications oa
-        WHERE oa.renewal_status = 'Active'
-    )
+                    WHEN oa.is_active = FALSE
+                    THEN 3
+
+                    ELSE 4
+                END,
+
+                oa.application_date DESC,
+                oa.application_id DESC
+        ) AS rn
+
+    FROM tbl_one_on_one_applications oa
+
+    WHERE oa.renewal_status = 'Active'
+)
 
     SELECT
         ra.application_id,
@@ -451,42 +455,58 @@ exports.getAllApplications = async (req, res) => {
 
         ra.focus_area,
         ra.payment_type,
-        ra.payment_status,
-        ra.fee_amount,
-        ra.preferred_slot,
-        ra.application_type,
-        ra.application_date,
-        ra.monthly_performance_review,
-        ra.remarks,
-        ra.is_active,
-        ra.created_at,
-        ra.updated_at,
 
-        EXTRACT(MONTH FROM ra.application_date)::INT AS application_month,
-        EXTRACT(YEAR FROM ra.application_date)::INT AS application_year
+    -- Current month = actual status
+    -- Previous/inactive = Pending
+    CASE
+        WHEN date_trunc('month', ra.application_date) =
+             make_date($2, $1, 1)
+        THEN ra.payment_status
+        ELSE 'Pending'
 
-    FROM ranked_applications ra
+      END AS payment_status,
 
-    JOIN tbl_players p
-      ON p.player_id = ra.player_id
+      ra.fee_amount,
+      ra.preferred_slot,
+      ra.application_type,
+      ra.application_date,
+      ra.monthly_performance_review,
+      ra.remarks,
+      ra.is_active,
+      ra.created_at,
+      ra.updated_at,
 
-    LEFT JOIN tbl_coach c
-      ON c.coach_id = ra.coach_id
+      EXTRACT(MONTH FROM ra.application_date)::INT AS application_month,
+      EXTRACT(YEAR FROM ra.application_date)::INT AS application_year
 
-    WHERE
-        ra.rn = 1
-        AND (
-            date_trunc('month', ra.application_date) IN (
-                make_date($2, $1, 1),
-                make_date($2, $1, 1) - interval '1 month'
-            )
-            OR ra.is_active = FALSE
-        )
+      FROM ranked_applications ra
 
-    ORDER BY
-        ra.application_date DESC,
-        ra.application_id DESC;
-    `,
+      JOIN tbl_players p
+          ON p.player_id = ra.player_id
+
+      LEFT JOIN tbl_coach c
+          ON c.coach_id = ra.coach_id
+
+      WHERE
+          ra.rn = 1
+
+          AND (
+              -- Current month
+              date_trunc('month', ra.application_date) =
+              make_date($2, $1, 1)
+
+              -- OR previous month
+              OR date_trunc('month', ra.application_date) =
+              make_date($2, $1, 1) - interval '1 month'
+
+              -- OR inactive
+              OR ra.is_active = FALSE
+          )
+
+      ORDER BY
+          ra.application_date DESC,
+          ra.application_id DESC;
+        `,
         [month, year]
       ),
 
