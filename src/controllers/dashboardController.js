@@ -376,6 +376,10 @@ exports.getDashboardCharts = async (req, res) => {
   try {
     const [playerGrowth, feeCollection, attendance] = await Promise.all([
 
+      // =========================================
+      // Player Growth Chart
+      // =========================================
+
       pool.query(`
         WITH months AS (
 
@@ -413,63 +417,102 @@ exports.getDashboardCharts = async (req, res) => {
       `),
 
 
+      // =========================================
+      // Fee Collection
+      // =========================================
+
       pool.query(`
         SELECT
-
 
           /* =====================================
              PENDING FEES - PLAYER COUNT
              ===================================== */
 
           (
-            SELECT COUNT(
-              DISTINCT pending_players.player_id
-            )
+            SELECT COUNT(*)
 
             FROM (
 
-              /* =================================
+              /* =========================
                  REGULAR PLAYERS
-                 ================================= */
+                 ========================= */
 
-              SELECT
-                p.player_id
+              SELECT DISTINCT p.player_id
 
               FROM tbl_players p
 
               WHERE p.is_active = TRUE
-
-                /* Player must have joined */
+                AND p.fee_type = 'Regular Fee'
+                AND p.regular_fee >= 0
                 AND p.admission_date <= CURRENT_DATE
 
-                /* Due date is 4th
-                   Count only after 4th */
-                AND CURRENT_DATE >
+                /* =========================
+                   PAID / COVERED LAST MONTH
+                   ========================= */
+
+                AND (
+                  /* First month payment stored in tbl_players */
+
+                  (
+                    DATE_TRUNC(
+                      'month',
+                      p.admission_date
+                    ) =
                     DATE_TRUNC(
                       'month',
                       CURRENT_DATE
-                    ) + INTERVAL '3 day'
+                    ) - INTERVAL '1 month'
 
-                /* Player has NOT paid this month */
+                    AND p.fee_status = 'Paid'
+                  )
+
+                  OR
+
+                  /* Subsequent month payment stored in tbl_player_fees */
+
+                  EXISTS (
+                    SELECT 1
+
+                    FROM tbl_player_fees pf_last
+
+                    WHERE pf_last.player_id = p.player_id
+                      AND pf_last.status = 'Paid'
+                      AND pf_last.is_active = TRUE
+
+                      AND pf_last.payment_date >=
+                          DATE_TRUNC(
+                            'month',
+                            CURRENT_DATE
+                          ) - INTERVAL '1 month'
+
+                      AND pf_last.payment_date <
+                          DATE_TRUNC(
+                            'month',
+                            CURRENT_DATE
+                          )
+                  )
+                )
+
+                /* =========================
+                   HAS NOT PAID THIS MONTH
+                   ========================= */
+
                 AND NOT EXISTS (
-
                   SELECT 1
 
-                  FROM tbl_player_fees pf
+                  FROM tbl_player_fees pf_current
 
-                  WHERE pf.player_id = p.player_id
+                  WHERE pf_current.player_id = p.player_id
+                    AND pf_current.status = 'Paid'
+                    AND pf_current.is_active = TRUE
 
-                    AND pf.status = 'Paid'
-
-                    AND pf.is_active = TRUE
-
-                    AND pf.payment_date >=
+                    AND pf_current.payment_date >=
                         DATE_TRUNC(
                           'month',
                           CURRENT_DATE
                         )
 
-                    AND pf.payment_date <
+                    AND pf_current.payment_date <
                         DATE_TRUNC(
                           'month',
                           CURRENT_DATE
@@ -480,282 +523,388 @@ exports.getDashboardCharts = async (req, res) => {
               UNION
 
 
-              /* =================================
-                 ONE-ON-ONE PLAYERS
-                 ================================= */
+              /* =========================
+                 PLAYERS FROM FEE TABLE
+                 ========================= */
 
-              SELECT
-                o.player_id
+              SELECT DISTINCT pf_last.player_id
 
-              FROM tbl_one_on_one_applications o
+              FROM tbl_player_fees pf_last
 
-              INNER JOIN tbl_players p
-                ON p.player_id = o.player_id
-               AND p.is_active = TRUE
+              WHERE pf_last.status = 'Paid'
+                AND pf_last.is_active = TRUE
 
-              WHERE o.is_active = TRUE
+                /* Paid last month */
 
-                AND o.renewal_status = 'Active'
-
-                /* Player must have joined */
-                AND p.admission_date <= CURRENT_DATE
-
-                /* Due date is 4th
-                   Count only after 4th */
-                AND CURRENT_DATE >
+                AND pf_last.payment_date >=
                     DATE_TRUNC(
                       'month',
                       CURRENT_DATE
-                    ) + INTERVAL '3 day'
+                    ) - INTERVAL '1 month'
 
-                /* Player has NOT paid this month */
+                AND pf_last.payment_date <
+                    DATE_TRUNC(
+                      'month',
+                      CURRENT_DATE
+                    )
+
+                /* Has NOT paid this month */
+
                 AND NOT EXISTS (
-
                   SELECT 1
 
-                  FROM tbl_player_fees pf
+                  FROM tbl_player_fees pf_current
 
-                  WHERE pf.player_id = o.player_id
+                  WHERE pf_current.player_id =
+                        pf_last.player_id
 
-                    AND pf.status = 'Paid'
+                    AND pf_current.status = 'Paid'
+                    AND pf_current.is_active = TRUE
 
-                    AND pf.is_active = TRUE
-
-                    AND pf.payment_date >=
+                    AND pf_current.payment_date >=
                         DATE_TRUNC(
                           'month',
                           CURRENT_DATE
                         )
 
-                    AND pf.payment_date <
+                    AND pf_current.payment_date <
                         DATE_TRUNC(
                           'month',
                           CURRENT_DATE
                         ) + INTERVAL '1 month'
                 )
 
-            ) pending_players
+
+              UNION
+
+
+              /* =========================
+                 ONE-ON-ONE PLAYERS
+                 ========================= */
+
+              SELECT DISTINCT last_month.player_id
+
+              FROM tbl_one_on_one_applications last_month
+
+              WHERE last_month.is_active = TRUE
+                AND last_month.payment_status = 'Paid'
+
+                /* Paid last month */
+
+                AND last_month.application_date >=
+                    DATE_TRUNC(
+                      'month',
+                      CURRENT_DATE
+                    ) - INTERVAL '1 month'
+
+                AND last_month.application_date <
+                    DATE_TRUNC(
+                      'month',
+                      CURRENT_DATE
+                    )
+
+                /* Has NOT paid this month */
+
+                AND NOT EXISTS (
+                  SELECT 1
+
+                  FROM tbl_one_on_one_applications this_month
+
+                  WHERE this_month.player_id =
+                        last_month.player_id
+
+                    AND this_month.is_active = TRUE
+                    AND this_month.payment_status = 'Paid'
+
+                    AND this_month.application_date >=
+                        DATE_TRUNC(
+                          'month',
+                          CURRENT_DATE
+                        )
+
+                    AND this_month.application_date <
+                        DATE_TRUNC(
+                          'month',
+                          CURRENT_DATE
+                        ) + INTERVAL '1 month'
+                )
+
+            ) AS pending_players
 
           ) AS pending,
 
 
           /* =====================================
-             COLLECTED FEES - PLAYER COUNT
+             PAID FEES - CURRENT MONTH
              ===================================== */
 
           (
             SELECT COUNT(
-              DISTINCT collected_players.player_id
+              DISTINCT paid_players.player_id
             )
 
             FROM (
 
-              /* =================================
+              /* =========================
                  REGULAR PLAYERS
-                 ================================= */
+                 ========================= */
 
-              SELECT
-                p.player_id
+              SELECT DISTINCT p.player_id
 
               FROM tbl_players p
 
               WHERE p.is_active = TRUE
-
-                /* Player must have joined */
+                AND p.fee_type = 'Regular Fee'
+                AND p.regular_fee >= 0
                 AND p.admission_date <= CURRENT_DATE
 
-                /* Player has paid this month */
-                AND EXISTS (
+                /* Paid this month */
 
-                  SELECT 1
+                AND (
+                  /* First month payment stored in tbl_players */
 
-                  FROM tbl_player_fees pf
+                  (
+                    DATE_TRUNC(
+                      'month',
+                      p.admission_date
+                    ) =
+                    DATE_TRUNC(
+                      'month',
+                      CURRENT_DATE
+                    )
 
-                  WHERE pf.player_id = p.player_id
+                    AND p.fee_status = 'Paid'
+                  )
 
-                    AND pf.status = 'Paid'
+                  OR
 
-                    AND pf.is_active = TRUE
+                  /* Payment stored in tbl_player_fees */
 
-                    AND pf.payment_date >=
-                        DATE_TRUNC(
-                          'month',
-                          CURRENT_DATE
-                        )
+                  EXISTS (
+                    SELECT 1
 
-                    AND pf.payment_date <
-                        DATE_TRUNC(
-                          'month',
-                          CURRENT_DATE
-                        ) + INTERVAL '1 month'
+                    FROM tbl_player_fees pf_current
+
+                    WHERE pf_current.player_id =
+                          p.player_id
+
+                      AND pf_current.status = 'Paid'
+                      AND pf_current.is_active = TRUE
+
+                      AND pf_current.payment_date >=
+                          DATE_TRUNC(
+                            'month',
+                            CURRENT_DATE
+                          )
+
+                      AND pf_current.payment_date <
+                          DATE_TRUNC(
+                            'month',
+                            CURRENT_DATE
+                          ) + INTERVAL '1 month'
+                  )
                 )
 
 
               UNION
 
 
-              /* =================================
+              /* =========================
+                 PLAYERS FROM FEE TABLE
+                 ========================= */
+
+              SELECT DISTINCT pf_current.player_id
+
+              FROM tbl_player_fees pf_current
+
+              WHERE pf_current.status = 'Paid'
+                AND pf_current.is_active = TRUE
+
+                /* Paid this month */
+
+                AND pf_current.payment_date >=
+                    DATE_TRUNC(
+                      'month',
+                      CURRENT_DATE
+                    )
+
+                AND pf_current.payment_date <
+                    DATE_TRUNC(
+                      'month',
+                      CURRENT_DATE
+                    ) + INTERVAL '1 month'
+
+
+              UNION
+
+
+              /* =========================
                  ONE-ON-ONE PLAYERS
-                 ================================= */
+                 ========================= */
 
-              SELECT
-                o.player_id
+              SELECT DISTINCT this_month.player_id
 
-              FROM tbl_one_on_one_applications o
+              FROM tbl_one_on_one_applications this_month
 
-              INNER JOIN tbl_players p
-                ON p.player_id = o.player_id
-               AND p.is_active = TRUE
+              WHERE this_month.is_active = TRUE
+                AND this_month.payment_status = 'Paid'
 
-              WHERE o.is_active = TRUE
+                /* Paid this month */
 
-                AND o.renewal_status = 'Active'
+                AND this_month.application_date >=
+                    DATE_TRUNC(
+                      'month',
+                      CURRENT_DATE
+                    )
 
-                /* Player must have joined */
-                AND p.admission_date <= CURRENT_DATE
+                AND this_month.application_date <
+                    DATE_TRUNC(
+                      'month',
+                      CURRENT_DATE
+                    ) + INTERVAL '1 month'
 
-                /* Player has paid this month */
-                AND EXISTS (
+            ) AS paid_players
 
-                  SELECT 1
-
-                  FROM tbl_player_fees pf
-
-                  WHERE pf.player_id = o.player_id
-
-                    AND pf.status = 'Paid'
-
-                    AND pf.is_active = TRUE
-
-                    AND pf.payment_date >=
-                        DATE_TRUNC(
-                          'month',
-                          CURRENT_DATE
-                        )
-
-                    AND pf.payment_date <
-                        DATE_TRUNC(
-                          'month',
-                          CURRENT_DATE
-                        ) + INTERVAL '1 month'
-                )
-
-            ) collected_players
-
-          ) AS collected;
+          ) AS paid;
 
       `),
+
 
       // =========================================
       // Weekly Attendance Chart
       // =========================================
 
       pool.query(`
-  WITH days AS (
+        WITH days AS (
 
-    SELECT generate_series(
-      CURRENT_DATE - INTERVAL '5 days',
-      CURRENT_DATE,
-      INTERVAL '1 day'
-    )::date AS attendance_date
+          SELECT generate_series(
+            CURRENT_DATE - INTERVAL '5 days',
+            CURRENT_DATE,
+            INTERVAL '1 day'
+          )::date AS attendance_date
 
-  ),
+        ),
 
-  total_players AS (
+        total_players AS (
 
-    SELECT
-      COUNT(*) AS total
-    FROM tbl_players
-    WHERE is_active = TRUE
+          SELECT
+            COUNT(*) AS total
 
-  ),
+          FROM tbl_players
 
-  attendance_data AS (
+          WHERE is_active = TRUE
 
-    SELECT
-      ta.payroll_date,
-      COUNT(DISTINCT ta.employee_code) AS present
+        ),
 
-    FROM tbl_attendance ta
+        attendance_data AS (
 
-    INNER JOIN tbl_players p
-      ON p.admission_id = ta.employee_code
+          SELECT
+            ta.payroll_date,
+            COUNT(DISTINCT ta.employee_code) AS present
 
-    WHERE ta.payroll_date >= CURRENT_DATE - INTERVAL '5 days'
-      AND ta.payroll_date <= CURRENT_DATE
-      AND p.is_active = TRUE
+          FROM tbl_attendance ta
 
-    GROUP BY ta.payroll_date
+          INNER JOIN tbl_players p
+            ON p.admission_id = ta.employee_code
 
-  )
+          WHERE ta.payroll_date >=
+                CURRENT_DATE - INTERVAL '5 days'
 
-  SELECT
+            AND ta.payroll_date <= CURRENT_DATE
 
-    TO_CHAR(
-      d.attendance_date,
-      'Dy'
-    ) AS day,
+            AND p.is_active = TRUE
 
-    d.attendance_date,
+          GROUP BY
+            ta.payroll_date
 
-    /* Present Count */
-    COALESCE(
-      ad.present,
-      0
-    )::INT AS present_count,
-
-    /* Absent Count */
-    GREATEST(
-      tp.total - COALESCE(ad.present, 0),
-      0
-    )::INT AS absent_count,
-
-    /* Present Percentage */
-    COALESCE(
-      LEAST(
-        100,
-        ROUND(
-          (
-            COALESCE(ad.present, 0)::numeric
-            /
-            NULLIF(tp.total, 0)
-          ) * 100
         )
-      ),
-      0
-    )::INT AS present_percentage,
 
-    /* Absent Percentage */
-    COALESCE(
-      GREATEST(
-        0,
-        100 -
-        LEAST(
-          100,
-          ROUND(
-            (
-              COALESCE(ad.present, 0)::numeric
-              /
-              NULLIF(tp.total, 0)
-            ) * 100
-          )
-        )
-      ),
-      0
-    )::INT AS absent_percentage
+        SELECT
 
-  FROM days d
+          TO_CHAR(
+            d.attendance_date,
+            'Dy'
+          ) AS day,
 
-  CROSS JOIN total_players tp
+          d.attendance_date,
 
-  LEFT JOIN attendance_data ad
-    ON ad.payroll_date = d.attendance_date
+          /* Present Count */
 
-  ORDER BY
-    d.attendance_date;
-`)
+          COALESCE(
+            ad.present,
+            0
+          )::INT AS present_count,
+
+          /* Absent Count */
+
+          GREATEST(
+            tp.total - COALESCE(ad.present, 0),
+            0
+          )::INT AS absent_count,
+
+          /* Present Percentage */
+
+          COALESCE(
+            LEAST(
+              100,
+              ROUND(
+                (
+                  COALESCE(
+                    ad.present,
+                    0
+                  )::numeric
+                  /
+                  NULLIF(
+                    tp.total,
+                    0
+                  )
+                ) * 100
+              )
+            ),
+            0
+          )::INT AS present_percentage,
+
+          /* Absent Percentage */
+
+          COALESCE(
+            GREATEST(
+              0,
+              100 -
+              LEAST(
+                100,
+                ROUND(
+                  (
+                    COALESCE(
+                      ad.present,
+                      0
+                    )::numeric
+                    /
+                    NULLIF(
+                      tp.total,
+                      0
+                    )
+                  ) * 100
+                )
+              )
+            ),
+            0
+          )::INT AS absent_percentage
+
+        FROM days d
+
+        CROSS JOIN total_players tp
+
+        LEFT JOIN attendance_data ad
+          ON ad.payroll_date =
+             d.attendance_date
+
+        ORDER BY
+          d.attendance_date;
+
+      `)
 
     ]);
+
 
     // =========================================
     // Response
@@ -769,21 +918,31 @@ exports.getDashboardCharts = async (req, res) => {
         player_growth: playerGrowth.rows,
 
         fee_collection: {
-          collected: Number(feeCollection.rows[0].collected),
+          collected: Number(
+            feeCollection.rows[0].paid
+          ),
 
-          pending: Number(feeCollection.rows[0].pending),
+          pending: Number(
+            feeCollection.rows[0].pending
+          ),
         },
 
         attendance: attendance.rows,
       },
     );
+
   } catch (error) {
-    console.error("Dashboard Charts Error:", error);
+
+    console.error(
+      "Dashboard Charts Error:",
+      error
+    );
 
     return sendErrorResponse(
       res,
       500,
-      error.message || "Failed to fetch dashboard charts.",
+      error.message ||
+      "Failed to fetch dashboard charts.",
     );
   }
 };
