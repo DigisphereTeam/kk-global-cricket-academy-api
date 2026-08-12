@@ -202,16 +202,15 @@ exports.getDashboardStatistics = async (req, res) => {
 
 
         (
-          SELECT COALESCE(SUM(total_amount), 0)
-
-          FROM tbl_ground_booking
-
-          WHERE status = 'Confirmed'
-
-            AND DATE_TRUNC('month', booking_date)
-                = DATE_TRUNC('month', CURRENT_DATE)
-
-        ) AS ground_revenue,
+        SELECT COALESCE(
+          SUM(total_amount),
+          0
+        )
+        FROM tbl_ground_booking
+        WHERE status IN ('Confirmed', 'Completed')
+          AND DATE_TRUNC('month', booking_date)
+              = DATE_TRUNC('month', CURRENT_DATE)
+      ) AS ground_revenue,
 
 
         (
