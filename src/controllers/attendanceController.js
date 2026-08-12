@@ -434,12 +434,21 @@ exports.getMonthlyAttendanceSummary = async (req, res) => {
     ? Number(req.query.year)
     : now.getFullYear();
 
-  const { employee_type, employee_id } = req.query;
+  const {
+    employee_type,
+    employee_id,
+  } = req.query;
 
   try {
+    // ============================================================
+    // VALIDATE EMPLOYEE TYPE
+    // ============================================================
+
     if (
       !employee_type ||
-      !["Player", "Coach", "Staff"].includes(employee_type)
+      !["Player", "Coach", "Staff"].includes(
+        employee_type
+      )
     ) {
       return sendErrorResponse(
         res,
@@ -448,143 +457,792 @@ exports.getMonthlyAttendanceSummary = async (req, res) => {
       );
     }
 
+    // ============================================================
+    // VALIDATE EMPLOYEE ID
+    // ============================================================
+
     if (!employee_id) {
-      return sendErrorResponse(res, 400, "Employee ID is required.");
+      return sendErrorResponse(
+        res,
+        400,
+        "Employee ID is required."
+      );
     }
+
+    if (isNaN(employee_id)) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Invalid Employee ID."
+      );
+    }
+
+    // ============================================================
+    // VALIDATE YEAR
+    // ============================================================
+
+    if (
+      !Number.isInteger(year) ||
+      year < 2000 ||
+      year > 2100
+    ) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Invalid year."
+      );
+    }
+
+    // ============================================================
+    // GET EMPLOYEE DETAILS
+    // ============================================================
 
     let employeeCodeQuery = "";
 
+    // ============================================================
+    // PLAYER
+    // ============================================================
+
     if (employee_type === "Player") {
       employeeCodeQuery = `
-        SELECT admission_id AS employee_code
+        SELECT
+          player_id AS employee_id,
+          admission_id AS employee_code,
+          full_name AS employee_name
         FROM tbl_players
         WHERE player_id = $1
-  `;
+      `;
     }
+
+    // ============================================================
+    // COACH
+    // ============================================================
 
     if (employee_type === "Coach") {
       employeeCodeQuery = `
-        SELECT coach_code AS employee_code
+        SELECT
+          coach_id AS employee_id,
+          coach_code AS employee_code,
+          full_name AS employee_name
         FROM tbl_coach
         WHERE coach_id = $1
-  `;
+      `;
     }
+
+    // ============================================================
+    // STAFF
+    // ============================================================
 
     if (employee_type === "Staff") {
       employeeCodeQuery = `
-        SELECT staff_code AS employee_code
+        SELECT
+          staff_id AS employee_id,
+          staff_code AS employee_code,
+          full_name AS employee_name
         FROM tbl_staff
         WHERE staff_id = $1
-  `;
+      `;
     }
 
-    const employeeResult = await pool.query(employeeCodeQuery, [employee_id]);
+    const employeeResult =
+      await pool.query(
+        employeeCodeQuery,
+        [employee_id]
+      );
 
     if (employeeResult.rowCount === 0) {
-      return sendErrorResponse(res, 404, "Employee not found.");
+      return sendErrorResponse(
+        res,
+        404,
+        "Employee not found."
+      );
     }
 
-    const employeeCode = employeeResult.rows[0].employee_code;
+    const employee =
+      employeeResult.rows[0];
 
-    // Show months from January to current month if current year,
-    // otherwise show all 12 months.
-    const currentYear = now.getFullYear();
-    const lastMonth =
-      year === currentYear ? now.getMonth() + 1 : 12;
+    const employeeCode =
+      employee.employee_code;
 
-    const attendanceResult = await pool.query(
-      `
-      WITH months AS(
-    SELECT generate_series(1, $3:: int) AS month_number
-  ),
-  attendance AS(
-    SELECT
-              EXTRACT(MONTH FROM payroll_date):: int AS month_number,
-    COUNT(DISTINCT payroll_date) AS working_days,
-    COUNT(DISTINCT payroll_date) AS present
-          FROM tbl_attendance
-          WHERE employee_code = $1
-            AND EXTRACT(YEAR FROM payroll_date) = $2
-          GROUP BY EXTRACT(MONTH FROM payroll_date)
-  )
+    // ============================================================
+    // CURRENT DATE IN IST
+    // ============================================================
 
-SELECT
-m.month_number,
-  TRIM(
-    TO_CHAR(
-      TO_DATE(m.month_number:: text, 'MM'),
-      'Month'
-    )
-  ) AS month,
-    COALESCE(a.working_days, 0) AS working_days,
-      COALESCE(a.present, 0) AS present,
-        0 AS absent,
-          0 AS leave,
-            0 AS late,
-              CASE
-            WHEN COALESCE(a.working_days, 0) = 0 THEN 0
-            ELSE ROUND(
-                (a.present:: numeric / a.working_days) * 100,
-  0
+    const istToday =
+      now.toLocaleDateString(
+        "en-CA",
+        {
+          timeZone:
+            "Asia/Kolkata",
+        }
+      );
+
+    const [
+      currentYear,
+      currentMonth,
+    ] = istToday
+      .split("-")
+      .map(Number);
+
+    // ============================================================
+    // FUTURE YEAR
+    // ============================================================
+
+    if (year > currentYear) {
+      return sendSuccessResponse(
+        res,
+        200,
+        "Monthly attendance fetched successfully.",
+        {
+          employee: {
+            id: Number(
+              employee.employee_id
+            ),
+
+            code:
+              employeeCode,
+
+            name:
+              employee.employee_name,
+
+            employee_type,
+          },
+
+          year,
+
+          statistics: {
+            present: 0,
+            absent: 0,
+            late: 0,
+            total_working_days: 0,
+            attendance_percentage:
+              "0%",
+          },
+
+          monthly_attendance: [],
+        }
+      );
+    }
+
+    // ============================================================
+    // DETERMINE END DATE
+    //
+    // Current year:
+    //     Today
+    //
+    // Previous year:
+    //     December 31
+    // ============================================================
+
+    let endDate;
+
+    if (year === currentYear) {
+      endDate = istToday;
+    } else {
+      endDate = `${year}-12-31`;
+    }
+
+    // ============================================================
+    // GET FIRST PUNCH DATE
+    //
+    // IMPORTANT:
+    //
+    // We use the employee's FIRST EVER PUNCH.
+    //
+    // Example:
+    //
+    // First punch:
+    // 2026-07-15 05:27 AM IST
+    //
+    // Attendance starts:
+    // 2026-07-15
+    //
+    // July 1 - July 14 are NOT counted as absent.
+    // ============================================================
+
+    const firstPunchResult =
+      await pool.query(
+        `
+        SELECT
+          MIN(l.punch_time) AS first_punch_time
+
+        FROM tbl_attendance a
+
+        INNER JOIN tbl_attendance_logs l
+          ON l.attendance_id =
+             a.attendance_id
+
+        WHERE a.employee_code = $1
+
+          AND l.punch_time IS NOT NULL
+        `,
+        [employeeCode]
+      );
+
+    // ============================================================
+    // NO PUNCH FOUND
+    // ============================================================
+
+    if (
+      !firstPunchResult.rows[0] ||
+      !firstPunchResult.rows[0]
+        .first_punch_time
+    ) {
+      return sendSuccessResponse(
+        res,
+        200,
+        "Monthly attendance fetched successfully.",
+        {
+          employee: {
+            id: Number(
+              employee.employee_id
+            ),
+
+            code:
+              employeeCode,
+
+            name:
+              employee.employee_name,
+
+            employee_type,
+          },
+
+          year,
+
+          statistics: {
+            present: 0,
+            absent: 0,
+            late: 0,
+            total_working_days: 0,
+            attendance_percentage:
+              "0%",
+          },
+
+          monthly_attendance: [],
+        }
+      );
+    }
+
+    // ============================================================
+    // CONVERT FIRST PUNCH TO IST DATE
+    // ============================================================
+
+    const firstPunchTime =
+      firstPunchResult.rows[0]
+        .first_punch_time;
+
+    const firstPunchDate =
+      new Date(
+        firstPunchTime
+      ).toLocaleDateString(
+        "en-CA",
+        {
+          timeZone:
+            "Asia/Kolkata",
+        }
+      );
+
+    // ============================================================
+    // IF EMPLOYEE'S FIRST PUNCH IS AFTER REQUESTED YEAR
+    //
+    // Example:
+    //
+    // First punch = 2027
+    // Requested year = 2026
+    //
+    // No attendance for 2026.
+    // ============================================================
+
+    const firstPunchYear =
+      Number(
+        firstPunchDate
+          .split("-")[0]
+      );
+
+    if (firstPunchYear > year) {
+      return sendSuccessResponse(
+        res,
+        200,
+        "Monthly attendance fetched successfully.",
+        {
+          employee: {
+            id: Number(
+              employee.employee_id
+            ),
+
+            code:
+              employeeCode,
+
+            name:
+              employee.employee_name,
+
+            employee_type,
+          },
+
+          year,
+
+          statistics: {
+            present: 0,
+            absent: 0,
+            late: 0,
+            total_working_days: 0,
+            attendance_percentage:
+              "0%",
+          },
+
+          monthly_attendance: [],
+        }
+      );
+    }
+
+    // ============================================================
+    // START DATE
+    //
+    // If requested year is the same as first punch year:
+    //
+    //     first punch date
+    //
+    // Otherwise:
+    //
+    //     January 1 of requested year
+    //
+    // Example:
+    //
+    // First punch = 2026-07-15
+    //
+    // Request 2026:
+    //     2026-07-15 -> today
+    //
+    // Request 2027:
+    //     2027-01-01 -> 2027-12-31
+    // ============================================================
+
+    let startDate;
+
+    if (year === firstPunchYear) {
+      startDate = firstPunchDate;
+    } else {
+      startDate = `${year}-01-01`;
+    }
+
+    // ============================================================
+    // SAFETY CHECK
+    // ============================================================
+
+    if (startDate > endDate) {
+      return sendSuccessResponse(
+        res,
+        200,
+        "Monthly attendance fetched successfully.",
+        {
+          employee: {
+            id: Number(
+              employee.employee_id
+            ),
+
+            code:
+              employeeCode,
+
+            name:
+              employee.employee_name,
+
+            employee_type,
+          },
+
+          year,
+
+          statistics: {
+            present: 0,
+            absent: 0,
+            late: 0,
+            total_working_days: 0,
+            attendance_percentage:
+              "0%",
+          },
+
+          monthly_attendance: [],
+        }
+      );
+    }
+
+    // ============================================================
+    // MAIN ATTENDANCE QUERY
+    //
+    // LOGIC:
+    //
+    // 1. Generate dates from first punch date.
+    //
+    // 2. Get all punch dates for employee.
+    //
+    // 3. If at least one punch exists:
+    //       Present
+    //
+    // 4. If no punch:
+    //       Absent
+    //
+    // 5. Multiple punches on same date:
+    //       Still ONE present day.
+    // ============================================================
+
+    const attendanceResult =
+      await pool.query(
+        `
+        WITH calendar AS (
+
+          SELECT
+            generate_series(
+              $2::date,
+              $3::date,
+              interval '1 day'
+            )::date AS attendance_date
+
+        ),
+
+        /*
+         * ========================================================
+         * ALL PUNCH DATES
+         * ========================================================
+         *
+         * We only need DISTINCT dates here.
+         *
+         * Example:
+         *
+         * 05:27 IN
+         * 05:56 OUT
+         * 05:56 IN
+         * 06:05 OUT
+         *
+         * becomes:
+         *
+         * 2026-08-12
+         *
+         * ONE present day.
+         */
+
+        punch_dates AS (
+
+          SELECT DISTINCT
+
+            (
+              l.punch_time
+              AT TIME ZONE
+              'Asia/Kolkata'
+            )::date
+              AS attendance_date
+
+          FROM tbl_attendance a
+
+          INNER JOIN tbl_attendance_logs l
+            ON l.attendance_id =
+               a.attendance_id
+
+          WHERE a.employee_code = $1
+
+            AND l.punch_time IS NOT NULL
+
+            AND (
+              l.punch_time
+              AT TIME ZONE
+              'Asia/Kolkata'
+            )::date >= $2::date
+
+            AND (
+              l.punch_time
+              AT TIME ZONE
+              'Asia/Kolkata'
+            )::date <= $3::date
+
+        ),
+
+        /*
+         * ========================================================
+         * MONTHLY SUMMARY
+         * ========================================================
+         */
+
+        monthly_summary AS (
+
+          SELECT
+
+            EXTRACT(
+              MONTH FROM
+              c.attendance_date
+            )::int AS month_number,
+
+            /*
+             * Every date between first punch
+             * and end date is counted.
+             */
+
+            COUNT(*)::int
+              AS total_dates,
+
+            /*
+             * Date has at least one punch.
+             */
+
+            COUNT(
+              pd.attendance_date
+            )::int
+              AS present,
+
+            /*
+             * Date has no punch.
+             */
+
+            (
+              COUNT(*)
+              -
+              COUNT(
+                pd.attendance_date
+              )
+            )::int
+              AS absent
+
+          FROM calendar c
+
+          LEFT JOIN punch_dates pd
+            ON pd.attendance_date =
+               c.attendance_date
+
+          GROUP BY
+            EXTRACT(
+              MONTH FROM
+              c.attendance_date
             )
+
+        )
+
+        SELECT
+
+          ms.month_number,
+
+          TRIM(
+            TO_CHAR(
+              TO_DATE(
+                ms.month_number::text,
+                'MM'
+              ),
+              'Month'
+            )
+          ) AS month,
+
+          COALESCE(
+            ms.total_dates,
+            0
+          ) AS working_days,
+
+          COALESCE(
+            ms.present,
+            0
+          ) AS present,
+
+          COALESCE(
+            ms.absent,
+            0
+          ) AS absent,
+
+          0 AS leave,
+
+          0 AS late,
+
+          CASE
+
+            WHEN COALESCE(
+              ms.total_dates,
+              0
+            ) = 0
+
+            THEN 0
+
+            ELSE ROUND(
+              (
+                COALESCE(
+                  ms.present,
+                  0
+                )::numeric
+                /
+                ms.total_dates::numeric
+              ) * 100,
+              0
+            )
+
           END AS attendance_percentage
-      FROM months m
-      LEFT JOIN attendance a
-        ON m.month_number = a.month_number
-      ORDER BY m.month_number DESC;
-`,
-      [employeeCode, year, lastMonth]
-    );
 
-    const monthlyData = attendanceResult.rows;
+        FROM monthly_summary ms
 
-    const statistics = monthlyData.reduce(
-      (acc, month) => {
-        acc.present += Number(month.present);
-        acc.absent += Number(month.absent);
-        acc.late += Number(month.late);
+        ORDER BY
+          ms.month_number DESC;
+        `,
+        [
+          employeeCode,
+          startDate,
+          endDate,
+        ]
+      );
 
-        acc.totalWorkingDays += Number(month.working_days);
+    // ============================================================
+    // FORMAT MONTHLY DATA
+    // ============================================================
 
-        return acc;
-      },
-      {
-        present: 0,
-        absent: 0,
-        late: 0,
-        totalWorkingDays: 0,
-      }
-    );
+    const monthlyData =
+      attendanceResult.rows.map(
+        (month) => ({
+          month_number:
+            Number(
+              month.month_number
+            ),
 
-    statistics.attendance_percentage =
+          month:
+            month.month,
+
+          working_days:
+            Number(
+              month.working_days
+            ),
+
+          present:
+            Number(
+              month.present
+            ),
+
+          absent:
+            Number(
+              month.absent
+            ),
+
+          leave:
+            Number(
+              month.leave
+            ),
+
+          late:
+            Number(
+              month.late
+            ),
+
+          attendance_percentage:
+            Number(
+              month.attendance_percentage
+            ),
+        })
+      );
+
+    // ============================================================
+    // OVERALL STATISTICS
+    // ============================================================
+
+    const statistics =
+      monthlyData.reduce(
+        (acc, month) => {
+          acc.present +=
+            month.present;
+
+          acc.absent +=
+            month.absent;
+
+          acc.late +=
+            month.late;
+
+          acc.totalWorkingDays +=
+            month.working_days;
+
+          return acc;
+        },
+        {
+          present: 0,
+          absent: 0,
+          late: 0,
+          totalWorkingDays: 0,
+        }
+      );
+
+    // ============================================================
+    // ATTENDANCE PERCENTAGE
+    // ============================================================
+
+    const attendancePercentage =
       statistics.totalWorkingDays > 0
         ? Math.round(
-          (statistics.present / statistics.totalWorkingDays) * 100
+          (
+            statistics.present /
+            statistics.totalWorkingDays
+          ) * 100
         )
         : 0;
+
+    // ============================================================
+    // RESPONSE
+    // ============================================================
 
     return sendSuccessResponse(
       res,
       200,
       "Monthly attendance fetched successfully.",
       {
-        statistics: {
-          present: statistics.present,
-          absent: statistics.absent,
-          late: statistics.late,
-          attendance_percentage: `${statistics.attendance_percentage}% `,
+        employee: {
+          id: Number(
+            employee.employee_id
+          ),
+
+          code:
+            employeeCode,
+
+          name:
+            employee.employee_name,
+
+          employee_type,
         },
-        monthly_attendance: monthlyData,
+
+        year,
+
+        /*
+         * This is useful for frontend.
+         *
+         * Example:
+         *
+         * attendance_start_date:
+         * 2026-07-15
+         */
+
+        attendance_start_date:
+          startDate,
+
+        attendance_end_date:
+          endDate,
+
+        statistics: {
+          present:
+            statistics.present,
+
+          absent:
+            statistics.absent,
+
+          late:
+            statistics.late,
+
+          total_working_days:
+            statistics.totalWorkingDays,
+
+          attendance_percentage:
+            `${attendancePercentage}%`,
+        },
+
+        monthly_attendance:
+          monthlyData,
       }
     );
-
   } catch (error) {
-    console.error(error);
+    console.error(
+      "Get monthly attendance summary error:",
+      error
+    );
 
     return sendErrorResponse(
       res,
       500,
-      error.message || "Failed to fetch monthly attendance."
+      error.message ||
+      "Failed to fetch monthly attendance."
     );
   }
 };
@@ -673,6 +1331,10 @@ exports.getAttendanceTimeline = async (req, res) => {
   } = req.query;
 
   try {
+    // ============================================================
+    // VALIDATE EMPLOYEE TYPE
+    // ============================================================
+
     if (
       !employee_type ||
       !["Player", "Coach", "Staff"].includes(employee_type)
@@ -683,6 +1345,10 @@ exports.getAttendanceTimeline = async (req, res) => {
         "Employee type must be Player, Coach or Staff."
       );
     }
+
+    // ============================================================
+    // VALIDATE EMPLOYEE ID
+    // ============================================================
 
     if (!employee_id) {
       return sendErrorResponse(
@@ -700,18 +1366,9 @@ exports.getAttendanceTimeline = async (req, res) => {
       );
     }
 
-    /*
-     * ============================================================
-     * DATE RANGE
-     * ============================================================
-     *
-     * If dates are not provided:
-     * from_date = first day of current month
-     * to_date   = today
-     *
-     * If dates are provided:
-     * use the provided date range.
-     */
+    // ============================================================
+    // DATE RANGE
+    // ============================================================
 
     const now = new Date();
 
@@ -722,8 +1379,12 @@ exports.getAttendanceTimeline = async (req, res) => {
     let fromDate;
     let toDate;
 
+    // ============================================================
+    // DEFAULT:
+    // FIRST DAY OF CURRENT MONTH -> TODAY
+    // ============================================================
+
     if (!from_date && !to_date) {
-      // First day of current month
       const currentMonthStart = new Date(
         now.toLocaleString("en-US", {
           timeZone: "Asia/Kolkata",
@@ -732,16 +1393,20 @@ exports.getAttendanceTimeline = async (req, res) => {
 
       currentMonthStart.setDate(1);
 
-      fromDate = currentMonthStart.toLocaleDateString(
-        "en-CA",
-        {
-          timeZone: "Asia/Kolkata",
-        }
-      );
+      fromDate =
+        currentMonthStart.toLocaleDateString(
+          "en-CA",
+          {
+            timeZone: "Asia/Kolkata",
+          }
+        );
 
       toDate = today;
     } else {
-      // If one is provided, both are required
+      // ==========================================================
+      // BOTH DATES REQUIRED
+      // ==========================================================
+
       if (!from_date || !to_date) {
         return sendErrorResponse(
           res,
@@ -750,10 +1415,17 @@ exports.getAttendanceTimeline = async (req, res) => {
         );
       }
 
-      // Validate date format
+      // ==========================================================
+      // VALIDATE DATE FORMAT
+      // ==========================================================
+
       if (
-        !/^\d{4}-\d{2}-\d{2}$/.test(from_date) ||
-        !/^\d{4}-\d{2}-\d{2}$/.test(to_date)
+        !/^\d{4}-\d{2}-\d{2}$/.test(
+          from_date
+        ) ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(
+          to_date
+        )
       ) {
         return sendErrorResponse(
           res,
@@ -766,7 +1438,10 @@ exports.getAttendanceTimeline = async (req, res) => {
       toDate = to_date;
     }
 
-    // Validate date range
+    // ============================================================
+    // VALIDATE DATE RANGE
+    // ============================================================
+
     if (fromDate > toDate) {
       return sendErrorResponse(
         res,
@@ -775,7 +1450,10 @@ exports.getAttendanceTimeline = async (req, res) => {
       );
     }
 
-    // Don't allow future to_date
+    // ============================================================
+    // DON'T ALLOW FUTURE DATE
+    // ============================================================
+
     if (toDate > today) {
       return sendErrorResponse(
         res,
@@ -784,36 +1462,55 @@ exports.getAttendanceTimeline = async (req, res) => {
       );
     }
 
-    /*
-     * ============================================================
-     * GET EMPLOYEE CODE
-     * ============================================================
-     */
+    // ============================================================
+    // GET EMPLOYEE CODE
+    // ============================================================
 
     let employeeCodeQuery = "";
 
+    // ============================================================
+    // PLAYER
+    // ============================================================
+
     if (employee_type === "Player") {
       employeeCodeQuery = `
-        SELECT admission_id AS employee_code
+        SELECT
+          player_id AS employee_id,
+          admission_id AS employee_code,
+          full_name AS employee_name
         FROM tbl_players
         WHERE player_id = $1
-  `;
+      `;
     }
+
+    // ============================================================
+    // COACH
+    // ============================================================
 
     if (employee_type === "Coach") {
       employeeCodeQuery = `
-        SELECT coach_code AS employee_code
+        SELECT
+          coach_id AS employee_id,
+          coach_code AS employee_code,
+          full_name AS employee_name
         FROM tbl_coach
         WHERE coach_id = $1
-  `;
+      `;
     }
+
+    // ============================================================
+    // STAFF
+    // ============================================================
 
     if (employee_type === "Staff") {
       employeeCodeQuery = `
-        SELECT staff_code AS employee_code
+        SELECT
+          staff_id AS employee_id,
+          staff_code AS employee_code,
+          full_name AS employee_name
         FROM tbl_staff
         WHERE staff_id = $1
-  `;
+      `;
     }
 
     const employee = await pool.query(
@@ -829,42 +1526,87 @@ exports.getAttendanceTimeline = async (req, res) => {
       );
     }
 
+    const employeeData =
+      employee.rows[0];
+
     const employeeCode =
-      employee.rows[0].employee_code;
+      employeeData.employee_code;
+
+    // ============================================================
+    // REGULAR TIME SLOTS
+    // ============================================================
 
     /*
-     * ============================================================
-     * ATTENDANCE TIMELINE
-     * ============================================================
+     * REGULAR MORNING
+     *
+     * Actual:
+     * 06:00 AM - 08:00 AM
+     *
+     * Buffer:
+     * 25 minutes before
+     *
+     * Final:
+     * 05:35 AM - 08:00 AM
      */
+
+    const regularMorningStart =
+      5 * 60 + 35;
+
+    const regularMorningEnd =
+      8 * 60;
+
+    /*
+     * REGULAR EVENING
+     *
+     * Actual:
+     * 04:30 PM - 06:30 PM
+     *
+     * Buffer:
+     * 25 minutes before
+     *
+     * Final:
+     * 04:05 PM - 06:30 PM
+     */
+
+    const regularEveningStart =
+      16 * 60 + 5;
+
+    const regularEveningEnd =
+      18 * 60 + 30;
+
+    // ============================================================
+    // ATTENDANCE QUERY
+    //
+    // IMPORTANT:
+    // Every punch is fetched.
+    //
+    // We DO NOT use MIN()
+    // We DO NOT use MAX()
+    // ============================================================
 
     const result = await pool.query(
       `
-      WITH dates AS(
-    SELECT generate_series(
-      $2:: date,
-      $3:: date,
-      interval '1 day'
-    ):: date AS attendance_date
-  )
+      WITH dates AS (
+        SELECT
+          generate_series(
+            $2::date,
+            $3::date,
+            interval '1 day'
+          )::date AS attendance_date
+      )
 
-SELECT
-d.attendance_date AS payroll_date,
-  a.attendance_id,
+      SELECT
+        d.attendance_date AS payroll_date,
 
-  MIN(
-    CASE
-            WHEN LOWER(l.punch_type) = 'in'
-            THEN l.punch_time
-          END
-  ) AS time_in,
+        a.attendance_id,
 
-    MAX(
-      CASE
-            WHEN LOWER(l.punch_type) = 'out'
-            THEN l.punch_time
-          END
-    ) AS time_out
+        l.punch_type,
+
+        l.punch_time,
+
+        l.branch_name,
+
+        l.device_id
 
       FROM dates d
 
@@ -875,13 +1617,10 @@ d.attendance_date AS payroll_date,
       LEFT JOIN tbl_attendance_logs l
         ON l.attendance_id = a.attendance_id
 
-      GROUP BY
-d.attendance_date,
-  a.attendance_id
-
       ORDER BY
-d.attendance_date DESC;
-`,
+        d.attendance_date DESC,
+        l.punch_time ASC;
+      `,
       [
         employeeCode,
         fromDate,
@@ -889,135 +1628,545 @@ d.attendance_date DESC;
       ]
     );
 
-    /*
-     * ============================================================
-     * FORMAT RESPONSE
-     * ============================================================
-     */
+    // ============================================================
+    // GROUP DATABASE ROWS BY DATE
+    // ============================================================
 
-    const attendance = result.rows.map((row) => {
+    const dateMap = new Map();
+
+    for (const row of result.rows) {
+      const dateKey =
+        row.payroll_date;
+
+      if (!dateMap.has(dateKey)) {
+        dateMap.set(dateKey, {
+          attendance_id:
+            row.attendance_id ||
+            null,
+
+          punches: [],
+        });
+      }
+
+      const dateData =
+        dateMap.get(dateKey);
+
+      // ==========================================================
+      // KEEP ATTENDANCE ID
+      // ==========================================================
+
+      if (
+        row.attendance_id &&
+        !dateData.attendance_id
+      ) {
+        dateData.attendance_id =
+          row.attendance_id;
+      }
+
+      // ==========================================================
+      // ADD EVERY PUNCH
+      // ==========================================================
+
+      if (
+        row.punch_type &&
+        row.punch_time
+      ) {
+        dateData.punches.push({
+          punch_type:
+            row.punch_type,
+
+          punch_time:
+            row.punch_time,
+
+          branch_name:
+            row.branch_name,
+
+          device_id:
+            row.device_id,
+        });
+      }
+    }
+
+    // ============================================================
+    // FINAL ATTENDANCE
+    // ============================================================
+
+    const attendance = [];
+
+    // ============================================================
+    // PROCESS EACH DATE
+    // ============================================================
+
+    for (const [
+      attendanceDate,
+      dateData,
+    ] of dateMap.entries()) {
+      const punches =
+        dateData.punches || [];
+
+      // ==========================================================
+      // STATUS
+      //
+      // ONLY:
+      // Present
+      // Absent
+      // ==========================================================
+
       let status;
       let remarks;
       let marked_by = "-";
 
-      if (row.attendance_id) {
+      if (dateData.attendance_id) {
         status = "Present";
         remarks = "On Time";
         marked_by = "Coach";
-
-        if (
-          row.time_in &&
-          row.time_in > "09:00:00"
-        ) {
-          status = "Late";
-          remarks = "Late Entry";
-        }
-      } else if (row.payroll_date === today) {
-        status = "Pending";
-        remarks = "Attendance Yet to be Marked";
       } else {
         status = "Absent";
         remarks = "Not Attended";
       }
 
-      /*
-       * ----------------------------------------------------------
-       * BATCH / SESSION
-       * ----------------------------------------------------------
-       */
+      // ==========================================================
+      // NO PUNCHES
+      // ==========================================================
 
-      let batch = "One-to-One";
-      let session = 0;
+      if (punches.length === 0) {
+        attendance.push({
+          attendance_id:
+            dateData.attendance_id ||
+            null,
 
-      let regularSession = null;
+          employee_id:
+            Number(employee_id),
 
-      const inPunches = row.in_punches || [];
+          employee_type,
 
-      /*
-       * Check every IN punch.
-       *
-       * PetPooja gives UTC timestamps, so convert each
-       * punch to IST before checking the time.
-       */
+          employee_code:
+            employeeCode,
 
-      for (const punchTime of inPunches) {
-        if (!punchTime) continue;
+          employee_name:
+            employeeData.employee_name,
 
-        const punchDate = new Date(punchTime);
+          date: attendanceDate,
 
-        const istTime = punchDate.toLocaleTimeString(
-          "en-GB",
-          {
-            timeZone: "Asia/Kolkata",
-            hour12: false,
+          batch: null,
+
+          session: null,
+
+          status,
+
+          time_in: null,
+
+          time_out: null,
+
+          branch_name: null,
+
+          device_id: null,
+
+          marked_by,
+
+          remarks,
+        });
+
+        continue;
+      }
+
+      // ==========================================================
+      // CONVERT PUNCH TIMES TO IST
+      // ==========================================================
+
+      const punchesWithTime =
+        punches.map((punch) => {
+          const punchDate =
+            new Date(
+              punch.punch_time
+            );
+
+          const istTime =
+            punchDate.toLocaleTimeString(
+              "en-GB",
+              {
+                timeZone:
+                  "Asia/Kolkata",
+
+                hour12: false,
+              }
+            );
+
+          const [
+            hours,
+            minutes,
+            seconds = 0,
+          ] = istTime
+            .split(":")
+            .map(Number);
+
+          const punchMinutes =
+            hours * 60 +
+            minutes +
+            seconds / 60;
+
+          return {
+            ...punch,
+
+            punchMinutes,
+
+            punchDate,
+          };
+        });
+
+      // ==========================================================
+      // SESSION VARIABLES
+      // ==========================================================
+
+      let sessionCounter = 0;
+
+      let currentSession = null;
+
+      // ==========================================================
+      // PROCESS EVERY PUNCH
+      // ==========================================================
+
+      for (const punch of punchesWithTime) {
+        const punchType =
+          punch.punch_type
+            ? punch.punch_type.toLowerCase()
+            : "";
+
+        // ========================================================
+        // IN
+        // ========================================================
+
+        if (punchType === "in") {
+          /*
+           * Only create a new session when
+           * there is currently NO active session.
+           *
+           * Therefore:
+           *
+           * IN
+           * IN
+           * OUT
+           *
+           * remains ONE session.
+           */
+
+          if (!currentSession) {
+            sessionCounter++;
+
+            let batch =
+              "One-on-One";
+
+            let session =
+              sessionCounter;
+
+            // ====================================================
+            // REGULAR MORNING
+            // ====================================================
+
+            if (
+              punch.punchMinutes >=
+              regularMorningStart &&
+              punch.punchMinutes <=
+              regularMorningEnd
+            ) {
+              batch = "Regular";
+              session = "Morning";
+            }
+
+            // ====================================================
+            // REGULAR EVENING
+            // ====================================================
+
+            else if (
+              punch.punchMinutes >=
+              regularEveningStart &&
+              punch.punchMinutes <=
+              regularEveningEnd
+            ) {
+              batch = "Regular";
+              session = "Evening";
+            }
+
+            // ====================================================
+            // CREATE SESSION
+            // ====================================================
+
+            currentSession = {
+              attendance_id:
+                dateData.attendance_id,
+
+              employee_id:
+                Number(employee_id),
+
+              employee_type,
+
+              employee_code:
+                employeeCode,
+
+              employee_name:
+                employeeData.employee_name,
+
+              date: attendanceDate,
+
+              batch,
+
+              session,
+
+              status,
+
+              time_in:
+                punch.punch_time,
+
+              time_out: null,
+
+              branch_name:
+                punch.branch_name ||
+                null,
+
+              device_id:
+                punch.device_id ||
+                null,
+
+              marked_by,
+
+              remarks,
+            };
           }
+
+          // ======================================================
+          // IMPORTANT:
+          //
+          // If currentSession already exists,
+          // this IN does NOT create another session.
+          //
+          // Example:
+          //
+          // 05:56 IN
+          // 06:00 IN
+          //
+          // Both belong to session 2.
+          // ======================================================
+
+          continue;
+        }
+
+        // ========================================================
+        // OUT
+        // ========================================================
+
+        if (punchType === "out") {
+          // ======================================================
+          // OUT WITH ACTIVE SESSION
+          // ======================================================
+
+          if (currentSession) {
+            currentSession.time_out =
+              punch.punch_time;
+
+            // ====================================================
+            // Keep OUT branch/device information if available
+            // ====================================================
+
+            if (
+              !currentSession.branch_name &&
+              punch.branch_name
+            ) {
+              currentSession.branch_name =
+                punch.branch_name;
+            }
+
+            if (
+              !currentSession.device_id &&
+              punch.device_id
+            ) {
+              currentSession.device_id =
+                punch.device_id;
+            }
+
+            // ====================================================
+            // ADD ONE COMPLETE SESSION RECORD
+            // ====================================================
+
+            attendance.push(
+              currentSession
+            );
+
+            // ====================================================
+            // CLOSE SESSION
+            // ====================================================
+
+            currentSession = null;
+          } else {
+            // ====================================================
+            // OUT WITHOUT IN
+            // ====================================================
+
+            sessionCounter++;
+
+            attendance.push({
+              attendance_id:
+                dateData.attendance_id,
+
+              employee_id:
+                Number(employee_id),
+
+              employee_type,
+
+              employee_code:
+                employeeCode,
+
+              employee_name:
+                employeeData.employee_name,
+
+              date: attendanceDate,
+
+              batch: "One-on-One",
+
+              session:
+                sessionCounter,
+
+              status,
+
+              time_in: null,
+
+              time_out:
+                punch.punch_time,
+
+              branch_name:
+                punch.branch_name ||
+                null,
+
+              device_id:
+                punch.device_id ||
+                null,
+
+              marked_by,
+
+              remarks,
+            });
+          }
+
+          continue;
+        }
+
+        // ========================================================
+        // UNKNOWN PUNCH TYPE
+        // ========================================================
+
+        if (!currentSession) {
+          sessionCounter++;
+
+          currentSession = {
+            attendance_id:
+              dateData.attendance_id,
+
+            employee_id:
+              Number(employee_id),
+
+            employee_type,
+
+            employee_code:
+              employeeCode,
+
+            employee_name:
+              employeeData.employee_name,
+
+            date: attendanceDate,
+
+            batch: "One-on-One",
+
+            session:
+              sessionCounter,
+
+            status,
+
+            time_in: null,
+
+            time_out: null,
+
+            branch_name:
+              punch.branch_name ||
+              null,
+
+            device_id:
+              punch.device_id ||
+              null,
+
+            marked_by,
+
+            remarks,
+          };
+        }
+      }
+
+      // ==========================================================
+      // IN WITHOUT OUT
+      //
+      // Example:
+      //
+      // IN 10:00
+      //
+      // Return:
+      //
+      // time_in  = 10:00
+      // time_out = null
+      // ==========================================================
+
+      if (currentSession) {
+        attendance.push(
+          currentSession
         );
+      }
+    }
 
-        const [
-          hours,
-          minutes,
-          seconds = 0,
-        ] = istTime.split(":").map(Number);
+    // ============================================================
+    // SORT
+    //
+    // Latest date first
+    // Earliest session first
+    // ============================================================
 
-        const punchMinutes =
-          hours * 60 +
-          minutes +
-          seconds / 60;
+    attendance.sort(
+      (a, b) => {
+        // ========================================================
+        // DATE DESCENDING
+        // ========================================================
 
-        /*
-         * Regular Morning
-         */
-
-        if (
-          punchMinutes >= regularMorningStart &&
-          punchMinutes <= regularMorningEnd
-        ) {
-          regularSession = "Morning";
-          break;
+        if (a.date !== b.date) {
+          return b.date.localeCompare(
+            a.date
+          );
         }
 
-        /*
-         * Regular Evening
-         */
+        // ========================================================
+        // TIME IN ASCENDING
+        // ========================================================
 
         if (
-          punchMinutes >= regularEveningStart &&
-          punchMinutes <= regularEveningEnd
+          !a.time_in &&
+          !b.time_in
         ) {
-          regularSession = "Evening";
-          break;
+          return 0;
         }
+
+        if (!a.time_in) {
+          return 1;
+        }
+
+        if (!b.time_in) {
+          return -1;
+        }
+
+        return (
+          new Date(a.time_in) -
+          new Date(b.time_in)
+        );
       }
+    );
 
-      /*
-       * If a regular punch was found:
-       *
-       * Regular + Morning/Evening
-       *
-       * Otherwise:
-       *
-       * One-to-One + number of IN punches
-       */
-
-      if (regularSession) {
-        batch = "Regular";
-        session = regularSession;
-      } else {
-        batch = "One-on-One";
-        session = inPunches.length;
-      }
-
-      return {
-        attendance_id: row.attendance_id,
-        date: row.payroll_date,
-        session: "Morning",
-        status,
-        time_in: row.time_in || "-",
-        time_out: row.time_out || "-",
-        marked_by,
-        remarks,
-      };
-    });
+    // ============================================================
+    // RESPONSE
+    // ============================================================
 
     return sendSuccessResponse(
       res,
@@ -1025,14 +2174,35 @@ d.attendance_date DESC;
       "Attendance timeline fetched successfully.",
       {
         from_date: fromDate,
+
         to_date: toDate,
+
         employee_type,
-        employee_id: Number(employee_id),
+
+        employee_id:
+          Number(employee_id),
+
+        employee: {
+          id:
+            Number(
+              employeeData.employee_id
+            ),
+
+          code:
+            employeeCode,
+
+          name:
+            employeeData.employee_name,
+        },
+
         attendance,
       }
     );
   } catch (error) {
-    console.error(error);
+    console.error(
+      "Get attendance timeline error:",
+      error
+    );
 
     return sendErrorResponse(
       res,
