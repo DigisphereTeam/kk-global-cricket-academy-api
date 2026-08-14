@@ -286,6 +286,7 @@ exports.getPlayerMonthlyReport = async (req, res) => {
       );
     };
 
+    // Validate from_date
     if (
       cleanedFromDate &&
       !isValidDate(cleanedFromDate)
@@ -297,6 +298,7 @@ exports.getPlayerMonthlyReport = async (req, res) => {
       );
     }
 
+    // Validate to_date
     if (
       cleanedToDate &&
       !isValidDate(cleanedToDate)
@@ -308,6 +310,7 @@ exports.getPlayerMonthlyReport = async (req, res) => {
       );
     }
 
+    // Get current date in India
     const now = new Date();
 
     const indiaDate = new Date(
@@ -325,11 +328,13 @@ exports.getPlayerMonthlyReport = async (req, res) => {
     const currentDay =
       indiaDate.getDate();
 
+    // Default from date = first day of current month
     const defaultFromDate =
       `${currentYear}-${String(
         currentMonth + 1
       ).padStart(2, "0")}-01`;
 
+    // Default to date = today
     const defaultToDate =
       `${currentYear}-${String(
         currentMonth + 1
@@ -609,18 +614,18 @@ exports.getPlayerMonthlyReport = async (req, res) => {
 
         p.admission_date,
 
-        EXTRACT(
-          MONTH FROM m.month_start
-        )::integer AS month,
+        /*
+         * Return month as string
+         * Example: August
+         */
+        TO_CHAR(
+          m.month_start,
+          'FMMonth'
+        ) AS month,
 
         EXTRACT(
           YEAR FROM m.month_start
         )::integer AS year,
-
-        TO_CHAR(
-          m.month_start,
-          'Month'
-        ) AS month_name,
 
         CASE
           WHEN DATE_TRUNC(
@@ -803,7 +808,7 @@ exports.getPlayerMonthlyReport = async (req, res) => {
       ORDER BY
         p.full_name ASC,
         m.month_start ASC
-      `;
+    `;
 
     const result = await pool.query(
       query,
@@ -812,14 +817,25 @@ exports.getPlayerMonthlyReport = async (req, res) => {
 
     const data = result.rows.map((row) => ({
       admission_id: row.admission_id,
-      player_id: Number(row.player_id),
-      player_name: row.player_name,
-      fee_type: row.fee_type,
-      admission_date: row.admission_date,
 
-      month: Number(row.month),
-      year: Number(row.year),
-      month_name: row.month_name.trim(),
+      player_id: Number(
+        row.player_id
+      ),
+
+      player_name: row.player_name,
+
+      fee_type: row.fee_type,
+
+      admission_date:
+        row.admission_date,
+
+      // Example: "August"
+      month: row.month,
+
+      // Example: 2026
+      year: Number(
+        row.year
+      ),
 
       admission_fee: Number(
         row.admission_fee || 0
@@ -833,17 +849,27 @@ exports.getPlayerMonthlyReport = async (req, res) => {
         row.regular_payment_date,
 
       one_on_one_fee:
-        Number(row.one_on_one_fee || 0) -
-        Number(row.only_one_on_one_fee || 0),
+        Number(
+          row.one_on_one_fee || 0
+        ) -
+        Number(
+          row.only_one_on_one_fee || 0
+        ),
 
       one_on_one_payment_date:
-        Number(row.one_on_one_fee || 0) -
-          Number(row.only_one_on_one_fee || 0) > 0
+        Number(
+          row.one_on_one_fee || 0
+        ) -
+          Number(
+            row.only_one_on_one_fee || 0
+          ) > 0
           ? row.one_on_one_payment_date
           : null,
 
       only_one_on_one_fee:
-        Number(row.only_one_on_one_fee || 0),
+        Number(
+          row.only_one_on_one_fee || 0
+        ),
 
       only_one_on_one_payment_date:
         row.only_one_on_one_payment_date,
@@ -860,11 +886,11 @@ exports.getPlayerMonthlyReport = async (req, res) => {
         row.absent_days || 0
       ),
 
-      total_attendance_days: Number(
-        row.total_attendance_days || 0
-      )
+      total_attendance_days:
+        Number(
+          row.total_attendance_days || 0
+        )
     }));
-
 
     const statistics = data.reduce(
       (acc, player) => {
@@ -875,7 +901,9 @@ exports.getPlayerMonthlyReport = async (req, res) => {
           player.regular_fee;
 
         acc.total_one_on_one_fee +=
-          Number(player.one_on_one_fee || 0);
+          Number(
+            player.one_on_one_fee || 0
+          );
 
         acc.total_only_one_on_one_fee +=
           player.only_one_on_one_fee;
@@ -900,7 +928,6 @@ exports.getPlayerMonthlyReport = async (req, res) => {
         total_one_on_one_fee: 0,
         total_only_one_on_one_fee: 0,
         total_fee_paid: 0,
-
         total_present_days: 0,
         total_absent_days: 0,
         total_attendance_days: 0
@@ -933,7 +960,6 @@ exports.getPlayerMonthlyReport = async (req, res) => {
     );
   }
 };
-
 
 exports.getTrainerWiseReport = async (req, res) => {
   const {
