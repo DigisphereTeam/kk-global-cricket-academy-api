@@ -37,28 +37,34 @@ exports.getPlayerWiseReport = async (req, res) => {
 
       FROM tbl_players p
 
+      /* =========================
+         REGULAR PLAYER CHECK
+      ========================= */
       LEFT JOIN LATERAL (
         SELECT
           pf.player_id
         FROM tbl_player_fees pf
         WHERE pf.player_id = p.player_id
           AND pf.is_active = TRUE
-          AND LOWER(pf.fee_type) = 'regular'
-          AND LOWER(pf.status) = 'paid'
+          AND LOWER(TRIM(pf.fee_type)) = 'regular'
+          AND LOWER(TRIM(pf.status)) = 'paid'
         ORDER BY
           pf.payment_date DESC NULLS LAST,
           pf.fee_id DESC
         LIMIT 1
       ) regular_fee ON TRUE
 
+      /* =========================
+         ONE-ON-ONE PLAYER CHECK
+      ========================= */
       LEFT JOIN LATERAL (
         SELECT
           o.player_id
         FROM tbl_one_on_one_applications o
         WHERE o.player_id = p.player_id
           AND o.is_active = TRUE
-          AND o.renewal_status = 'Active'
-          AND LOWER(o.payment_status) = 'paid'
+          AND LOWER(TRIM(o.renewal_status)) = 'active'
+          AND LOWER(TRIM(o.payment_status)) = 'paid'
         ORDER BY
           o.application_date DESC,
           o.application_id DESC
@@ -71,7 +77,9 @@ exports.getPlayerWiseReport = async (req, res) => {
     const values = [];
     let index = 1;
 
-    // Player Type Filter
+    /* =========================
+       PLAYER TYPE FILTER
+    ========================= */
     if (
       player_type &&
       player_type !== "undefined" &&
@@ -91,7 +99,9 @@ exports.getPlayerWiseReport = async (req, res) => {
       index++;
     }
 
-    // Search Filter
+    /* =========================
+       SEARCH FILTER
+    ========================= */
     if (search && search.trim() !== "") {
       query += `
         AND (
@@ -105,21 +115,35 @@ exports.getPlayerWiseReport = async (req, res) => {
       index++;
     }
 
-    // Player ID Filter
+    /* =========================
+       PLAYER ID FILTER
+    ========================= */
     if (
       player_id &&
       player_id !== "undefined" &&
       player_id !== "null"
     ) {
+      const playerIdNumber = Number(player_id);
+
+      if (Number.isNaN(playerIdNumber)) {
+        return sendErrorResponse(
+          res,
+          400,
+          "Invalid player_id."
+        );
+      }
+
       query += `
         AND p.player_id = $${index}
       `;
 
-      values.push(Number(player_id));
+      values.push(playerIdNumber);
       index++;
     }
 
-    // From Date Filter
+    /* =========================
+       FROM DATE FILTER
+    ========================= */
     if (
       from_date &&
       from_date !== "undefined" &&
@@ -133,7 +157,9 @@ exports.getPlayerWiseReport = async (req, res) => {
       index++;
     }
 
-    // To Date Filter
+    /* =========================
+       TO DATE FILTER
+    ========================= */
     if (
       to_date &&
       to_date !== "undefined" &&
@@ -147,39 +173,52 @@ exports.getPlayerWiseReport = async (req, res) => {
       index++;
     }
 
-    // Order
+    /* =========================
+       ORDER
+    ========================= */
     query += `
       ORDER BY
         p.admission_date DESC,
         p.full_name ASC
     `;
 
-    // Execute Query
-    const result = await db.query(query, values);
+    /* =========================
+       EXECUTE QUERY
+    ========================= */
+    const result = await pool.query(query, values);
 
     const data = result.rows;
 
-    // Statistics
+    /* =========================
+       STATISTICS
+    ========================= */
     const statistics = {
       total_players: data.length,
+
       regular_players: data.filter(
         (player) => player.batch === "Regular"
       ).length,
+
       one_on_one_players: data.filter(
         (player) => player.batch === "One-on-One"
       ).length,
+
       active_players: data.filter(
         (player) =>
           player.status &&
           player.status.toLowerCase() === "active"
       ).length,
+
       inactive_players: data.filter(
         (player) =>
-          player.status &&
+          !player.status ||
           player.status.toLowerCase() !== "active"
       ).length,
     };
 
+    /* =========================
+       RESPONSE
+    ========================= */
     return sendSuccessResponse(
       res,
       200,
@@ -187,6 +226,7 @@ exports.getPlayerWiseReport = async (req, res) => {
       {
         from_date: from_date || null,
         to_date: to_date || null,
+        player_type: player_type || null,
         statistics,
         data,
       }
