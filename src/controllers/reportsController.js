@@ -16,6 +16,7 @@ exports.getPlayerWiseReport = async (req, res) => {
   try {
     let query = `
       SELECT
+        p.player_id,
         p.admission_id,
         p.full_name AS player_name,
         p.status,
@@ -63,11 +64,14 @@ exports.getPlayerWiseReport = async (req, res) => {
           o.application_id DESC
         LIMIT 1
       ) oo ON TRUE
+
+      WHERE 1 = 1
     `;
 
     const values = [];
     let index = 1;
 
+    // Player Type Filter
     if (
       player_type &&
       player_type !== "undefined" &&
@@ -87,6 +91,7 @@ exports.getPlayerWiseReport = async (req, res) => {
       index++;
     }
 
+    // Search Filter
     if (search && search.trim() !== "") {
       query += `
         AND (
@@ -100,6 +105,7 @@ exports.getPlayerWiseReport = async (req, res) => {
       index++;
     }
 
+    // Player ID Filter
     if (
       player_id &&
       player_id !== "undefined" &&
@@ -113,7 +119,12 @@ exports.getPlayerWiseReport = async (req, res) => {
       index++;
     }
 
-    if (from_date) {
+    // From Date Filter
+    if (
+      from_date &&
+      from_date !== "undefined" &&
+      from_date !== "null"
+    ) {
       query += `
         AND p.admission_date >= $${index}::date
       `;
@@ -122,7 +133,12 @@ exports.getPlayerWiseReport = async (req, res) => {
       index++;
     }
 
-    if (to_date) {
+    // To Date Filter
+    if (
+      to_date &&
+      to_date !== "undefined" &&
+      to_date !== "null"
+    ) {
       query += `
         AND p.admission_date <= $${index}::date
       `;
@@ -131,21 +147,48 @@ exports.getPlayerWiseReport = async (req, res) => {
       index++;
     }
 
+    // Order
     query += `
       ORDER BY
         p.admission_date DESC,
         p.full_name ASC
     `;
 
+    // Execute Query
+    const result = await db.query(query, values);
+
+    const data = result.rows;
+
+    // Statistics
+    const statistics = {
+      total_players: data.length,
+      regular_players: data.filter(
+        (player) => player.batch === "Regular"
+      ).length,
+      one_on_one_players: data.filter(
+        (player) => player.batch === "One-on-One"
+      ).length,
+      active_players: data.filter(
+        (player) =>
+          player.status &&
+          player.status.toLowerCase() === "active"
+      ).length,
+      inactive_players: data.filter(
+        (player) =>
+          player.status &&
+          player.status.toLowerCase() !== "active"
+      ).length,
+    };
+
     return sendSuccessResponse(
       res,
       200,
       "Player report retrieved successfully.",
       {
-        from_date: fromDate,
-        to_date: toDate,
+        from_date: from_date || null,
+        to_date: to_date || null,
         statistics,
-        data
+        data,
       }
     );
   } catch (error) {
