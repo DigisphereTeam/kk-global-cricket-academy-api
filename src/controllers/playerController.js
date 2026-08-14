@@ -723,10 +723,10 @@ exports.createPlayerAdmission = async (req, res) => {
           : null,
         address.trim(),
         school?.trim() || null,
-        Number(admission_fee),
+        Number(admission_fee) || 0,
         payment_type.trim(),
         fee_type.trim(),
-        Number(regular_fee),
+        Number(regular_fee) || 0,
         remarks?.trim() || null,
         father_name?.trim() || null,
         father_phone?.trim() || null,
@@ -911,7 +911,7 @@ exports.getAllPlayers = async (req, res) => {
         SELECT COUNT(*)
       FROM tbl_players
       WHERE is_active = TRUE
-    ) AS active_players,
+      ) AS active_players,
 
     (
       SELECT COUNT(*)
@@ -919,10 +919,6 @@ exports.getAllPlayers = async (req, res) => {
       WHERE is_active = FALSE
     ) AS inactive_players,
 
-
-      /* =========================
-         PENDING FEES
-      ========================= */
 
       (
 
@@ -1054,22 +1050,19 @@ exports.getAllPlayers = async (req, res) => {
         )
       FROM tbl_players p
 
-      WHERE p.admission_date >=
-      DATE_TRUNC('month', CURRENT_DATE)
+      WHERE p.admission_date >= DATE_TRUNC('month', CURRENT_DATE)
 
-        AND p.admission_date <
-      DATE_TRUNC('month', CURRENT_DATE)
-      + INTERVAL '1 month'
+      AND p.admission_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
 
-        AND p.admission_fee IS NOT NULL
+      AND COALESCE(p.admission_fee, 0) >= 0
+      AND COALESCE(p.admission_fee, 0) <> 'NaN'::numeric
+
       ) AS admission_fee,
 
 
       (
           SELECT COALESCE(SUM(regular_amount), 0)
           FROM (
-
-          /* Paid regular fees */
 
           SELECT
             COALESCE(pf.amount, 0) AS regular_amount
@@ -1088,8 +1081,9 @@ exports.getAllPlayers = async (req, res) => {
 
           FROM tbl_players p
 
-          WHERE p.is_active = TRUE
-            AND p.regular_fee IS NOT NULL
+          WHERE LOWER(TRIM(p.fee_type)) = 'regular fee'
+                AND COALESCE(p.regular_fee, 0) >= 0
+                AND p.regular_fee <> 'NaN'::numeric
 
             AND DATE_TRUNC('month', p.admission_date)
                 = DATE_TRUNC('month', CURRENT_DATE)

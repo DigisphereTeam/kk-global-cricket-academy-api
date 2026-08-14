@@ -63,8 +63,6 @@ exports.getPlayerWiseReport = async (req, res) => {
           o.application_id DESC
         LIMIT 1
       ) oo ON TRUE
-
-      WHERE p.is_active = TRUE
     `;
 
     const values = [];
@@ -139,13 +137,16 @@ exports.getPlayerWiseReport = async (req, res) => {
         p.full_name ASC
     `;
 
-    const result = await pool.query(query, values);
-
     return sendSuccessResponse(
       res,
       200,
-      "Player report fetched successfully.",
-      result.rows
+      "Player report retrieved successfully.",
+      {
+        from_date: fromDate,
+        to_date: toDate,
+        statistics,
+        data
+      }
     );
   } catch (error) {
     console.error(
@@ -164,21 +165,13 @@ exports.getPlayerWiseReport = async (req, res) => {
 
 exports.getPlayerMonthlyReport = async (req, res) => {
   const {
-    search,
-    player_id,
     from_date,
     to_date,
   } = req.query;
 
   try {
-    // ============================================================
-    // NORMALIZE DATE
-    // ============================================================
-
     const normalizeDate = (value) => {
-      if (!value) {
-        return null;
-      }
+      if (!value) return null;
 
       return String(value)
         .trim()
@@ -189,14 +182,8 @@ exports.getPlayerMonthlyReport = async (req, res) => {
     const cleanedFromDate = normalizeDate(from_date);
     const cleanedToDate = normalizeDate(to_date);
 
-    // ============================================================
-    // VALIDATE DATE
-    // ============================================================
-
     const isValidDate = (dateString) => {
-      if (!dateString) {
-        return false;
-      }
+      if (!dateString) return false;
 
       if (!/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
         return false;
@@ -216,10 +203,6 @@ exports.getPlayerMonthlyReport = async (req, res) => {
       );
     };
 
-    // ============================================================
-    // VALIDATE FROM DATE
-    // ============================================================
-
     if (
       cleanedFromDate &&
       !isValidDate(cleanedFromDate)
@@ -231,10 +214,6 @@ exports.getPlayerMonthlyReport = async (req, res) => {
       );
     }
 
-    // ============================================================
-    // VALIDATE TO DATE
-    // ============================================================
-
     if (
       cleanedToDate &&
       !isValidDate(cleanedToDate)
@@ -245,10 +224,6 @@ exports.getPlayerMonthlyReport = async (req, res) => {
         "Invalid to_date. Use YYYY-MM-DD format."
       );
     }
-
-    // ============================================================
-    // CURRENT DATE - INDIA
-    // ============================================================
 
     const now = new Date();
 
@@ -267,62 +242,23 @@ exports.getPlayerMonthlyReport = async (req, res) => {
     const currentDay =
       indiaDate.getDate();
 
-    // ============================================================
-    // TODAY IN YYYY-MM-DD
-    // ============================================================
-
-    const todayDate =
-      `${currentYear}-${String(
-        currentMonth + 1
-      ).padStart(2, "0")}-${String(
-        currentDay
-      ).padStart(2, "0")}`;
-
-    // ============================================================
-    // DEFAULT DATE RANGE
-    //
-    // Current month first day -> today
-    // ============================================================
-
     const defaultFromDate =
       `${currentYear}-${String(
         currentMonth + 1
       ).padStart(2, "0")}-01`;
 
     const defaultToDate =
-      todayDate;
+      `${currentYear}-${String(
+        currentMonth + 1
+      ).padStart(2, "0")}-${String(
+        currentDay
+      ).padStart(2, "0")}`;
 
     const fromDate =
-      cleanedFromDate ||
-      defaultFromDate;
+      cleanedFromDate || defaultFromDate;
 
     const toDate =
-      cleanedToDate ||
-      defaultToDate;
-
-    // ============================================================
-    // FINAL DATE VALIDATION
-    // ============================================================
-
-    if (!isValidDate(fromDate)) {
-      return sendErrorResponse(
-        res,
-        400,
-        "Invalid from_date. Use YYYY-MM-DD format."
-      );
-    }
-
-    if (!isValidDate(toDate)) {
-      return sendErrorResponse(
-        res,
-        400,
-        "Invalid to_date. Use YYYY-MM-DD format."
-      );
-    }
-
-    // ============================================================
-    // DATE RANGE VALIDATION
-    // ============================================================
+      cleanedToDate || defaultToDate;
 
     if (fromDate > toDate) {
       return sendErrorResponse(
@@ -332,209 +268,143 @@ exports.getPlayerMonthlyReport = async (req, res) => {
       );
     }
 
-    // ============================================================
-    // PLAYER ID VALIDATION
-    // ============================================================
-
-    if (player_id) {
-      if (
-        !/^\d+$/.test(
-          String(player_id).trim()
-        )
-      ) {
-        return sendErrorResponse(
-          res,
-          400,
-          "Invalid player_id."
-        );
-      }
-    }
-
-    // ============================================================
-    // MAIN QUERY
-    // ============================================================
-
-    let query = `
-
-      WITH
-
-      /* ========================================================
-         REPORT MONTHS
-         ======================================================== */
-
-      report_months AS (
-
+    const query = `
+      WITH months AS (
         SELECT
-          generate_series(
-            DATE_TRUNC(
-              'month',
-              $1::date
-            ),
-            DATE_TRUNC(
-              'month',
-              $2::date
-            ),
-            INTERVAL '1 month'
+          DATE_TRUNC(
+            'month',
+            generate_series(
+              $1::date,
+              LEAST(
+                $2::date,
+                CURRENT_DATE
+              ),
+              INTERVAL '1 month'
+            )
           )::date AS month_start
-
       ),
-
-      /* ========================================================
-         FIRST PUNCH FOR EACH PLAYER
-         ======================================================== */
-
-      first_punch AS (
-
-        SELECT
-
-          a.employee_code,
-
-          MIN(
-            l.punch_time
-          ) AS first_punch_time,
-
-          MIN(
-            (
-              l.punch_time AT TIME ZONE
-              'Asia/Kolkata'
-            )::date
-          ) AS first_punch_date
-
-        FROM tbl_attendance a
-
-        INNER JOIN tbl_attendance_logs l
-          ON l.attendance_id =
-             a.attendance_id
-
-        WHERE
-          l.punch_time IS NOT NULL
-
-        GROUP BY
-          a.employee_code
-
-      ),
-
-      /* ========================================================
-         ATTENDANCE DAYS
-         ======================================================== */
-
-      attendance_days AS (
-
-        SELECT DISTINCT
-
-          a.employee_code,
-
-          a.payroll_date::date
-            AS attendance_date
-
-        FROM tbl_attendance a
-
-        WHERE
-          a.payroll_date IS NOT NULL
-
-      ),
-
-      /* ========================================================
-         MONTHLY ATTENDANCE
-         ======================================================== */
-
-      attendance_summary AS (
-
-        SELECT
-
-          ad.employee_code,
-
-          DATE_TRUNC(
-            'month',
-            ad.attendance_date
-          )::date AS month_start,
-
-          COUNT(
-            DISTINCT ad.attendance_date
-          )::int AS days_present,
-
-          MIN(
-            ad.attendance_date
-          ) AS attendance_start_date,
-
-          MAX(
-            ad.attendance_date
-          ) AS attendance_end_date
-
-        FROM attendance_days ad
-
-        GROUP BY
-
-          ad.employee_code,
-
-          DATE_TRUNC(
-            'month',
-            ad.attendance_date
-          )
-
-      ),
-
-      /* ========================================================
-         REGULAR FEE
-         ======================================================== */
 
       regular_fee_summary AS (
-
         SELECT
+          p.player_id,
+          m.month_start,
 
-          pf.player_id,
+          (
+            CASE
+              WHEN DATE_TRUNC(
+                'month',
+                p.admission_date
+              ) = m.month_start
 
-          DATE_TRUNC(
-            'month',
-            pf.payment_date
-          )::date AS month_start,
+              THEN COALESCE(
+                p.regular_fee,
+                0
+              )
 
-          SUM(
+              ELSE 0
+            END
+
+            +
+
             COALESCE(
-              pf.amount,
+              SUM(
+                CASE
+                  WHEN DATE_TRUNC(
+                    'month',
+                    pf.payment_date
+                  ) = m.month_start
+
+                  AND pf.status = 'Paid'
+
+                  THEN COALESCE(
+                    pf.amount,
+                    0
+                  )
+
+                  ELSE 0
+                END
+              ),
               0
             )
           ) AS regular_fee,
 
-          MAX(
-            pf.payment_date
-          ) AS regular_payment_date
+          CASE
+            WHEN DATE_TRUNC(
+              'month',
+              p.admission_date
+            ) = m.month_start
 
-        FROM tbl_player_fees pf
+            AND COALESCE(
+              p.regular_fee,
+              0
+            ) > 0
 
-        WHERE
+            THEN p.admission_date
 
-          pf.status = 'Paid'
+            ELSE MIN(
+              CASE
+                WHEN DATE_TRUNC(
+                  'month',
+                  pf.payment_date
+                ) = m.month_start
+
+                AND pf.status = 'Paid'
+
+                THEN pf.payment_date
+              END
+            )
+          END AS regular_payment_date
+
+        FROM tbl_players p
+
+        CROSS JOIN months m
+
+        LEFT JOIN tbl_player_fees pf
+          ON pf.player_id = p.player_id
 
           AND pf.payment_date IS NOT NULL
 
-          AND pf.is_active = TRUE
+          AND pf.payment_date >= m.month_start
 
-        GROUP BY
-
-          pf.player_id,
-
-          DATE_TRUNC(
-            'month',
-            pf.payment_date
+          AND pf.payment_date < (
+            m.month_start
+            + INTERVAL '1 month'
           )
 
+          AND pf.status = 'Paid'
+
+        WHERE
+          p.admission_date <= LEAST(
+            $2::date,
+            CURRENT_DATE
+          )
+
+          AND m.month_start >= DATE_TRUNC(
+            'month',
+            p.admission_date
+          )
+
+          AND COALESCE(
+            p.regular_fee,
+            0
+          ) >= 0
+
+          AND COALESCE(
+            p.regular_fee,
+            0
+          ) <> 'NaN'::numeric
+
+        GROUP BY
+          p.player_id,
+          p.regular_fee,
+          p.admission_date,
+          m.month_start
       ),
 
-      /* ========================================================
-         ONE-ON-ONE FEE
-         ======================================================== */
-
       one_on_one_summary AS (
-
         SELECT
-
           o.player_id,
-
-          DATE_TRUNC(
-            'month',
-            o.application_date
-          )::date AS month_start,
+          m.month_start,
 
           SUM(
             COALESCE(
@@ -543,32 +413,106 @@ exports.getPlayerMonthlyReport = async (req, res) => {
             )
           ) AS one_on_one_fee,
 
-          MAX(
+          MIN(
             o.application_date
           ) AS one_on_one_payment_date
 
         FROM tbl_one_on_one_applications o
 
+        CROSS JOIN months m
+
         WHERE
+          o.application_date IS NOT NULL
 
-          o.is_active = TRUE
+          AND o.application_date >= m.month_start
 
-          AND o.application_date IS NOT NULL
-
-        GROUP BY
-
-          o.player_id,
-
-          DATE_TRUNC(
-            'month',
-            o.application_date
+          AND o.application_date < (
+            m.month_start
+            + INTERVAL '1 month'
           )
 
-      )
+          AND COALESCE(
+            o.fee_amount,
+            0
+          ) >= 0
 
-      /* ========================================================
-         MAIN REPORT
-         ======================================================== */
+          AND COALESCE(
+            o.fee_amount,
+            0
+          ) <> 'NaN'::numeric
+
+        GROUP BY
+          o.player_id,
+          m.month_start
+      ),
+
+      attendance_summary AS (
+        SELECT
+          p.player_id,
+          m.month_start,
+
+          COUNT(*) FILTER (
+            WHERE first_punch.first_punch_time IS NOT NULL
+          ) AS present_days,
+
+          COUNT(*) FILTER (
+            WHERE first_punch.first_punch_time IS NULL
+          ) AS absent_days,
+
+          COUNT(*) AS total_attendance_days
+
+        FROM tbl_players p
+
+        CROSS JOIN months m
+
+        INNER JOIN tbl_attendance a
+          ON a.employee_code = p.admission_id
+
+          AND a.payroll_date >= GREATEST(
+            p.admission_date,
+            $1::date,
+            m.month_start
+          )
+
+          AND a.payroll_date <= LEAST(
+            LEAST(
+              $2::date,
+              CURRENT_DATE
+            ),
+            (
+              m.month_start
+              + INTERVAL '1 month - 1 day'
+            )::date
+          )
+
+        LEFT JOIN LATERAL (
+          SELECT
+            MIN(
+              al.punch_time
+            ) AS first_punch_time
+
+          FROM tbl_attendance_logs al
+
+          WHERE
+            al.attendance_id = a.attendance_id
+        ) first_punch
+          ON TRUE
+
+        WHERE
+          p.admission_date <= LEAST(
+            $2::date,
+            CURRENT_DATE
+          )
+
+          AND m.month_start >= DATE_TRUNC(
+            'month',
+            p.admission_date
+          )
+
+        GROUP BY
+          p.player_id,
+          m.month_start
+      )
 
       SELECT
 
@@ -582,330 +526,156 @@ exports.getPlayerMonthlyReport = async (req, res) => {
 
         p.admission_date,
 
-        TRIM(
-          TO_CHAR(
-            rm.month_start,
-            'Month'
-          )
-        ) AS month,
+        EXTRACT(
+          MONTH FROM m.month_start
+        )::integer AS month,
 
         EXTRACT(
-          YEAR FROM rm.month_start
-        )::int AS year,
+          YEAR FROM m.month_start
+        )::integer AS year,
 
-        fp.first_punch_date,
-
-        /* ======================================================
-           ATTENDANCE START
-           ====================================================== */
-
-        GREATEST(
-
-          rm.month_start,
-
-          $1::date,
-
-          COALESCE(
-            fp.first_punch_date,
-            $2::date
-          )
-
-        ) AS attendance_start_date,
-
-        /* ======================================================
-           ATTENDANCE END
-
-           IMPORTANT:
-           Cannot go beyond TODAY.
-
-           If toDate is future:
-             toDate = 2026-08-31
-             today  = 2026-08-12
-
-           attendance_end_date = 2026-08-12
-           ====================================================== */
-
-        LEAST(
-
-          (
-            rm.month_start
-            + INTERVAL '1 month'
-            - INTERVAL '1 day'
-          )::date,
-
-          $2::date,
-
-          CURRENT_DATE
-
-        ) AS attendance_end_date,
-
-        /* ======================================================
-           PRESENT
-           ====================================================== */
-
-        COALESCE(
-          att.days_present,
-          0
-        ) AS present,
-
-        /* ======================================================
-           TOTAL WORKING DAYS
-
-           NEVER COUNTS FUTURE DAYS.
-           ====================================================== */
-
-        GREATEST(
-
-          (
-
-            LEAST(
-
-              (
-                rm.month_start
-                + INTERVAL '1 month'
-                - INTERVAL '1 day'
-              )::date,
-
-              $2::date,
-
-              CURRENT_DATE
-
-            )
-
-            -
-
-            GREATEST(
-
-              rm.month_start,
-
-              $1::date,
-
-              COALESCE(
-                fp.first_punch_date,
-                $2::date
-              )
-
-            )
-
-            + 1
-
-          ),
-
-          0
-
-        )::int AS total_working_days,
-
-        /* ======================================================
-           ABSENT
-           ====================================================== */
-
-        GREATEST(
-
-          (
-
-            GREATEST(
-
-              (
-
-                LEAST(
-
-                  (
-                    rm.month_start
-                    + INTERVAL '1 month'
-                    - INTERVAL '1 day'
-                  )::date,
-
-                  $2::date,
-
-                  CURRENT_DATE
-
-                )
-
-                -
-
-                GREATEST(
-
-                  rm.month_start,
-
-                  $1::date,
-
-                  COALESCE(
-                    fp.first_punch_date,
-                    $2::date
-                  )
-
-                )
-
-                + 1
-
-              ),
-
-              0
-
-            )
-
-            -
-
-            COALESCE(
-              att.days_present,
-              0
-            )
-
-          ),
-
-          0
-
-        )::int AS absent,
-
-        /* ======================================================
-           ATTENDANCE PERCENTAGE
-           ====================================================== */
+        TO_CHAR(
+          m.month_start,
+          'Month'
+        ) AS month_name,
 
         CASE
+          WHEN DATE_TRUNC(
+            'month',
+            p.admission_date
+          ) = m.month_start
 
-          WHEN
-
-            GREATEST(
-
-              (
-
-                LEAST(
-
-                  (
-                    rm.month_start
-                    + INTERVAL '1 month'
-                    - INTERVAL '1 day'
-                  )::date,
-
-                  $2::date,
-
-                  CURRENT_DATE
-
-                )
-
-                -
-
-                GREATEST(
-
-                  rm.month_start,
-
-                  $1::date,
-
-                  COALESCE(
-                    fp.first_punch_date,
-                    $2::date
-                  )
-
-                )
-
-                + 1
-
-              ),
-
-              0
-
-            ) = 0
-
-          THEN 0
-
-          ELSE LEAST(
-
-            100,
-
-            ROUND(
-
-              (
-
-                COALESCE(
-                  att.days_present,
-                  0
-                )::numeric
-
-                /
-
-                GREATEST(
-
-                  (
-
-                    LEAST(
-
-                      (
-                        rm.month_start
-                        + INTERVAL '1 month'
-                        - INTERVAL '1 day'
-                      )::date,
-
-                      $2::date,
-
-                      CURRENT_DATE
-
-                    )
-
-                    -
-
-                    GREATEST(
-
-                      rm.month_start,
-
-                      $1::date,
-
-                      COALESCE(
-                        fp.first_punch_date,
-                        $2::date
-                      )
-
-                    )
-
-                    + 1
-
-                  ),
-
-                  0
-
-                )::numeric
-
-              ) * 100,
-
-              0
-
+          AND p.admission_date BETWEEN
+            $1::date
+            AND LEAST(
+              $2::date,
+              CURRENT_DATE
             )
 
+          THEN COALESCE(
+            p.admission_fee,
+            0
           )
 
-        END AS attendance_percentage,
+          ELSE 0
+        END AS admission_fee,
 
-        /* ======================================================
-           ADMISSION FEE
-           ====================================================== */
+        CASE
+          WHEN DATE_TRUNC(
+            'month',
+            p.admission_date
+          ) = m.month_start
 
-        COALESCE(
-          p.admission_fee,
-          0
-        ) AS admission_fee,
+          AND p.admission_date BETWEEN
+            $1::date
+            AND LEAST(
+              $2::date,
+              CURRENT_DATE
+            )
 
-        /* ======================================================
-           REGULAR FEE
-           ====================================================== */
+          THEN p.admission_date
+
+          ELSE NULL
+        END AS admission_payment_date,
 
         COALESCE(
           regular.regular_fee,
           0
         ) AS regular_fee,
 
-        /* ======================================================
-           ONE-TO-ONE FEE
-           ====================================================== */
+        regular.regular_payment_date,
 
         COALESCE(
           one_on_one.one_on_one_fee,
           0
         ) AS one_on_one_fee,
 
-        /* ======================================================
-           TOTAL FEE PAID
-           ====================================================== */
+        one_on_one.one_on_one_payment_date,
+
+        CASE
+          WHEN
+            COALESCE(
+              one_on_one.one_on_one_fee,
+              0
+            ) > 0
+
+            AND LOWER(
+              TRIM(p.fee_type)
+            ) = 'admission fee'
+
+            AND COALESCE(
+              p.regular_fee,
+              0
+            ) = 0
+
+          THEN COALESCE(
+            one_on_one.one_on_one_fee,
+            0
+          )
+
+          ELSE 0
+        END AS only_one_on_one_fee,
+
+        CASE
+          WHEN
+            COALESCE(
+              one_on_one.one_on_one_fee,
+              0
+            ) > 0
+
+            AND LOWER(
+              TRIM(p.fee_type)
+            ) = 'admission fee'
+
+            AND COALESCE(
+              p.regular_fee,
+              0
+            ) = 0
+
+          THEN one_on_one.one_on_one_payment_date
+
+          ELSE NULL
+        END AS only_one_on_one_payment_date,
+
+        COALESCE(
+          attendance.present_days,
+          0
+        ) AS present_days,
+
+        COALESCE(
+          attendance.absent_days,
+          0
+        ) AS absent_days,
+
+        COALESCE(
+          attendance.total_attendance_days,
+          0
+        ) AS total_attendance_days,
 
         (
+          CASE
+            WHEN DATE_TRUNC(
+              'month',
+              p.admission_date
+            ) = m.month_start
+
+            AND p.admission_date BETWEEN
+              $1::date
+              AND LEAST(
+                $2::date,
+                CURRENT_DATE
+              )
+
+            THEN COALESCE(
+              p.admission_fee,
+              0
+            )
+
+            ELSE 0
+          END
+
+          +
+
           COALESCE(
             regular.regular_fee,
             0
@@ -918,236 +688,157 @@ exports.getPlayerMonthlyReport = async (req, res) => {
             0
           )
 
-        ) AS fee_paid,
-
-        /* ======================================================
-           PAYMENT DATES
-           ====================================================== */
-
-        regular.regular_payment_date::date
-          AS regular_payment_date,
-
-        one_on_one.one_on_one_payment_date::date
-          AS one_on_one_payment_date
+        ) AS fee_paid
 
       FROM tbl_players p
 
-      CROSS JOIN report_months rm
-
-      LEFT JOIN first_punch fp
-        ON fp.employee_code =
-           p.admission_id
-
-      LEFT JOIN attendance_summary att
-        ON att.employee_code =
-           p.admission_id
-
-        AND att.month_start =
-            rm.month_start
+      CROSS JOIN months m
 
       LEFT JOIN regular_fee_summary regular
-        ON regular.player_id =
-           p.player_id
-
-        AND regular.month_start =
-            rm.month_start
+        ON regular.player_id = p.player_id
+        AND regular.month_start = m.month_start
 
       LEFT JOIN one_on_one_summary one_on_one
-        ON one_on_one.player_id =
-           p.player_id
+        ON one_on_one.player_id = p.player_id
+        AND one_on_one.month_start = m.month_start
 
-        AND one_on_one.month_start =
-            rm.month_start
+      LEFT JOIN attendance_summary attendance
+        ON attendance.player_id = p.player_id
+        AND attendance.month_start = m.month_start
 
       WHERE
-
-        fp.first_punch_date IS NOT NULL
-
-        AND fp.first_punch_date <=
-
-          LEAST(
-
-            (
-              rm.month_start
-              + INTERVAL '1 month'
-              - INTERVAL '1 day'
-            )::date,
-
-            $2::date,
-
-            CURRENT_DATE
-
-          )
-    `;
-
-    const values = [
-      fromDate,
-      toDate,
-    ];
-
-    let index = 3;
-
-    // ============================================================
-    // SEARCH
-    // ============================================================
-
-    if (search) {
-      query += `
-
-        AND (
-
-          p.full_name ILIKE $${index}
-
-          OR
-
-          p.admission_id ILIKE $${index}
-
+        p.admission_date <= LEAST(
+          $2::date,
+          CURRENT_DATE
         )
 
-      `;
-
-      values.push(
-        `%${String(search).trim()}%`
-      );
-
-      index++;
-    }
-
-    // ============================================================
-    // PLAYER ID
-    // ============================================================
-
-    if (player_id) {
-      query += `
-
-        AND p.player_id = $${index}
-
-      `;
-
-      values.push(
-        Number(player_id)
-      );
-
-      index++;
-    }
-
-    // ============================================================
-    // ORDER
-    // ============================================================
-
-    query += `
+        AND m.month_start >= DATE_TRUNC(
+          'month',
+          p.admission_date
+        )
 
       ORDER BY
+        p.full_name ASC,
+        m.month_start ASC
+      `;
 
-        rm.month_start DESC,
+    const result = await pool.query(
+      query,
+      [fromDate, toDate]
+    );
 
-        p.full_name ASC
+    const data = result.rows.map((row) => ({
+      admission_id: row.admission_id,
+      player_id: Number(row.player_id),
+      player_name: row.player_name,
+      fee_type: row.fee_type,
+      admission_date: row.admission_date,
 
-    `;
+      month: Number(row.month),
+      year: Number(row.year),
+      month_name: row.month_name.trim(),
 
-    const result =
-      await pool.query(
-        query,
-        values
-      );
+      admission_fee: Number(
+        row.admission_fee || 0
+      ),
 
-    // ============================================================
-    // RESPONSE
-    // ============================================================
+      regular_fee: Number(
+        row.regular_fee || 0
+      ),
 
-    const rows =
-      result.rows.map(
-        (row) => ({
+      regular_payment_date:
+        row.regular_payment_date,
 
-          admission_id:
-            row.admission_id,
+      one_on_one_fee:
+        Number(row.one_on_one_fee || 0) -
+        Number(row.only_one_on_one_fee || 0),
 
-          player_id:
-            Number(row.player_id),
+      one_on_one_payment_date:
+        Number(row.one_on_one_fee || 0) -
+          Number(row.only_one_on_one_fee || 0) > 0
+          ? row.one_on_one_payment_date
+          : null,
 
-          player_name:
-            row.player_name,
+      only_one_on_one_fee:
+        Number(row.only_one_on_one_fee || 0),
 
-          fee_type:
-            row.fee_type,
+      only_one_on_one_payment_date:
+        row.only_one_on_one_payment_date,
 
-          admission_date:
-            row.admission_date,
+      fee_paid: Number(
+        row.fee_paid || 0
+      ),
 
-          month:
-            row.month,
+      present: Number(
+        row.present_days || 0
+      ),
 
-          year:
-            Number(row.year),
+      absent: Number(
+        row.absent_days || 0
+      ),
 
-          first_punch_date:
-            row.first_punch_date,
+      total_attendance_days: Number(
+        row.total_attendance_days || 0
+      )
+    }));
 
-          attendance_start_date:
-            row.attendance_start_date,
 
-          attendance_end_date:
-            row.attendance_end_date,
+    const statistics = data.reduce(
+      (acc, player) => {
+        acc.total_admission_fee +=
+          player.admission_fee;
 
-          present:
-            Number(row.present || 0),
+        acc.total_regular_fee +=
+          player.regular_fee;
 
-          absent:
-            Number(row.absent || 0),
+        acc.total_one_on_one_fee +=
+          Number(player.one_on_one_fee || 0);
 
-          total_working_days:
-            Number(
-              row.total_working_days || 0
-            ),
+        acc.total_only_one_on_one_fee +=
+          player.only_one_on_one_fee;
 
-          attendance_percentage:
-            `${Number(
-              row.attendance_percentage || 0
-            )}%`,
+        acc.total_fee_paid +=
+          player.fee_paid;
 
-          admission_fee:
-            Number(
-              row.admission_fee || 0
-            ),
+        acc.total_present_days +=
+          player.present;
 
-          regular_fee:
-            Number(
-              row.regular_fee || 0
-            ),
+        acc.total_absent_days +=
+          player.absent;
 
-          one_on_one_fee:
-            Number(
-              row.one_on_one_fee || 0
-            ),
+        acc.total_attendance_days +=
+          player.total_attendance_days;
 
-          fee_paid:
-            Number(
-              row.fee_paid || 0
-            ),
+        return acc;
+      },
+      {
+        total_admission_fee: 0,
+        total_regular_fee: 0,
+        total_one_on_one_fee: 0,
+        total_only_one_on_one_fee: 0,
+        total_fee_paid: 0,
 
-          regular_payment_date:
-            row.regular_payment_date,
-
-          one_on_one_payment_date:
-            row.one_on_one_payment_date,
-        })
-      );
+        total_present_days: 0,
+        total_absent_days: 0,
+        total_attendance_days: 0
+      }
+    );
 
     return sendSuccessResponse(
       res,
       200,
-      "Monthly player report fetched successfully.",
+      "Player report retrieved successfully.",
       {
         from_date: fromDate,
         to_date: toDate,
-        data: rows,
+        statistics,
+        data
       }
     );
 
   } catch (error) {
-
     console.error(
-      "Monthly Player Report Error:",
+      "Player report error:",
       error
     );
 
@@ -2170,10 +1861,6 @@ exports.getEmployeeStatistics = async (req, res) => {
     );
   }
 
-  // ==========================================
-  // DEFAULT DATE RANGE — CURRENT MONTH
-  // ==========================================
-
   const today = new Date();
 
   const currentDate = new Date(
@@ -2226,104 +1913,58 @@ exports.getEmployeeStatistics = async (req, res) => {
     if (employee_type === "Player") {
       const result = await pool.query(
         `
-    SELECT
+      SELECT
+
       (
-        SELECT COALESCE(
-          SUM(p.admission_fee),
-          0
-        )
+        SELECT COALESCE(SUM(p.admission_fee), 0)
         FROM tbl_players p
-
         WHERE p.admission_date >= $1::date
-          AND p.admission_date <= $2::date
-          AND p.admission_fee IS NOT NULL
-
+          AND p.admission_date < ($2::date + INTERVAL '1 day')
+          AND COALESCE(p.admission_fee, 0) >= 0
+          AND COALESCE(p.admission_fee, 0) <> 'NaN'::numeric
       ) AS admission_fee,
 
       (
-        SELECT COALESCE(
-          SUM(regular_amount),
-          0
-        )
-
+        SELECT COALESCE(SUM(regular_amount), 0)
         FROM (
 
           SELECT
-            COALESCE(
-              p.regular_fee,
-              0
-            ) AS regular_amount
-
-          FROM tbl_players p
-
-          WHERE p.regular_fee > 0
-            AND p.fee_type = 'Regular Fee'
-
-            AND p.admission_date >= $1::date
-            AND p.admission_date < (
-              $2::date + INTERVAL '1 day'
-            )
-
+            COALESCE(pf.amount, 0) AS regular_amount
+          FROM tbl_player_fees pf
+          WHERE pf.status = 'Paid'
+            AND pf.payment_date >= $1::date
+            AND pf.payment_date < ($2::date + INTERVAL '1 day')
 
           UNION ALL
 
           SELECT
-            COALESCE(
-              pf.amount,
-              0
-            ) AS regular_amount
+            COALESCE(p.regular_fee, 0) AS regular_amount
+          FROM tbl_players p
+          WHERE LOWER(TRIM(p.fee_type)) = 'regular fee'
+            AND COALESCE(p.regular_fee, 0) >= 0
+            AND p.regular_fee <> 'NaN'::numeric
+            AND p.admission_date >= $1::date
+            AND p.admission_date < ($2::date + INTERVAL '1 day')
 
-          FROM tbl_player_fees pf
-
-          INNER JOIN tbl_players p
-            ON p.player_id = pf.player_id
-
-          WHERE pf.payment_date >= $1::date
-            AND pf.payment_date < (
-              $2::date + INTERVAL '1 day'
-            )
-
-            /* Existing players */
-            AND p.admission_date < $2::date
-
-        ) AS regular_fees
+        ) AS regular_revenue_data
       ) AS regular_fee,
 
       (
-        SELECT COALESCE(
-          SUM(o.fee_amount),
-          0
-        )
-
+        SELECT COALESCE(SUM(o.fee_amount), 0)
         FROM tbl_one_on_one_applications o
-
         WHERE o.application_date >= $1::date
-          AND o.application_date < (
-            $2::date + INTERVAL '1 day'
-          )
-
+          AND o.application_date < ($2::date + INTERVAL '1 day')
       ) AS one_on_one_fee,
 
       (
-        SELECT COALESCE(
-          SUM(o.fee_amount),
-          0
-        )
-
+        SELECT COALESCE(SUM(o.fee_amount), 0)
         FROM tbl_one_on_one_applications o
-
         INNER JOIN tbl_players p
           ON p.player_id = o.player_id
-
         WHERE o.application_date >= $1::date
-          AND o.application_date < (
-            $2::date + INTERVAL '1 day'
-          )
-
+          AND o.application_date < ($2::date + INTERVAL '1 day')
           AND p.fee_type = 'Admission Fee'
-
           AND p.regular_fee = 0
-
       ) AS only_one_on_one_fee
     `,
         [fromDate, toDate]
@@ -2384,9 +2025,7 @@ exports.getEmployeeStatistics = async (req, res) => {
 
           COUNT(
             DISTINCT department
-          ) AS total_departments,
-
-          0 AS leave_staff
+          ) AS total_departments
 
         FROM tbl_staff
 
@@ -2422,11 +2061,7 @@ exports.getEmployeeStatistics = async (req, res) => {
 
             total_departments: Number(
               row.total_departments || 0
-            ),
-
-            leave_staff: Number(
-              row.leave_staff || 0
-            ),
+            )
           },
         }
       );

@@ -8,7 +8,7 @@ const reportsRouter = express.Router();
 
 reportsRouter.use(verifyToken);
 
-// reportsRouter.use(checkRole("ADMIN"));
+reportsRouter.use(checkRole("ADMIN"));
 
 reportsRouter.get("/player-wise", getPlayerWiseReport);
 

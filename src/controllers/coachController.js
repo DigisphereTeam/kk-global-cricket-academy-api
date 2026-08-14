@@ -136,13 +136,9 @@ exports.addCoach = async (req, res) => {
       return sendErrorResponse(
         res,
         409,
-        "Phone number already exists."
+        "A coach with this phone number already exists."
       );
     }
-
-    // ==========================================
-    // Create Coach
-    // ==========================================
 
     const result =
       await client.query(
@@ -389,9 +385,6 @@ exports.getAllCoaches = async (req, res) => {
       `),
     ]);
 
-    // =========================
-    // GENERATE SIGNED URLS
-    // =========================
     const coaches = await Promise.all(
       result.rows.map(async (coach) => {
         const document_urls = await Promise.all(
@@ -426,9 +419,6 @@ exports.getAllCoaches = async (req, res) => {
       })
     );
 
-    // =========================
-    // RESPONSE
-    // =========================
     return sendSuccessResponse(
       res,
       200,
