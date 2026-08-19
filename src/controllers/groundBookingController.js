@@ -279,8 +279,8 @@ const updateExpiredGroundBookings = async (client) => {
     await client.query(`
         UPDATE tbl_ground_booking
         SET status = CASE
-            WHEN LOWER(status) = 'pending' THEN 'cancelled'
-            WHEN LOWER(status) = 'confirmed' THEN 'completed'
+            WHEN LOWER(status) = 'pending' THEN 'Cancelled'
+            WHEN LOWER(status) = 'confirmed' THEN 'Completed'
             ELSE status
         END
         WHERE LOWER(status) IN ('pending', 'confirmed')
