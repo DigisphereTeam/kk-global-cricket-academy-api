@@ -275,41 +275,77 @@ exports.createGroundBooking = async (req, res) => {
     }
 };
 
+const updateExpiredGroundBookings = async (client) => {
+    await client.query(`
+        UPDATE tbl_ground_booking
+        SET status = CASE
+            WHEN LOWER(status) = 'pending' THEN 'cancelled'
+            WHEN LOWER(status) = 'confirmed' THEN 'completed'
+            ELSE status
+        END
+        WHERE LOWER(status) IN ('pending', 'confirmed')
+          AND (
+              booking_date < CURRENT_DATE
+              OR (
+                  booking_date = CURRENT_DATE
+                  AND CURRENT_TIME >=
+                      TO_TIMESTAMP(
+                          booking_date::text || ' ' ||
+                          TRIM(SPLIT_PART(time_slot, '-', 2)),
+                          'YYYY-MM-DD HH12:MI AM'
+                      )::time
+              )
+          )
+    `);
+};
+
 exports.getAllGroundBookings = async (req, res) => {
+    let client;
+
     try {
+        client = await pool.connect();
+
+        await client.query("BEGIN");
+
+        await updateExpiredGroundBookings(client);
+
         const [bookings, statistics] = await Promise.all([
-            // Get all ground bookings
-            pool.query(`
-        SELECT *
-        FROM tbl_ground_booking
-        ORDER BY booking_id DESC
-      `),
+            client.query(`
+                SELECT *
+                FROM tbl_ground_booking
+                ORDER BY booking_id DESC
+            `),
 
-            // Get booking statistics
-            pool.query(`
-        SELECT
-          COUNT(*) AS total_bookings,
+            client.query(`
+                SELECT
+                    COUNT(*) AS total_bookings,
 
-          COUNT(*) FILTER (
-            WHERE LOWER(status) = 'confirmed'
-          ) AS confirmed_bookings,
+                    COUNT(*) FILTER (
+                        WHERE LOWER(status) = 'confirmed'
+                    ) AS confirmed_bookings,
 
-          COUNT(*) FILTER (
-            WHERE LOWER(status) = 'pending'
-          ) AS pending_bookings,
+                    COUNT(*) FILTER (
+                        WHERE LOWER(status) = 'pending'
+                    ) AS pending_bookings,
 
-          COUNT(*) FILTER (
-            WHERE LOWER(status) = 'completed'
-          ) AS completed_bookings,
+                    COUNT(*) FILTER (
+                        WHERE LOWER(status) = 'completed'
+                    ) AS completed_bookings,
 
-          COUNT(*) FILTER (
-            WHERE booking_date >= CURRENT_DATE
-            AND LOWER(status) = 'confirmed'
-          ) AS upcoming_bookings
+                    COUNT(*) FILTER (
+                        WHERE LOWER(status) = 'cancelled'
+                    ) AS cancelled_bookings,
 
-        FROM tbl_ground_booking
-      `),
+                    COUNT(*) FILTER (
+                        WHERE booking_date >= CURRENT_DATE
+                          AND LOWER(status) = 'confirmed'
+                    ) AS upcoming_bookings
+
+                FROM tbl_ground_booking
+            `),
         ]);
+
+        await client.query("COMMIT");
 
         const stats = statistics.rows[0];
 
@@ -323,13 +359,17 @@ exports.getAllGroundBookings = async (req, res) => {
                     confirmed_bookings: Number(stats.confirmed_bookings),
                     pending_bookings: Number(stats.pending_bookings),
                     completed_bookings: Number(stats.completed_bookings),
+                    cancelled_bookings: Number(stats.cancelled_bookings),
                     upcoming_bookings: Number(stats.upcoming_bookings),
                 },
-
                 bookings: bookings.rows,
             }
         );
     } catch (error) {
+        if (client) {
+            await client.query("ROLLBACK");
+        }
+
         console.error("Get All Ground Bookings Error:", error);
 
         return sendErrorResponse(
@@ -337,6 +377,10 @@ exports.getAllGroundBookings = async (req, res) => {
             500,
             error.message || "Internal Server Error"
         );
+    } finally {
+        if (client) {
+            client.release();
+        }
     }
 };
 
