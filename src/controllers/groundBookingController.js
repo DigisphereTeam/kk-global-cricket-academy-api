@@ -426,6 +426,7 @@ exports.getMonthlyGroundBookingSlots = async (req, res) => {
             FROM tbl_ground_booking
             WHERE EXTRACT(MONTH FROM booking_date) = $1
               AND EXTRACT(YEAR FROM booking_date) = $2
+              AND LOWER(status) = 'confirmed'
             ORDER BY booking_date ASC, time_slot ASC
             `,
             [selectedMonth, selectedYear]
@@ -434,7 +435,7 @@ exports.getMonthlyGroundBookingSlots = async (req, res) => {
         return sendSuccessResponse(
             res,
             200,
-            "Monthly ground booking slots fetched successfully.",
+            "Monthly confirmed ground booking slots fetched successfully.",
             {
                 month: selectedMonth,
                 year: selectedYear,
