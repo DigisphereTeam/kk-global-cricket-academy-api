@@ -2,14 +2,9 @@ const cron = require("node-cron");
 const pool = require("../config/dbConfig");
 
 const feeDueNotificationCron = () => {
-  // TESTING: Runs every 2 minutes
-  // PRODUCTION: "0 9 5 * *" -> 9:00 AM on the 5th of every month
-
   cron.schedule(
-    "0 9 5 * *",
+    "0 9 1-5 * *",
     async () => {
-      console.log("Running Fee Due notification cron...");
-
       let client;
 
       try {
@@ -17,45 +12,79 @@ const feeDueNotificationCron = () => {
 
         await client.query("BEGIN");
 
-        // ============================================================
-        // REGULAR FEE DUE
-        // ============================================================
-        //
-        // Player is considered regular-fee due when:
-        // - Player is active
-        // - No fee record exists for the current month
-        //
+        const MAX_PLAYERS_PER_NOTIFICATION = 10;
+
         const regularFees = await client.query(`
-          SELECT
+          SELECT DISTINCT
             p.player_id,
             p.full_name,
             p.admission_id
           FROM tbl_players p
           WHERE p.is_active = TRUE
-
+            AND p.fee_type = 'Regular Fee'
+            AND p.regular_fee >= 0
+            AND p.admission_date <= CURRENT_DATE
+            AND (
+              (
+                DATE_TRUNC('month', p.admission_date) =
+                  DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
+                AND p.fee_status = 'Paid'
+              )
+              OR
+              EXISTS (
+                SELECT 1
+                FROM tbl_player_fees pf_last
+                WHERE pf_last.player_id = p.player_id
+                  AND pf_last.status = 'Paid'
+                  AND pf_last.is_active = TRUE
+                  AND pf_last.payment_date >=
+                    DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
+                  AND pf_last.payment_date <
+                    DATE_TRUNC('month', CURRENT_DATE)
+              )
+            )
             AND NOT EXISTS (
               SELECT 1
-              FROM tbl_player_fees pf
-              WHERE pf.player_id = p.player_id
-                AND pf.due_date >= DATE_TRUNC('month', CURRENT_DATE)
-                AND pf.due_date < DATE_TRUNC('month', CURRENT_DATE)
-                    + INTERVAL '1 month'
+              FROM tbl_player_fees pf_current
+              WHERE pf_current.player_id = p.player_id
+                AND pf_current.status = 'Paid'
+                AND pf_current.is_active = TRUE
+                AND pf_current.payment_date >=
+                  DATE_TRUNC('month', CURRENT_DATE)
+                AND pf_current.payment_date <
+                  DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
             )
 
-          ORDER BY p.player_id;
+          UNION
+
+          SELECT DISTINCT
+            p.player_id,
+            p.full_name,
+            p.admission_id
+          FROM tbl_players p
+          INNER JOIN tbl_player_fees pf_last
+            ON pf_last.player_id = p.player_id
+          WHERE p.is_active = TRUE
+            AND pf_last.status = 'Paid'
+            AND pf_last.is_active = TRUE
+            AND pf_last.payment_date >=
+              DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
+            AND pf_last.payment_date <
+              DATE_TRUNC('month', CURRENT_DATE)
+            AND NOT EXISTS (
+              SELECT 1
+              FROM tbl_player_fees pf_current
+              WHERE pf_current.player_id = pf_last.player_id
+                AND pf_current.status = 'Paid'
+                AND pf_current.is_active = TRUE
+                AND pf_current.payment_date >=
+                  DATE_TRUNC('month', CURRENT_DATE)
+                AND pf_current.payment_date <
+                  DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+            )
+
+          ORDER BY player_id;
         `);
-
-        console.log(
-          `Regular fee due players: ${regularFees.rows.length}`
-        );
-
-        // ============================================================
-        // CREATE REGULAR FEE NOTIFICATIONS
-        // ============================================================
-
-        const MAX_PLAYERS_PER_NOTIFICATION = 10;
-
-        let regularNotificationCount = 0;
 
         for (
           let i = 0;
@@ -87,74 +116,45 @@ const feeDueNotificationCron = () => {
               description,
               performed_by
             )
-            VALUES
-            ($1, $2, $3, $4)
+            VALUES ($1, $2, $3, $4)
             `,
             [
-              "Regular Fee Due",
+              "Fee Due",
               "Regular Fee Due",
               description,
               "System",
             ]
           );
-
-          regularNotificationCount++;
         }
 
-        // ============================================================
-        // ONE-TO-ONE FEE DUE
-        // ============================================================
-        //
-        // Player is considered One-to-One fee due when:
-        //
-        // 1. Player is active
-        // 2. Player has had a One-to-One application previously
-        // 3. Player does NOT have an active One-to-One application
-        //    for the current month
-        //
         const oneOnOneFees = await client.query(`
-          SELECT
+          SELECT DISTINCT
             p.player_id,
             p.full_name,
             p.admission_id
-          FROM tbl_players p
+          FROM tbl_one_on_one_applications last_month
+          INNER JOIN tbl_players p
+            ON p.player_id = last_month.player_id
           WHERE p.is_active = TRUE
-
-            -- Player must have had One-to-One previously
-            AND EXISTS (
-              SELECT 1
-              FROM tbl_one_on_one_applications previous_o
-              WHERE previous_o.player_id = p.player_id
-            )
-
-            -- No active One-to-One application this month
+            AND last_month.is_active = TRUE
+            AND last_month.payment_status = 'Paid'
+            AND last_month.application_date >=
+              DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
+            AND last_month.application_date <
+              DATE_TRUNC('month', CURRENT_DATE)
             AND NOT EXISTS (
               SELECT 1
-              FROM tbl_one_on_one_applications current_o
-              WHERE current_o.player_id = p.player_id
-                AND current_o.is_active = TRUE
-                AND current_o.application_date >= DATE_TRUNC(
-                  'month',
-                  CURRENT_DATE
-                )
-                AND current_o.application_date < DATE_TRUNC(
-                  'month',
-                  CURRENT_DATE
-                ) + INTERVAL '1 month'
+              FROM tbl_one_on_one_applications this_month
+              WHERE this_month.player_id = last_month.player_id
+                AND this_month.is_active = TRUE
+                AND this_month.payment_status = 'Paid'
+                AND this_month.application_date >=
+                  DATE_TRUNC('month', CURRENT_DATE)
+                AND this_month.application_date <
+                  DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
             )
-
           ORDER BY p.player_id;
         `);
-
-        console.log(
-          `One-to-One fee due players: ${oneOnOneFees.rows.length}`
-        );
-
-        // ============================================================
-        // CREATE ONE-TO-ONE NOTIFICATIONS
-        // ============================================================
-
-        let oneOnOneNotificationCount = 0;
 
         for (
           let i = 0;
@@ -186,29 +186,20 @@ const feeDueNotificationCron = () => {
               description,
               performed_by
             )
-            VALUES
-            ($1, $2, $3, $4)
+            VALUES ($1, $2, $3, $4)
             `,
             [
-              "One-to-One Fee Due",
+              "Fee Due",
               "One-to-One Fee Due",
               description,
               "System",
             ]
           );
-
-          oneOnOneNotificationCount++;
         }
 
         await client.query("COMMIT");
 
-        console.log(
-          `Created ${regularNotificationCount} regular fee notification(s).`
-        );
-
-        console.log(
-          `Created ${oneOnOneNotificationCount} One-to-One notification(s).`
-        );
+        console.log("Fee Due notification cron completed successfully.");
       } catch (error) {
         if (client) {
           await client.query("ROLLBACK");

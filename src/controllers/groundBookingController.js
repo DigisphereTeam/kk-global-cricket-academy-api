@@ -274,6 +274,7 @@ exports.createGroundBooking = async (req, res) => {
         }
     }
 };
+
 exports.getAllGroundBookings = async (req, res) => {
     try {
         const [bookings, statistics] = await Promise.all([
@@ -330,6 +331,75 @@ exports.getAllGroundBookings = async (req, res) => {
         );
     } catch (error) {
         console.error("Get All Ground Bookings Error:", error);
+
+        return sendErrorResponse(
+            res,
+            500,
+            error.message || "Internal Server Error"
+        );
+    }
+};
+
+exports.getMonthlyGroundBookingSlots = async (req, res) => {
+    try {
+        const { month, year } = req.query;
+
+        const currentDate = new Date();
+
+        const selectedMonth = month
+            ? Number(month)
+            : currentDate.getMonth() + 1;
+
+        const selectedYear = year
+            ? Number(year)
+            : currentDate.getFullYear();
+
+        if (
+            !Number.isInteger(selectedMonth) ||
+            selectedMonth < 1 ||
+            selectedMonth > 12
+        ) {
+            return sendErrorResponse(
+                res,
+                400,
+                "Month must be between 1 and 12."
+            );
+        }
+
+        if (!Number.isInteger(selectedYear) || selectedYear < 2000) {
+            return sendErrorResponse(
+                res,
+                400,
+                "Invalid year."
+            );
+        }
+
+        const result = await pool.query(
+            `
+            SELECT
+                booking_date,
+                time_slot
+            FROM tbl_ground_booking
+            WHERE EXTRACT(MONTH FROM booking_date) = $1
+              AND EXTRACT(YEAR FROM booking_date) = $2
+            ORDER BY booking_date ASC, time_slot ASC
+            `,
+            [selectedMonth, selectedYear]
+        );
+
+        return sendSuccessResponse(
+            res,
+            200,
+            "Monthly ground booking slots fetched successfully.",
+            {
+                month: selectedMonth,
+                year: selectedYear,
+                bookings: result.rows
+            }
+        );
+
+    } catch (error) {
+        console.error("Get Monthly Ground Booking Slots Error:", error);
 
         return sendErrorResponse(
             res,
