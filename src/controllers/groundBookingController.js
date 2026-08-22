@@ -611,10 +611,13 @@ exports.updateGroundBooking = async (req, res) => {
         remarks = remarks?.trim() || null;
 
         if (
-            currentBooking.status === "Cancelled" &&
+            (
+                currentBooking.status === "Cancelled" ||
+                currentBooking.status === "Pending"
+            ) &&
             status === undefined
         ) {
-            status = "Pending";
+            status = "Rescheduled Approved";
         }
 
         if (
