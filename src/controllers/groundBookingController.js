@@ -612,13 +612,22 @@ exports.updateGroundBooking = async (req, res) => {
         time_slot = time_slot?.trim();
         remarks = remarks?.trim() || null;
 
-        if (booking_date) {
+        if (booking_date !== undefined) {
             const today = new Date();
             today.setHours(0, 0, 0, 0);
 
-            const selectedDate = new Date(booking_date);
+            const oldDate = new Date(
+                currentBooking.booking_date
+            );
 
-            if (Number.isNaN(selectedDate.getTime())) {
+            const newDate = new Date(
+                booking_date
+            );
+
+            if (
+                Number.isNaN(oldDate.getTime()) ||
+                Number.isNaN(newDate.getTime())
+            ) {
                 await client.query("ROLLBACK");
 
                 return sendErrorResponse(
@@ -628,10 +637,18 @@ exports.updateGroundBooking = async (req, res) => {
                 );
             }
 
-            selectedDate.setHours(0, 0, 0, 0);
+            oldDate.setHours(0, 0, 0, 0);
+            newDate.setHours(0, 0, 0, 0);
+
+            const isDateChanged =
+                newDate.getTime() !== oldDate.getTime();
+
+            const isFutureDate =
+                newDate.getTime() > today.getTime();
 
             if (
-                selectedDate > today &&
+                isDateChanged &&
+                isFutureDate &&
                 (
                     currentBooking.status === "Cancelled" ||
                     currentBooking.status === "Pending"
@@ -740,10 +757,14 @@ exports.updateGroundBooking = async (req, res) => {
         }
 
         const checkDate =
-            booking_date || currentBooking.booking_date;
+            booking_date !== undefined
+                ? booking_date
+                : currentBooking.booking_date;
 
         const checkSlot =
-            time_slot || currentBooking.time_slot;
+            time_slot !== undefined
+                ? time_slot
+                : currentBooking.time_slot;
 
         const duplicateBooking = await client.query(
             `
@@ -797,7 +818,9 @@ exports.updateGroundBooking = async (req, res) => {
                 if (remaining_amount !== undefined) {
                     value = finalRemainingAmount;
                 } else {
-                    value = finalTotalAmount - finalAdvancePaid;
+                    value =
+                        finalTotalAmount -
+                        finalAdvancePaid;
                 }
             } else if (field === "status") {
                 if (status !== undefined) {
@@ -805,7 +828,9 @@ exports.updateGroundBooking = async (req, res) => {
                 } else {
                     continue;
                 }
-            } else if (req.body[field] !== undefined) {
+            } else if (
+                req.body[field] !== undefined
+            ) {
                 value = req.body[field];
             } else {
                 continue;
@@ -862,15 +887,10 @@ exports.updateGroundBooking = async (req, res) => {
             `Ground booking ${updatedBooking.rows[0].booking_code} was updated.`;
 
         if (
-            currentBooking.status === "Cancelled" &&
-            status === "Rescheduled Approved"
-        ) {
-            action = "Rescheduled Approved";
-
-            description =
-                `Ground booking ${updatedBooking.rows[0].booking_code} was rescheduled and approved.`;
-        } else if (
-            currentBooking.status === "Pending" &&
+            (
+                currentBooking.status === "Cancelled" ||
+                currentBooking.status === "Pending"
+            ) &&
             status === "Rescheduled Approved"
         ) {
             action = "Rescheduled Approved";
@@ -943,6 +963,7 @@ exports.updateGroundBooking = async (req, res) => {
         }
     }
 };
+
 
 
 
