@@ -11,6 +11,8 @@ const coachRouter = express.Router();
 
 coachRouter.use(verifyToken);
 
+// coachRouter.use(checkRole("ADMIN"));
+
 coachRouter.post(
   "/",
   (req, res, next) => {
@@ -41,7 +43,6 @@ coachRouter.post(
     });
   },
   validateRequestBody,
-  checkRole("PRIMARY"),
   addCoach
 );
 

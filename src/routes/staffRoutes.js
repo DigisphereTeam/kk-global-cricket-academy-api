@@ -12,6 +12,8 @@ const { sendErrorResponse } = require("../utils/apiResponse");
 
 staffRouter.use(verifyToken);
 
+// staffRouter.use(checkRole("ADMIN"));
+
 staffRouter.post(
   "/",
   (req, res, next) => {
@@ -42,7 +44,6 @@ staffRouter.post(
     });
   },
   validateRequestBody,
-  checkRole("PRIMARY"),
   addStaff
 );
 

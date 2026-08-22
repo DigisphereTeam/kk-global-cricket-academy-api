@@ -8,7 +8,9 @@ const expenditureRouter = express.Router();
 
 expenditureRouter.use(verifyToken);
 
-expenditureRouter.post('/', validateRequestBody, checkRole('PRIMARY'), createExpenditure);
+// expenditureRouter.use(checkRole("ADMIN"));
+
+expenditureRouter.post('/', validateRequestBody, createExpenditure);
 
 expenditureRouter.get('/', getAllExpenditures);
 
@@ -16,6 +18,6 @@ expenditureRouter.get('/:expenditure_id', getExpenditureById);
 
 expenditureRouter.patch('/:expenditure_id', validateRequestBody, updateExpenditure);
 
-expenditureRouter.delete('/:expenditure_id', checkRole('ADMIN'), validateRequestBody, deleteExpenditure);
+expenditureRouter.delete('/:expenditure_id', validateRequestBody, deleteExpenditure);
 
 module.exports = expenditureRouter;
