@@ -539,6 +539,7 @@ exports.updateGroundBooking = async (req, res) => {
         "Confirmed",
         "Completed",
         "Cancelled",
+        "Rescheduled Approved",
     ];
 
     if (
@@ -599,6 +600,7 @@ exports.updateGroundBooking = async (req, res) => {
             payment_type,
             total_amount,
             advance_paid,
+            remaining_amount,
             remarks,
             status,
         } = req.body;
@@ -610,14 +612,34 @@ exports.updateGroundBooking = async (req, res) => {
         time_slot = time_slot?.trim();
         remarks = remarks?.trim() || null;
 
-        if (
-            (
-                currentBooking.status === "Cancelled" ||
-                currentBooking.status === "Pending"
-            ) &&
-            status === undefined
-        ) {
-            status = "Rescheduled Approved";
+        if (booking_date) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            const selectedDate = new Date(booking_date);
+
+            if (Number.isNaN(selectedDate.getTime())) {
+                await client.query("ROLLBACK");
+
+                return sendErrorResponse(
+                    res,
+                    400,
+                    "Invalid booking date."
+                );
+            }
+
+            selectedDate.setHours(0, 0, 0, 0);
+
+            if (
+                selectedDate > today &&
+                (
+                    currentBooking.status === "Cancelled" ||
+                    currentBooking.status === "Pending"
+                ) &&
+                status === undefined
+            ) {
+                status = "Rescheduled Approved";
+            }
         }
 
         if (
@@ -663,6 +685,11 @@ exports.updateGroundBooking = async (req, res) => {
                 ? Number(advance_paid)
                 : Number(currentBooking.advance_paid);
 
+        const finalRemainingAmount =
+            remaining_amount !== undefined
+                ? Number(remaining_amount)
+                : finalTotalAmount - finalAdvancePaid;
+
         if (
             Number.isNaN(finalTotalAmount) ||
             finalTotalAmount <= 0
@@ -699,8 +726,18 @@ exports.updateGroundBooking = async (req, res) => {
             );
         }
 
-        const remaining_amount =
-            finalTotalAmount - finalAdvancePaid;
+        if (
+            Number.isNaN(finalRemainingAmount) ||
+            finalRemainingAmount < 0
+        ) {
+            await client.query("ROLLBACK");
+
+            return sendErrorResponse(
+                res,
+                400,
+                "Remaining amount cannot be negative."
+            );
+        }
 
         const checkDate =
             booking_date || currentBooking.booking_date;
@@ -744,6 +781,7 @@ exports.updateGroundBooking = async (req, res) => {
             "payment_type",
             "total_amount",
             "advance_paid",
+            "remaining_amount",
             "remarks",
             "status",
         ];
@@ -755,11 +793,14 @@ exports.updateGroundBooking = async (req, res) => {
         for (const field of allowedFields) {
             let value;
 
-            if (field === "status") {
-                if (
-                    status !== undefined ||
-                    currentBooking.status === "Cancelled"
-                ) {
+            if (field === "remaining_amount") {
+                if (remaining_amount !== undefined) {
+                    value = finalRemainingAmount;
+                } else {
+                    value = finalTotalAmount - finalAdvancePaid;
+                }
+            } else if (field === "status") {
+                if (status !== undefined) {
                     value = status;
                 } else {
                     continue;
@@ -786,14 +827,7 @@ exports.updateGroundBooking = async (req, res) => {
         }
 
         updates.push(
-            `remaining_amount = $${index}`
-        );
-
-        values.push(remaining_amount);
-        index++;
-
-        updates.push(
-            `updated_at = CURRENT_TIMESTAMP`
+            "updated_at = CURRENT_TIMESTAMP"
         );
 
         values.push(Number(booking_id));
@@ -829,12 +863,20 @@ exports.updateGroundBooking = async (req, res) => {
 
         if (
             currentBooking.status === "Cancelled" &&
-            status === "Pending"
+            status === "Rescheduled Approved"
         ) {
-            action = "Updated";
+            action = "Rescheduled Approved";
 
             description =
-                `Ground booking ${updatedBooking.rows[0].booking_code} was reopened and moved to Pending.`;
+                `Ground booking ${updatedBooking.rows[0].booking_code} was rescheduled and approved.`;
+        } else if (
+            currentBooking.status === "Pending" &&
+            status === "Rescheduled Approved"
+        ) {
+            action = "Rescheduled Approved";
+
+            description =
+                `Ground booking ${updatedBooking.rows[0].booking_code} was rescheduled and approved.`;
         } else if (status === "Confirmed") {
             action = "Confirmed";
 
@@ -901,6 +943,7 @@ exports.updateGroundBooking = async (req, res) => {
         }
     }
 };
+
 
 
 exports.deleteGroundBooking = async (req, res) => {
