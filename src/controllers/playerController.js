@@ -1207,6 +1207,7 @@ exports.updatePlayer = async (req, res) => {
       "weight",
       "fee_type",
       "regular_fee",
+      "hostel_fee"
     ];
 
     const updates = [];

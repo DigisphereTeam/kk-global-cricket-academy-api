@@ -6,6 +6,7 @@ exports.createPlayerFee = async (req, res) => {
     player_id,
     fee_type,
     amount,
+    hostel_fee,
     payment_type,
     payment_date,
     remarks,
@@ -14,7 +15,6 @@ exports.createPlayerFee = async (req, res) => {
   let client;
 
   try {
-    // Required fields
     if (
       !player_id ||
       !fee_type ||
@@ -28,7 +28,6 @@ exports.createPlayerFee = async (req, res) => {
       );
     }
 
-    // Player validation
     if (
       isNaN(player_id) ||
       Number(player_id) <= 0
@@ -40,8 +39,10 @@ exports.createPlayerFee = async (req, res) => {
       );
     }
 
-    // Amount validation
-    if (Number(amount) <= 0) {
+    if (
+      isNaN(Number(amount)) ||
+      Number(amount) <= 0
+    ) {
       return sendErrorResponse(
         res,
         400,
@@ -49,7 +50,22 @@ exports.createPlayerFee = async (req, res) => {
       );
     }
 
-    // Payment date validation
+    if (
+      hostel_fee !== undefined &&
+      hostel_fee !== null &&
+      hostel_fee !== "" &&
+      (
+        isNaN(Number(hostel_fee)) ||
+        Number(hostel_fee) < 0
+      )
+    ) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Hostel fee cannot be negative."
+      );
+    }
+
     const paymentDate = payment_date
       ? new Date(payment_date)
       : new Date();
@@ -62,21 +78,18 @@ exports.createPlayerFee = async (req, res) => {
       );
     }
 
-    // Format payment date (YYYY-MM-DD)
     const formattedPaymentDate = `${paymentDate.getFullYear()}-${String(
       paymentDate.getMonth() + 1
     ).padStart(2, "0")}-${String(
       paymentDate.getDate()
     ).padStart(2, "0")}`;
 
-    // Due date = 4th of next month
     const dueDate = new Date(
       paymentDate.getFullYear(),
       paymentDate.getMonth() + 1,
       4
     );
 
-    // Format due date (YYYY-MM-DD)
     const due_date = `${dueDate.getFullYear()}-${String(
       dueDate.getMonth() + 1
     ).padStart(2, "0")}-${String(
@@ -87,7 +100,6 @@ exports.createPlayerFee = async (req, res) => {
 
     await client.query("BEGIN");
 
-    // Check player exists
     const playerResult = await client.query(
       `
       SELECT
@@ -109,46 +121,20 @@ exports.createPlayerFee = async (req, res) => {
       );
     }
 
-    // Check if payment date is in player's admission month
-    const admissionMonthResult = await client.query(
-      `
-        SELECT 1
-        FROM tbl_players p
-        WHERE p.player_id = $1
-          AND p.regular_fee > 0
-          AND p.fee_type = 'Regular Fee'
-          AND p.admission_date >= DATE_TRUNC('month', $2::date)
-          AND p.admission_date <
-              DATE_TRUNC('month', $2::date) + INTERVAL '1 month'
-        `,
-      [
-        Number(player_id),
-        formattedPaymentDate,
-      ]
-    );
-
-    if (admissionMonthResult.rowCount > 0) {
-      await client.query("ROLLBACK");
-
-      return sendErrorResponse(
-        res,
-        409,
-        "Regular fee already paid for admission month."
-      );
-    }
-
-    // Check duplicate fee for same player and payment date
     const existingFee = await client.query(
       `
-        SELECT fee_id
-        FROM tbl_player_fees
-        WHERE player_id = $1
-          AND payment_date >= DATE_TRUNC('month', $2::date)
-          AND payment_date < DATE_TRUNC('month', $2::date) + INTERVAL '1 month'
-        LIMIT 1
+      SELECT fee_id
+      FROM tbl_player_fees
+      WHERE player_id = $1
+        AND fee_type = $2
+        AND payment_date >= DATE_TRUNC('month', $3::date)
+        AND payment_date < DATE_TRUNC('month', $3::date) + INTERVAL '1 month'
+        AND is_active = TRUE
+      LIMIT 1
       `,
       [
         Number(player_id),
+        fee_type.trim(),
         formattedPaymentDate,
       ]
     );
@@ -159,34 +145,37 @@ exports.createPlayerFee = async (req, res) => {
       return sendErrorResponse(
         res,
         409,
-        "Fee has already been paid for this month."
+        `${fee_type.trim()} has already been paid for this month.`
       );
     }
 
-    // Insert fee
     const result = await client.query(
       `
-        INSERT INTO tbl_player_fees
-        (
-          player_id,
-          fee_type,
-          amount,
-          payment_type,
-          due_date,
-          payment_date,
-          status,
-          remarks
-        )
-        VALUES
-        (
-          $1,$2,$3,$4,$5,$6,$7,$8
-        )
-        RETURNING *;
-        `,
+      INSERT INTO tbl_player_fees
+      (
+        player_id,
+        fee_type,
+        amount,
+        hostel_fee,
+        payment_type,
+        due_date,
+        payment_date,
+        status,
+        remarks
+      )
+      VALUES
+      ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      RETURNING *;
+      `,
       [
         Number(player_id),
         fee_type.trim(),
         Number(amount),
+        hostel_fee === undefined ||
+          hostel_fee === null ||
+          hostel_fee === ""
+          ? 0
+          : Number(hostel_fee),
         payment_type.trim(),
         due_date,
         formattedPaymentDate,
@@ -195,7 +184,6 @@ exports.createPlayerFee = async (req, res) => {
       ]
     );
 
-    // Logged-in user
     const userResult = await client.query(
       `
       SELECT full_name
@@ -205,9 +193,18 @@ exports.createPlayerFee = async (req, res) => {
       [req.user.user_id]
     );
 
-    const performedBy = userResult.rows[0].full_name;
+    const performedBy = userResult.rows[0]?.full_name;
 
-    // Notification log
+    if (!performedBy) {
+      await client.query("ROLLBACK");
+
+      return sendErrorResponse(
+        res,
+        404,
+        "Logged-in user not found."
+      );
+    }
+
     await client.query(
       `
       INSERT INTO tbl_notification_logs
@@ -218,14 +215,12 @@ exports.createPlayerFee = async (req, res) => {
         performed_by
       )
       VALUES
-      (
-        $1,$2,$3,$4
-      )
+      ($1,$2,$3,$4)
       `,
       [
         "Player Fee",
         "Created",
-        `${playerResult.rows[0].full_name}'s fee was added.`,
+        `${playerResult.rows[0].full_name}'s ${fee_type.trim()} was added.`,
         performedBy,
       ]
     );
@@ -240,7 +235,6 @@ exports.createPlayerFee = async (req, res) => {
     );
 
   } catch (error) {
-
     if (client) {
       await client.query("ROLLBACK");
     }
@@ -254,11 +248,9 @@ exports.createPlayerFee = async (req, res) => {
     );
 
   } finally {
-
     if (client) {
       client.release();
     }
-
   }
 };
 
@@ -428,6 +420,13 @@ exports.updatePlayerFee = async (req, res) => {
           ? Number(req.body.amount)
           : Number(oldFee.amount),
 
+      hostel_fee:
+        req.body.hostel_fee !== undefined &&
+          req.body.hostel_fee !== null &&
+          req.body.hostel_fee !== ""
+          ? Number(req.body.hostel_fee)
+          : Number(oldFee.hostel_fee || 0),
+
       payment_type:
         req.body.payment_type ?? oldFee.payment_type,
 
@@ -452,24 +451,34 @@ exports.updatePlayerFee = async (req, res) => {
       );
     }
 
+    if (updatedFee.hostel_fee < 0) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Hostel fee cannot be negative."
+      );
+    }
+
     const result = await pool.query(
       `
       UPDATE tbl_player_fees
       SET
         fee_type = $1,
         amount = $2,
-        payment_type = $3,
-        due_date = $4,
-        payment_date = $5,
-        status = $6,
-        remarks = $7,
+        hostel_fee = $3,
+        payment_type = $4,
+        due_date = $5,
+        payment_date = $6,
+        status = $7,
+        remarks = $8,
         updated_at = CURRENT_TIMESTAMP
-      WHERE fee_id = $8
+      WHERE fee_id = $9
       RETURNING *;
       `,
       [
         updatedFee.fee_type,
         updatedFee.amount,
+        updatedFee.hostel_fee,
         updatedFee.payment_type,
         updatedFee.due_date,
         updatedFee.payment_date,
@@ -579,6 +588,7 @@ exports.getPlayerFeesByPlayerId = async (req, res) => {
           fee_id,
           fee_type,
           amount,
+          hostel_fee,
           payment_type,
           due_date,
           payment_date,
