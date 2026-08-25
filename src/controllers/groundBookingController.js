@@ -17,7 +17,6 @@ exports.createGroundBooking = async (req, res) => {
             remarks,
         } = req.body;
 
-        // Trim string values
         customer_name = customer_name?.trim();
         customer_phone = customer_phone?.trim();
         purpose = purpose?.trim();
@@ -25,7 +24,6 @@ exports.createGroundBooking = async (req, res) => {
         time_slot = time_slot?.trim();
         remarks = remarks?.trim() || null;
 
-        // Required field validation
         if (
             !customer_name ||
             !customer_phone ||
@@ -42,7 +40,6 @@ exports.createGroundBooking = async (req, res) => {
             );
         }
 
-        // Phone validation
         if (!/^[6-9]\d{9}$/.test(customer_phone)) {
             return sendErrorResponse(
                 res,
@@ -51,20 +48,20 @@ exports.createGroundBooking = async (req, res) => {
             );
         }
 
-        // Time slot validation (HH:MM - HH:MM)
-        // if (
-        //     !/^([01]\d|2[0-3]):([0-5]\d)\s*-\s*([01]\d|2[0-3]):([0-5]\d)$/.test(
-        //         time_slot
-        //     )
-        // ) {
-        //     return sendErrorResponse(
-        //         res,
-        //         400,
-        //         "Invalid time slot format. Use HH:MM - HH:MM."
-        //     );
-        // }
+        const allowedTimeSlots = [
+            "08:30 AM - 12:00 PM",
+            "12:30 PM - 04:00 PM",
+            "08:30 AM - 04:00 PM",
+        ];
 
-        // Payment type validation
+        if (!allowedTimeSlots.includes(time_slot)) {
+            return sendErrorResponse(
+                res,
+                400,
+                "Invalid time slot."
+            );
+        }
+
         const allowedPaymentTypes = [
             "Cash",
             "UPI",
@@ -80,7 +77,6 @@ exports.createGroundBooking = async (req, res) => {
             );
         }
 
-        // Amount validation
         total_amount = Number(total_amount);
         advance_paid = Number(advance_paid);
 
@@ -114,7 +110,6 @@ exports.createGroundBooking = async (req, res) => {
 
         await client.query("BEGIN");
 
-        // Generate Booking Code (GB260001)
         const currentYear = new Date().getFullYear();
         const yearCode = String(currentYear).slice(-2);
         const prefix = `GB${yearCode}`;
@@ -128,7 +123,7 @@ exports.createGroundBooking = async (req, res) => {
             `
             SELECT COALESCE(
                 MAX(
-                CAST(SUBSTRING(booking_code FROM 5) AS INTEGER)
+                    CAST(SUBSTRING(booking_code FROM 5) AS INTEGER)
                 ),
                 0
             ) AS last_number
@@ -138,52 +133,105 @@ exports.createGroundBooking = async (req, res) => {
             [`${prefix}%`]
         );
 
-        const nextNumber = Number(bookingResult.rows[0].last_number) + 1;
+        const nextNumber =
+            Number(bookingResult.rows[0].last_number) + 1;
 
-        const booking_code = `${prefix}${String(nextNumber).padStart(4, "0")}`;
-        // Check duplicate booking
+        const booking_code =
+            `${prefix}${String(nextNumber).padStart(4, "0")}`;
+
         const existingBooking = await client.query(
             `
-      SELECT booking_id
-      FROM tbl_ground_booking
-      WHERE booking_date = $1
-        AND time_slot = $2
-        AND status != 'Cancelled'
-      `,
-            [booking_date, time_slot]
+            SELECT booking_id, time_slot
+            FROM tbl_ground_booking
+            WHERE booking_date = $1
+              AND status != 'Cancelled'
+            `,
+            [booking_date]
         );
 
         if (existingBooking.rowCount > 0) {
-            await client.query("ROLLBACK");
+            const MORNING_SLOT = "08:30 AM - 12:00 PM";
+            const EVENING_SLOT = "12:30 PM - 04:00 PM";
+            const FULL_DAY_SLOT = "08:30 AM - 04:00 PM";
 
-            return sendErrorResponse(
-                res,
-                409,
-                "The selected time slot is already booked."
+            const hasMorningBooking = existingBooking.rows.some(
+                (booking) =>
+                    booking.time_slot?.trim() === MORNING_SLOT
             );
+
+            const hasEveningBooking = existingBooking.rows.some(
+                (booking) =>
+                    booking.time_slot?.trim() === EVENING_SLOT
+            );
+
+            const hasFullDayBooking = existingBooking.rows.some(
+                (booking) =>
+                    booking.time_slot?.trim() === FULL_DAY_SLOT
+            );
+
+            if (
+                time_slot === FULL_DAY_SLOT &&
+                (hasMorningBooking || hasEveningBooking)
+            ) {
+                await client.query("ROLLBACK");
+
+                return sendErrorResponse(
+                    res,
+                    409,
+                    "Full Day booking cannot be created because Morning or Evening session is already booked for this date."
+                );
+            }
+
+            if (
+                (time_slot === MORNING_SLOT ||
+                    time_slot === EVENING_SLOT) &&
+                hasFullDayBooking
+            ) {
+                await client.query("ROLLBACK");
+
+                return sendErrorResponse(
+                    res,
+                    409,
+                    "This time slot cannot be booked because Full Day is already booked for this date."
+                );
+            }
+
+            const sameSlotBooking = existingBooking.rows.some(
+                (booking) =>
+                    booking.time_slot?.trim() === time_slot
+            );
+
+            if (sameSlotBooking) {
+                await client.query("ROLLBACK");
+
+                return sendErrorResponse(
+                    res,
+                    409,
+                    "The selected time slot is already booked."
+                );
+            }
         }
 
-        // Create booking
         const booking = await client.query(
             `
-      INSERT INTO tbl_ground_booking (
-        booking_code,
-        customer_name,
-        customer_phone,
-        purpose,
-        booking_date,
-        time_slot,
-        payment_type,
-        total_amount,
-        advance_paid,
-        remaining_amount,
-        remarks,
-        id_increment
-      )
-      VALUES
-      ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-      RETURNING *;
-      `,
+            INSERT INTO tbl_ground_booking (
+                booking_code,
+                customer_name,
+                customer_phone,
+                purpose,
+                booking_date,
+                time_slot,
+                payment_type,
+                total_amount,
+                advance_paid,
+                remaining_amount,
+                remarks,
+                id_increment
+            )
+            VALUES
+            ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+            RETURNING *;
+            `,
             [
                 booking_code,
                 customer_name,
@@ -200,13 +248,12 @@ exports.createGroundBooking = async (req, res) => {
             ]
         );
 
-        // Get logged-in user
         const userResult = await client.query(
             `
-      SELECT full_name
-      FROM tbl_users
-      WHERE user_id = $1
-      `,
+            SELECT full_name
+            FROM tbl_users
+            WHERE user_id = $1
+            `,
             [req.user.user_id]
         );
 
@@ -222,19 +269,18 @@ exports.createGroundBooking = async (req, res) => {
             );
         }
 
-        // Notification
         await client.query(
             `
-      INSERT INTO tbl_notification_logs
-      (
-        module_name,
-        action,
-        description,
-        performed_by
-      )
-      VALUES
-      ($1,$2,$3,$4)
-      `,
+            INSERT INTO tbl_notification_logs
+            (
+                module_name,
+                action,
+                description,
+                performed_by
+            )
+            VALUES
+            ($1,$2,$3,$4)
+            `,
             [
                 "Ground Booking",
                 "Created",
@@ -251,6 +297,7 @@ exports.createGroundBooking = async (req, res) => {
             "Ground booking created successfully.",
             booking.rows[0]
         );
+
     } catch (error) {
         if (client) {
             await client.query("ROLLBACK");
@@ -261,12 +308,14 @@ exports.createGroundBooking = async (req, res) => {
             500,
             error.message || "Internal Server Error"
         );
+
     } finally {
         if (client) {
             client.release();
         }
     }
 };
+
 
 const updateExpiredGroundBookings = async (client) => {
     await client.query(`
