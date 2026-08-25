@@ -10,7 +10,7 @@ const coachRouter = require("./src/routes/coachRoutes");
 const staffRouter = require("./src/routes/staffRoutes");
 const authRouter = require("./src/routes/authRoutes");
 const oneOnOneRouter = require("./src/routes/oneOnOneRoutes");
-const groundBookingRouter = require("./src/routes/groundBookingRoutes");
+
 const eventRouter = require("./src/routes/eventRoutes");
 const equipmentRouter = require("./src/routes/equipmentRoutes");
 const expenditureRouter = require("./src/routes/expenditureRoutes");
@@ -24,6 +24,8 @@ const reportsRouter = require("./src/routes/reportsRoutes");
 const attendanceRouter = require("./src/routes/attendanceRoutes");
 const { startAttendanceCron } = require("./src/jobs/attendance.cron");
 const feeDueNotificationCron = require("./src/jobs/feeNotificationCron");
+const groundBookingRouter = require("./src/routes/groundBookingRoutes");
+
 
 const app = express();
 

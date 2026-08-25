@@ -5,434 +5,6 @@ const {
 } = require("../utils/apiResponse");
 const { deletefroms3, uploadToS3, getSignedVideoUrl } = require("../utils/s3upload");
 
-
-// exports.createPlayerAdmission = async (req, res) => {
-//   const {
-//     full_name,
-//     gender,
-//     age,
-//     date_of_birth,
-//     admission_date,
-//     phone_number,
-//     email,
-//     address,
-//     school,
-//     admission_fee,
-//     payment_type,
-//     fee_type,
-//     regular_fee,
-//     remarks,
-//     father_name,
-//     father_phone,
-//     father_occupation,
-//     mother_name,
-//     mother_phone,
-//     contact_name,
-//     relation,
-//     contact_phone,
-//     blood_group,
-//     allergies,
-//     height,
-//     weight,
-//   } = req.body;
-
-//   // Required field validation
-//   if (
-//     !full_name?.trim() ||
-//     !gender ||
-//     age == null ||
-//     !phone_number?.trim() ||
-//     !address?.trim() ||
-//     admission_fee === undefined ||
-//     admission_fee === null ||
-//     admission_fee === "" ||
-//     !payment_type?.trim() ||
-//     !fee_type?.trim() ||
-//     regular_fee === undefined ||
-//     regular_fee === null ||
-//     regular_fee === ""
-//   ) {
-//     return sendErrorResponse(
-//       res,
-//       400,
-//       "All required fields must be provided."
-//     );
-//   }
-
-//   // Player phone validation
-//   if (!/^[6-9]\d{9}$/.test(phone_number.trim())) {
-//     return sendErrorResponse(
-//       res,
-//       400,
-//       "Invalid player phone number."
-//     );
-//   }
-
-//   // Father phone validation
-//   if (
-//     father_phone &&
-//     !/^[6-9]\d{9}$/.test(father_phone.trim())
-//   ) {
-//     return sendErrorResponse(
-//       res,
-//       400,
-//       "Invalid father phone number."
-//     );
-//   }
-
-//   // Mother phone validation
-//   if (
-//     mother_phone &&
-//     !/^[6-9]\d{9}$/.test(mother_phone.trim())
-//   ) {
-//     return sendErrorResponse(
-//       res,
-//       400,
-//       "Invalid mother phone number."
-//     );
-//   }
-
-//   // Emergency contact validation
-//   if (
-//     contact_phone &&
-//     !/^[6-9]\d{9}$/.test(contact_phone.trim())
-//   ) {
-//     return sendErrorResponse(
-//       res,
-//       400,
-//       "Invalid emergency contact phone number."
-//     );
-//   }
-
-//   // Email validation
-//   if (
-//     email &&
-//     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
-//   ) {
-//     return sendErrorResponse(
-//       res,
-//       400,
-//       "Invalid email address."
-//     );
-//   }
-
-//   // Age validation
-//   if (
-//     isNaN(Number(age)) ||
-//     Number(age) <= 0
-//   ) {
-//     return sendErrorResponse(
-//       res,
-//       400,
-//       "Age must be greater than 0."
-//     );
-//   }
-
-//   // Admission fee validation
-//   if (
-//     isNaN(Number(admission_fee)) ||
-//     Number(admission_fee) <= 0
-//   ) {
-//     return sendErrorResponse(
-//       res,
-//       400,
-//       "Admission fee required or must be greater than 0."
-//     );
-//   }
-
-//   // Regular fee validation
-//   if (
-//     isNaN(Number(regular_fee)) ||
-//     Number(regular_fee) <= 0
-//   ) {
-//     return sendErrorResponse(
-//       res,
-//       400,
-//       "Regular fee must be greater than 0."
-//     );
-//   }
-
-//   // Weight validation
-//   if (
-//     weight !== undefined &&
-//     weight !== null &&
-//     weight.toString().trim() !== "" &&
-//     (isNaN(Number(weight)) || Number(weight) <= 0)
-//   ) {
-//     return sendErrorResponse(
-//       res,
-//       400,
-//       "Weight must be greater than 0."
-//     );
-//   }
-
-//   // Height validation
-//   if (
-//     height !== undefined &&
-//     height !== null &&
-//     height.toString().trim() !== "" &&
-//     (isNaN(Number(height)) || Number(height) <= 0)
-//   ) {
-//     return sendErrorResponse(
-//       res,
-//       400,
-//       "Height must be greater than 0."
-//     );
-//   }
-
-//   let client;
-
-//   try {
-//     client = await pool.connect();
-
-//     await client.query("BEGIN");
-
-//     const currentYear = new Date().getFullYear();
-//     const yearCode = String(currentYear).slice(-2);
-//     const prefix = `A${yearCode}`;
-
-//     // Prevent duplicate admission ID generation
-//     await client.query(
-//       `SELECT pg_advisory_xact_lock($1)`,
-//       [currentYear]
-//     );
-
-//     const admissionResult = await client.query(
-//       `
-//       SELECT COALESCE(
-//         MAX(
-//           CAST(SUBSTRING(admission_id FROM 4) AS INTEGER)
-//         ),
-//         0
-//       ) AS last_number
-//       FROM tbl_players
-//       WHERE admission_id LIKE $1
-//       `,
-//       [`${prefix}%`]
-//     );
-
-//     const nextNumber =
-//       Number(admissionResult.rows[0].last_number) + 1;
-
-//     const admission_id =
-//       `${prefix}${String(nextNumber).padStart(4, "0")}`;
-
-//     // Check duplicate player
-//     let existingPlayer;
-
-//     if (email) {
-//       existingPlayer = await client.query(
-//         `
-//         SELECT 1
-//         FROM tbl_players
-//         WHERE phone_number = $1
-//            OR LOWER(email) = LOWER($2)
-//         LIMIT 1
-//         `,
-//         [
-//           phone_number.trim(),
-//           email.trim(),
-//         ]
-//       );
-//     } else {
-//       existingPlayer = await client.query(
-//         `
-//         SELECT 1
-//         FROM tbl_players
-//         WHERE phone_number = $1
-//         LIMIT 1
-//         `,
-//         [phone_number.trim()]
-//       );
-//     }
-
-//     if (existingPlayer.rowCount > 0) {
-//       await client.query("ROLLBACK");
-
-//       return sendErrorResponse(
-//         res,
-//         409,
-//         "Player already exists."
-//       );
-//     }
-
-//     // Create player
-//     const result = await client.query(
-//       `
-//       INSERT INTO tbl_players (
-//         admission_id,
-//         full_name,
-//         gender,
-//         age,
-//         date_of_birth,
-//         admission_date,
-//         phone_number,
-//         email,
-//         address,
-//         school,
-//         admission_fee,
-//         payment_type,
-//         fee_type,
-//         regular_fee,
-//         remarks,
-//         father_name,
-//         father_phone,
-//         father_occupation,
-//         mother_name,
-//         mother_phone,
-//         contact_name,
-//         relation,
-//         contact_phone,
-//         blood_group,
-//         allergies,
-//         height,
-//         weight,
-//         id_increment
-//       )
-//       VALUES (
-//         $1,$2,$3,$4,$5,
-//         COALESCE($6::date, CURRENT_DATE),
-//         $7,$8,$9,$10,
-//         $11,$12,$13,$14,$15,$16,$17,$18,
-//         $19,$20,$21,$22,$23,$24,$25,$26,$27,$28
-//       )
-//       RETURNING *;
-//       `,
-//       [
-//         admission_id,
-//         full_name.trim(),
-//         gender,
-//         Number(age),
-//         date_of_birth || null,
-//         admission_date || null,
-//         phone_number.trim(),
-//         email
-//           ? email.trim().toLowerCase()
-//           : null,
-//         address.trim(),
-//         school?.trim() || null,
-//         Number(admission_fee),
-//         payment_type.trim(),
-//         fee_type.trim(),
-//         Number(regular_fee),
-//         remarks?.trim() || null,
-//         father_name?.trim() || null,
-//         father_phone?.trim() || null,
-//         father_occupation?.trim() || null,
-//         mother_name?.trim() || null,
-//         mother_phone?.trim() || null,
-//         contact_name?.trim() || null,
-//         relation?.trim() || null,
-//         contact_phone?.trim() || null,
-//         blood_group || null,
-//         allergies?.trim() || null,
-//         height != null
-//           ? Number(height)
-//           : null,
-//         weight != null
-//           ? Number(weight)
-//           : null,
-//         nextNumber,
-//       ]
-//     );
-
-//     const playerId = result.rows[0].player_id;
-
-//     // Insert multiple player documents
-//     if (req.files && req.files.length > 0) {
-//       for (const file of req.files) {
-//         await client.query(
-//           `
-//           INSERT INTO tbl_player_documents
-//           (
-//             player_id,
-//             document_url
-//           )
-//           VALUES
-//           ($1, $2)
-//           `,
-//           [
-//             playerId,
-//             `/uploads/${file.filename}`,
-//           ]
-//         );
-//       }
-//     }
-
-//     // Get logged-in user
-//     const reqUserDetails = await client.query(
-//       `
-//       SELECT full_name
-//       FROM tbl_users
-//       WHERE user_id = $1
-//       `,
-//       [req.user.user_id]
-//     );
-
-//     const reqUser = reqUserDetails.rows[0];
-
-//     if (!reqUser) {
-//       await client.query("ROLLBACK");
-
-//       return sendErrorResponse(
-//         res,
-//         404,
-//         "Logged-in user not found."
-//       );
-//     }
-
-//     // Notification
-//     await client.query(
-//       `
-//       INSERT INTO tbl_notification_logs
-//       (
-//         module_name,
-//         action,
-//         description,
-//         performed_by
-//       )
-//       VALUES
-//       ($1,$2,$3,$4)
-//       `,
-//       [
-//         "Player",
-//         "Created",
-//         `Player ${result.rows[0].full_name} was added.`,
-//         reqUser.full_name,
-//       ]
-//     );
-
-//     await client.query("COMMIT");
-
-//     return sendSuccessResponse(
-//       res,
-//       201,
-//       "Player admission created successfully.",
-//       result.rows[0]
-//     );
-
-//   } catch (error) {
-//     if (client) {
-//       await client.query("ROLLBACK");
-//     }
-
-//     console.error(error);
-
-//     return sendErrorResponse(
-//       res,
-//       500,
-//       error.message || "Internal Server Error"
-//     );
-
-//   } finally {
-//     if (client) {
-//       client.release();
-//     }
-//   }
-// };
-
-
-
 exports.createPlayerAdmission = async (req, res) => {
   const {
     full_name,
@@ -441,12 +13,10 @@ exports.createPlayerAdmission = async (req, res) => {
     date_of_birth,
     admission_date,
     phone_number,
-    email,
     address,
-    school,
     admission_fee,
     payment_type,
-    fee_type,
+    hostel_fee,
     regular_fee,
     remarks,
     father_name,
@@ -458,136 +28,182 @@ exports.createPlayerAdmission = async (req, res) => {
     relation,
     contact_phone,
     blood_group,
-    allergies,
-    height,
-    weight,
   } = req.body;
 
-  // Required field validation
+  const errors = {};
+
+  const phoneRegex = /^[6-9]\d{9}$/;
+  const nameRegex = /^[A-Za-z\s.'-]+$/;
+
+  if (!full_name?.trim()) {
+    errors.full_name = "Full name is required.";
+  } else if (full_name.trim().length > 250) {
+    errors.full_name = "Full name cannot exceed 250 characters.";
+  } else if (!nameRegex.test(full_name.trim())) {
+    errors.full_name = "Full name contains invalid characters.";
+  }
+
+  if (!gender?.trim()) {
+    errors.gender = "Gender is required.";
+  }
+
+  if (!age || isNaN(age) || Number(age) <= 0 || Number(age) > 100) {
+    errors.age = "Age must be between 1 and 100.";
+  }
+
+  if (!phone_number?.trim()) {
+    errors.phone_number = "Phone number is required.";
+  } else if (!phoneRegex.test(phone_number.trim())) {
+    errors.phone_number = "Invalid phone number.";
+  }
+
+  if (!address?.trim()) {
+    errors.address = "Address is required.";
+  } else if (address.trim().length > 500) {
+    errors.address = "Address cannot exceed 500 characters.";
+  }
+
   if (
-    !full_name?.trim() ||
-    !gender ||
-    age == null ||
-    !phone_number?.trim() ||
-    !address?.trim() ||
-    admission_fee === undefined ||
-    admission_fee === null ||
-    admission_fee === "" ||
-    !payment_type?.trim() ||
-    !fee_type?.trim()
-  ) {
-    return sendErrorResponse(
-      res,
-      400,
-      "All required fields must be provided."
-    );
-  }
-
-  // Player phone validation
-  if (!/^[6-9]\d{9}$/.test(phone_number.trim())) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Invalid player phone number."
-    );
-  }
-
-  // Father phone validation
-  if (
-    father_phone &&
-    !/^[6-9]\d{9}$/.test(father_phone.trim())
-  ) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Invalid father phone number."
-    );
-  }
-
-  // Mother phone validation
-  if (
-    mother_phone &&
-    !/^[6-9]\d{9}$/.test(mother_phone.trim())
-  ) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Invalid mother phone number."
-    );
-  }
-
-  // Emergency contact validation
-  if (
-    contact_phone &&
-    !/^[6-9]\d{9}$/.test(contact_phone.trim())
-  ) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Invalid emergency contact phone number."
-    );
-  }
-
-  // Email validation
-  if (
-    email &&
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
-  ) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Invalid email address."
-    );
-  }
-
-  // Age validation
-  if (isNaN(Number(age)) || Number(age) <= 0) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Age must be greater than 0."
-    );
-  }
-
-  // Admission fee validation
-  if (
-    isNaN(Number(admission_fee)) ||
+    !admission_fee ||
+    isNaN(admission_fee) ||
     Number(admission_fee) <= 0
   ) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Admission fee required or must be greater than 0."
-    );
+    errors.admission_fee =
+      "Admission fee must be greater than zero.";
   }
 
-
-  // Weight validation
-  if (
-    weight !== undefined &&
-    weight !== null &&
-    weight.toString().trim() !== "" &&
-    (isNaN(Number(weight)) || Number(weight) <= 0)
-  ) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Weight must be greater than 0."
-    );
+  if (!payment_type?.trim()) {
+    errors.payment_type = "Payment type is required.";
   }
 
-  // Height validation
   if (
-    height !== undefined &&
-    height !== null &&
-    height.toString().trim() !== "" &&
-    (isNaN(Number(height)) || Number(height) <= 0)
+    hostel_fee !== undefined &&
+    hostel_fee !== null &&
+    hostel_fee !== "" &&
+    (isNaN(hostel_fee) || Number(hostel_fee) < 0)
   ) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Height must be greater than 0."
-    );
+    errors.hostel_fee =
+      "Hostel fee cannot be negative.";
+  }
+
+  if (
+    regular_fee !== undefined &&
+    regular_fee !== null &&
+    regular_fee !== "" &&
+    (isNaN(regular_fee) || Number(regular_fee) < 0)
+  ) {
+    errors.regular_fee =
+      "Regular fee cannot be negative.";
+  }
+
+  if (
+    father_name &&
+    (
+      father_name.trim().length > 250 ||
+      !nameRegex.test(father_name.trim())
+    )
+  ) {
+    errors.father_name = "Invalid father name.";
+  }
+
+  if (
+    mother_name &&
+    (
+      mother_name.trim().length > 250 ||
+      !nameRegex.test(mother_name.trim())
+    )
+  ) {
+    errors.mother_name = "Invalid mother name.";
+  }
+
+  if (
+    contact_name &&
+    (
+      contact_name.trim().length > 250 ||
+      !nameRegex.test(contact_name.trim())
+    )
+  ) {
+    errors.contact_name = "Invalid contact name.";
+  }
+
+  if (
+    father_phone &&
+    !phoneRegex.test(father_phone.trim())
+  ) {
+    errors.father_phone =
+      "Invalid father phone number.";
+  }
+
+  if (
+    mother_phone &&
+    !phoneRegex.test(mother_phone.trim())
+  ) {
+    errors.mother_phone =
+      "Invalid mother phone number.";
+  }
+
+  if (
+    contact_phone &&
+    !phoneRegex.test(contact_phone.trim())
+  ) {
+    errors.contact_phone =
+      "Invalid emergency contact phone number.";
+  }
+
+  if (
+    date_of_birth &&
+    isNaN(Date.parse(date_of_birth))
+  ) {
+    errors.date_of_birth =
+      "Invalid date of birth.";
+  }
+
+  if (
+    admission_date &&
+    isNaN(Date.parse(admission_date))
+  ) {
+    errors.admission_date =
+      "Invalid admission date.";
+  }
+
+  if (
+    father_occupation &&
+    father_occupation.trim().length > 250
+  ) {
+    errors.father_occupation =
+      "Father occupation cannot exceed 250 characters.";
+  }
+
+  if (
+    relation &&
+    relation.trim().length > 100
+  ) {
+    errors.relation =
+      "Relation cannot exceed 100 characters.";
+  }
+
+  if (
+    blood_group &&
+    blood_group.trim().length > 10
+  ) {
+    errors.blood_group =
+      "Invalid blood group.";
+  }
+
+  if (
+    remarks &&
+    remarks.trim().length > 1000
+  ) {
+    errors.remarks =
+      "Remarks cannot exceed 1000 characters.";
+  }
+
+  if (Object.keys(errors).length > 0) {
+    return res.status(400).json({
+      success: false,
+      message: "Validation failed.",
+      errors,
+    });
   }
 
   let client;
@@ -602,7 +218,6 @@ exports.createPlayerAdmission = async (req, res) => {
     const yearCode = String(currentYear).slice(-2);
     const prefix = `A${yearCode}`;
 
-    // Prevent duplicate admission ID generation
     await client.query(
       `SELECT pg_advisory_xact_lock($1)`,
       [currentYear]
@@ -612,7 +227,9 @@ exports.createPlayerAdmission = async (req, res) => {
       `
       SELECT COALESCE(
         MAX(
-          CAST(SUBSTRING(admission_id FROM 4) AS INTEGER)
+          CAST(
+            SUBSTRING(admission_id FROM 4) AS INTEGER
+          )
         ),
         0
       ) AS last_number
@@ -628,34 +245,15 @@ exports.createPlayerAdmission = async (req, res) => {
     const admission_id =
       `${prefix}${String(nextNumber).padStart(4, "0")}`;
 
-    // Check duplicate player
-    let existingPlayer;
-
-    if (email) {
-      existingPlayer = await client.query(
-        `
-        SELECT 1
-        FROM tbl_players
-        WHERE phone_number = $1
-           OR LOWER(email) = LOWER($2)
-        LIMIT 1
-        `,
-        [
-          phone_number.trim(),
-          email.trim(),
-        ]
-      );
-    } else {
-      existingPlayer = await client.query(
-        `
-        SELECT 1
-        FROM tbl_players
-        WHERE phone_number = $1
-        LIMIT 1
-        `,
-        [phone_number.trim()]
-      );
-    }
+    const existingPlayer = await client.query(
+      `
+      SELECT 1
+      FROM tbl_players
+      WHERE phone_number = $1
+      LIMIT 1
+      `,
+      [phone_number.trim()]
+    );
 
     if (existingPlayer.rowCount > 0) {
       await client.query("ROLLBACK");
@@ -663,11 +261,11 @@ exports.createPlayerAdmission = async (req, res) => {
       return sendErrorResponse(
         res,
         409,
-        "Player already exists."
+        "This phone number is already registered with another player."
       );
     }
 
-    // Create player
+
     const result = await client.query(
       `
       INSERT INTO tbl_players (
@@ -678,12 +276,10 @@ exports.createPlayerAdmission = async (req, res) => {
         date_of_birth,
         admission_date,
         phone_number,
-        email,
         address,
-        school,
         admission_fee,
         payment_type,
-        fee_type,
+        hostel_fee,
         regular_fee,
         remarks,
         father_name,
@@ -695,37 +291,56 @@ exports.createPlayerAdmission = async (req, res) => {
         relation,
         contact_phone,
         blood_group,
-        allergies,
-        height,
-        weight,
         id_increment
       )
       VALUES (
-        $1,$2,$3,$4,$5,
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
         COALESCE($6::date, CURRENT_DATE),
-        $7,$8,$9,$10,
-        $11,$12,$13,$14,$15,$16,$17,$18,
-        $19,$20,$21,$22,$23,$24,$25,$26,$27,$28
+        $7,
+        $8,
+        $9,
+        $10,
+        $11,
+        $12,
+        $13,
+        $14,
+        $15,
+        $16,
+        $17,
+        $18,
+        $19,
+        $20,
+        $21,
+        $22,
+        $23
       )
       RETURNING *;
       `,
       [
         admission_id,
         full_name.trim(),
-        gender,
+        gender.trim(),
         Number(age),
         date_of_birth || null,
         admission_date || null,
         phone_number.trim(),
-        email
-          ? email.trim().toLowerCase()
-          : null,
         address.trim(),
-        school?.trim() || null,
-        Number(admission_fee) || 0,
+        Number(admission_fee),
         payment_type.trim(),
-        fee_type.trim(),
-        Number(regular_fee) || 0,
+        hostel_fee !== undefined &&
+          hostel_fee !== null &&
+          hostel_fee !== ""
+          ? Number(hostel_fee)
+          : 0,
+        regular_fee !== undefined &&
+          regular_fee !== null &&
+          regular_fee !== ""
+          ? Number(regular_fee)
+          : 0,
         remarks?.trim() || null,
         father_name?.trim() || null,
         father_phone?.trim() || null,
@@ -735,50 +350,33 @@ exports.createPlayerAdmission = async (req, res) => {
         contact_name?.trim() || null,
         relation?.trim() || null,
         contact_phone?.trim() || null,
-        blood_group || null,
-        allergies?.trim() || null,
-        height != null ? Number(height) : null,
-        weight != null ? Number(weight) : null,
+        blood_group?.trim() || null,
         nextNumber,
       ]
     );
 
     const playerId = result.rows[0].player_id;
 
-    // ==========================================
-    // Upload player documents to S3
-    // ==========================================
-
     if (req.files && req.files.length > 0) {
       for (const file of req.files) {
         try {
-          // Upload file to S3
           const s3Key = await uploadToS3(
             file,
             "players"
           );
 
-          // Keep track of uploaded files
-          // so we can delete them if DB transaction fails
           uploadedS3Files.push(s3Key);
 
-          // Store S3 key in common documents table
           await client.query(
             `
-        INSERT INTO tbl_documents
-        (
-          player_id,
-          document_url
-        )
-        VALUES
-        ($1, $2)
-        `,
-            [
-              playerId,
-              s3Key,
-            ]
+            INSERT INTO tbl_documents (
+              player_id,
+              document_url
+            )
+            VALUES ($1, $2)
+            `,
+            [playerId, s3Key]
           );
-
         } catch (uploadError) {
           console.error(
             "S3 upload failed:",
@@ -792,7 +390,6 @@ exports.createPlayerAdmission = async (req, res) => {
       }
     }
 
-    // Get logged-in user
     const reqUserDetails = await client.query(
       `
       SELECT full_name
@@ -810,18 +407,15 @@ exports.createPlayerAdmission = async (req, res) => {
       );
     }
 
-    // Notification
     await client.query(
       `
-      INSERT INTO tbl_notification_logs
-      (
+      INSERT INTO tbl_notification_logs (
         module_name,
         action,
         description,
         performed_by
       )
-      VALUES
-      ($1,$2,$3,$4)
+      VALUES ($1, $2, $3, $4)
       `,
       [
         "Player",
@@ -831,7 +425,6 @@ exports.createPlayerAdmission = async (req, res) => {
       ]
     );
 
-    // Commit transaction
     await client.query("COMMIT");
 
     return sendSuccessResponse(
@@ -842,7 +435,15 @@ exports.createPlayerAdmission = async (req, res) => {
     );
 
   } catch (error) {
-    console.error("Create player error:", error);
+    console.error("Create player error:", {
+      message: error.message,
+      code: error.code,
+      detail: error.detail,
+      constraint: error.constraint,
+      table: error.table,
+      column: error.column,
+      stack: error.stack,
+    });
 
     if (client) {
       try {
@@ -855,25 +456,65 @@ exports.createPlayerAdmission = async (req, res) => {
       }
     }
 
-    // Delete files already uploaded to S3
-    // if database transaction failed
     if (uploadedS3Files.length > 0) {
-      for (const s3Key of uploadedS3Files) {
-        try {
-          await deletefroms3(s3Key);
-        } catch (deleteError) {
-          console.error(
-            `Failed to delete S3 file ${s3Key}:`,
-            deleteError
-          );
-        }
-      }
+      await Promise.allSettled(
+        uploadedS3Files.map(async (s3Key) => {
+          try {
+            await deletefroms3(s3Key);
+          } catch (deleteError) {
+            console.error(
+              `Failed to delete S3 file ${s3Key}:`,
+              deleteError
+            );
+          }
+        })
+      );
+    }
+
+    if (error.code === "23505") {
+      return sendErrorResponse(
+        res,
+        409,
+        "A player with the provided information already exists."
+      );
+    }
+
+    if (error.code === "23503") {
+      return sendErrorResponse(
+        res,
+        400,
+        "Invalid related record."
+      );
+    }
+
+    if (error.code === "23502") {
+      return sendErrorResponse(
+        res,
+        400,
+        `Required field is missing: ${error.column || "unknown field"}.`
+      );
+    }
+
+    if (error.code === "22P02") {
+      return sendErrorResponse(
+        res,
+        400,
+        "Invalid data format."
+      );
+    }
+
+    if (error.code === "22007") {
+      return sendErrorResponse(
+        res,
+        400,
+        "Invalid date format."
+      );
     }
 
     return sendErrorResponse(
       res,
       500,
-      error.message || "Internal Server Error"
+      "Failed to create player admission."
     );
 
   } finally {
@@ -883,253 +524,212 @@ exports.createPlayerAdmission = async (req, res) => {
   }
 };
 
-
-
-
 exports.getAllPlayers = async (req, res) => {
   try {
     const [players, statistics] = await Promise.all([
       pool.query(`
         SELECT
-        p.*
-          FROM tbl_players p
-                ORDER BY
-        p.player_id DESC;
-        `),
-
-
-      pool.query(`
-       SELECT
-
-        (
-          SELECT COUNT(*)
-      FROM tbl_players
-        ) AS total_players,
-
-      (
-        SELECT COUNT(*)
-      FROM tbl_players
-      WHERE is_active = TRUE
-      ) AS active_players,
-
-    (
-      SELECT COUNT(*)
-      FROM tbl_players
-      WHERE is_active = FALSE
-    ) AS inactive_players,
-
-
-      (
-
-        SELECT COUNT(*) AS pending_fee_count
-        FROM (
-
-    /* =========================
-       REGULAR PLAYERS
-       ========================= */
-
-    SELECT DISTINCT p.player_id
-    FROM tbl_players p
-    WHERE p.is_active = TRUE
-      AND p.fee_type = 'Regular Fee'
-      AND p.regular_fee >= 0
-      AND p.admission_date <= CURRENT_DATE
-
-      -- Paid/covered last month
-      AND (
-          -- First month payment was stored in tbl_players
-          (
-              DATE_TRUNC('month', p.admission_date) =
-                  DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
-              AND p.fee_status = 'Paid'
-          )
-
-          OR
-
-          -- Subsequent month payment was stored in tbl_player_fees
-          EXISTS (
-              SELECT 1
-              FROM tbl_player_fees pf_last
-              WHERE pf_last.player_id = p.player_id
-                AND pf_last.status = 'Paid'
-                AND pf_last.is_active = TRUE
-                AND pf_last.payment_date >=
-                    DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
-                AND pf_last.payment_date <
-                    DATE_TRUNC('month', CURRENT_DATE)
-          )
-      )
-
-      -- Has NOT paid this month
-      AND NOT EXISTS (
-          SELECT 1
-          FROM tbl_player_fees pf_current
-          WHERE pf_current.player_id = p.player_id
-            AND pf_current.status = 'Paid'
-            AND pf_current.is_active = TRUE
-            AND pf_current.payment_date >=
-                DATE_TRUNC('month', CURRENT_DATE)
-            AND pf_current.payment_date <
-                DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
-      )
-
-
-    UNION
-
-
-    /* =========================
-       PLAYERS FROM FEE TABLE
-       ========================= */
-
-    SELECT DISTINCT pf_last.player_id
-    FROM tbl_player_fees pf_last
-    WHERE pf_last.status = 'Paid'
-      AND pf_last.is_active = TRUE
-
-      -- Paid last month
-      AND pf_last.payment_date >=
-          DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
-      AND pf_last.payment_date <
-          DATE_TRUNC('month', CURRENT_DATE)
-
-      -- Has NOT paid this month
-      AND NOT EXISTS (
-          SELECT 1
-          FROM tbl_player_fees pf_current
-          WHERE pf_current.player_id = pf_last.player_id
-            AND pf_current.status = 'Paid'
-            AND pf_current.is_active = TRUE
-            AND pf_current.payment_date >=
-                DATE_TRUNC('month', CURRENT_DATE)
-            AND pf_current.payment_date <
-                DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
-      )
-
-
-    UNION
-
-
-    /* =========================
-       ONE-ON-ONE PLAYERS
-       ========================= */
-
-        SELECT DISTINCT last_month.player_id
-        FROM tbl_one_on_one_applications last_month
-        WHERE last_month.is_active = TRUE
-          AND last_month.payment_status = 'Paid'
-
-          -- Paid last month
-        AND last_month.application_date >=
-              DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
-        AND last_month.application_date <
-              DATE_TRUNC('month', CURRENT_DATE)
-
-          -- Has NOT paid this month
-        AND NOT EXISTS (
-              SELECT 1
-              FROM tbl_one_on_one_applications this_month
-              WHERE this_month.player_id = last_month.player_id
-                AND this_month.is_active = TRUE
-                AND this_month.payment_status = 'Paid'
-                AND this_month.application_date >=
-                    DATE_TRUNC('month', CURRENT_DATE)
-                AND this_month.application_date <
-                    DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
-          )
-
-    ) AS pending_players
-
-    ) AS pending_fees,
-
-
-      (
-        SELECT COALESCE(
-          SUM(p.admission_fee),
-          0
-        )
-      FROM tbl_players p
-
-      WHERE p.admission_date >= DATE_TRUNC('month', CURRENT_DATE)
-
-      AND p.admission_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
-
-      AND COALESCE(p.admission_fee, 0) >= 0
-      AND COALESCE(p.admission_fee, 0) <> 'NaN'::numeric
-
-      ) AS admission_fee,
-
-
-      (
-          SELECT COALESCE(SUM(regular_amount), 0)
-          FROM (
-
-          SELECT
-            COALESCE(pf.amount, 0) AS regular_amount
-
-          FROM tbl_player_fees pf
-
-          WHERE pf.status = 'Paid'
-
-            AND DATE_TRUNC('month', pf.payment_date)
-                = DATE_TRUNC('month', CURRENT_DATE)
-
-          UNION ALL
-
-          SELECT
-            COALESCE(p.regular_fee, 0) AS regular_amount
-
-          FROM tbl_players p
-
-          WHERE LOWER(TRIM(p.fee_type)) = 'regular fee'
-                AND COALESCE(p.regular_fee, 0) >= 0
-                AND p.regular_fee <> 'NaN'::numeric
-
-            AND DATE_TRUNC('month', p.admission_date)
-                = DATE_TRUNC('month', CURRENT_DATE)
-
-        ) AS regular_revenue_data
-
-      ) AS regular_fee,
-
-
-      (
-        SELECT COALESCE(
-          SUM(o.fee_amount),
-          0
-        )
-      FROM tbl_one_on_one_applications o
-
-      WHERE o.application_date >=
-      DATE_TRUNC('month', CURRENT_DATE)
-
-        AND o.application_date <
-      DATE_TRUNC('month', CURRENT_DATE)
-      + INTERVAL '1 month'
-      ) AS one_on_one_fee,
-
-
-      (
-        SELECT COALESCE(
-          SUM(o.fee_amount),
-          0
-        )
-        FROM tbl_one_on_one_applications o
-
-        INNER JOIN tbl_players p
-          ON p.player_id = o.player_id
-
-        WHERE o.application_date >= DATE_TRUNC('month', CURRENT_DATE)
-
-          AND o.application_date <
-              DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
-
-          AND p.regular_fee = 0
-
-          AND p.fee_type = 'Admission Fee'
-
-      ) AS only_one_on_one_fee
+          p.*
+        FROM tbl_players p
+        ORDER BY p.player_id DESC;
       `),
 
+      pool.query(`
+        SELECT
+
+          (
+            SELECT COUNT(*)
+            FROM tbl_players
+          ) AS total_players,
+
+          (
+            SELECT COUNT(*)
+            FROM tbl_players
+            WHERE is_active = TRUE
+          ) AS active_players,
+
+          (
+            SELECT COUNT(*)
+            FROM tbl_players
+            WHERE is_active = FALSE
+          ) AS inactive_players,
+
+          (
+            SELECT COUNT(*)
+            FROM (
+              SELECT DISTINCT p.player_id
+              FROM tbl_players p
+              WHERE p.is_active = TRUE
+                AND p.fee_type = 'Regular Fee'
+                AND p.regular_fee >= 0
+                AND p.admission_date <= CURRENT_DATE
+
+                AND (
+                  (
+                    DATE_TRUNC('month', p.admission_date) =
+                      DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
+                    AND p.fee_status = 'Paid'
+                  )
+
+                  OR
+
+                  EXISTS (
+                    SELECT 1
+                    FROM tbl_player_fees pf_last
+                    WHERE pf_last.player_id = p.player_id
+                      AND pf_last.status = 'Paid'
+                      AND pf_last.is_active = TRUE
+                      AND pf_last.payment_date >=
+                        DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
+                      AND pf_last.payment_date <
+                        DATE_TRUNC('month', CURRENT_DATE)
+                  )
+                )
+
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM tbl_player_fees pf_current
+                  WHERE pf_current.player_id = p.player_id
+                    AND pf_current.status = 'Paid'
+                    AND pf_current.is_active = TRUE
+                    AND pf_current.payment_date >=
+                      DATE_TRUNC('month', CURRENT_DATE)
+                    AND pf_current.payment_date <
+                      DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+                )
+
+              UNION
+
+              SELECT DISTINCT pf_last.player_id
+              FROM tbl_player_fees pf_last
+              WHERE pf_last.status = 'Paid'
+                AND pf_last.is_active = TRUE
+                AND pf_last.payment_date >=
+                  DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
+                AND pf_last.payment_date <
+                  DATE_TRUNC('month', CURRENT_DATE)
+
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM tbl_player_fees pf_current
+                  WHERE pf_current.player_id = pf_last.player_id
+                    AND pf_current.status = 'Paid'
+                    AND pf_current.is_active = TRUE
+                    AND pf_current.payment_date >=
+                      DATE_TRUNC('month', CURRENT_DATE)
+                    AND pf_current.payment_date <
+                      DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+                )
+
+              UNION
+
+              SELECT DISTINCT last_month.player_id
+              FROM tbl_one_on_one_applications last_month
+              WHERE last_month.is_active = TRUE
+                AND last_month.payment_status = 'Paid'
+                AND last_month.application_date >=
+                  DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
+                AND last_month.application_date <
+                  DATE_TRUNC('month', CURRENT_DATE)
+
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM tbl_one_on_one_applications this_month
+                  WHERE this_month.player_id = last_month.player_id
+                    AND this_month.is_active = TRUE
+                    AND this_month.payment_status = 'Paid'
+                    AND this_month.application_date >=
+                      DATE_TRUNC('month', CURRENT_DATE)
+                    AND this_month.application_date <
+                      DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+                )
+
+            ) AS pending_players
+          ) AS pending_fees,
+
+          (
+            SELECT COALESCE(
+              SUM(p.admission_fee),
+              0
+            )
+            FROM tbl_players p
+            WHERE p.admission_date >=
+              DATE_TRUNC('month', CURRENT_DATE)
+              AND p.admission_date <
+                DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+              AND COALESCE(p.admission_fee, 0) > 0
+          ) AS admission_fee,
+
+          (
+            SELECT COALESCE(
+              SUM(regular_amount),
+              0
+            )
+            FROM (
+              SELECT
+                COALESCE(pf.amount, 0) AS regular_amount
+              FROM tbl_player_fees pf
+              WHERE pf.status = 'Paid'
+                AND pf.payment_date >=
+                  DATE_TRUNC('month', CURRENT_DATE)
+                AND pf.payment_date <
+                  DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+
+              UNION ALL
+
+              SELECT
+                COALESCE(p.regular_fee, 0) AS regular_amount
+              FROM tbl_players p
+              WHERE COALESCE(p.regular_fee, 0) > 0
+                AND p.admission_date >=
+                  DATE_TRUNC('month', CURRENT_DATE)
+                AND p.admission_date <
+                  DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+            ) AS regular_revenue_data
+          ) AS regular_fee,
+
+          (
+            SELECT COALESCE(
+              SUM(p.hostel_fee),
+              0
+            )
+            FROM tbl_players p
+            WHERE COALESCE(p.hostel_fee, 0) > 0
+              AND p.admission_date >=
+                DATE_TRUNC('month', CURRENT_DATE)
+              AND p.admission_date <
+                DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+          ) AS hostel_fee,
+
+          (
+            SELECT COALESCE(
+              SUM(o.fee_amount),
+              0
+            )
+            FROM tbl_one_on_one_applications o
+            WHERE o.application_date >=
+              DATE_TRUNC('month', CURRENT_DATE)
+              AND o.application_date <
+                DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+          ) AS one_on_one_fee,
+
+          (
+            SELECT COALESCE(
+              SUM(o.fee_amount),
+              0
+            )
+            FROM tbl_one_on_one_applications o
+            INNER JOIN tbl_players p
+              ON p.player_id = o.player_id
+            WHERE o.application_date >=
+              DATE_TRUNC('month', CURRENT_DATE)
+              AND o.application_date <
+                DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+              AND COALESCE(p.regular_fee, 0) = 0
+              AND COALESCE(p.admission_fee, 0) > 0
+          ) AS only_one_on_one_fee
+
+      `),
     ]);
 
     const stats = statistics.rows[0];
@@ -1141,24 +741,31 @@ exports.getAllPlayers = async (req, res) => {
       {
         statistics: {
           total_players: Number(stats.total_players),
+
           active_players: Number(stats.active_players),
+
           inactive_players: Number(stats.inactive_players),
+
           pending_fees: Number(stats.pending_fees),
 
           admission_fee: Number(stats.admission_fee),
+
           regular_fee: Number(stats.regular_fee),
-          // one_on_one_fee: Number(stats.one_on_one_fee),
-          one_on_one_fee: Number(stats.one_on_one_fee) - Number(
-            stats.only_one_on_one_fee
-          ),
-          only_one_on_one_fee: Number(
-            stats.only_one_on_one_fee
-          ),
+
+          hostel_fee: Number(stats.hostel_fee),
+
+          one_on_one_fee:
+            Number(stats.one_on_one_fee) -
+            Number(stats.only_one_on_one_fee),
+
+          only_one_on_one_fee:
+            Number(stats.only_one_on_one_fee),
         },
 
         players: players.rows,
       }
     );
+
   } catch (error) {
     console.error(
       "Get All Players Error:",
@@ -1172,6 +779,7 @@ exports.getAllPlayers = async (req, res) => {
     );
   }
 };
+
 
 
 exports.getPlayerById = async (req, res) => {

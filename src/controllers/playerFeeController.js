@@ -163,18 +163,6 @@ exports.createPlayerFee = async (req, res) => {
       );
     }
 
-    await client.query(
-      `
-        UPDATE tbl_players
-        SET fee_type = 'Regular Fee'
-        WHERE player_id = $1
-          AND fee_type = 'Admission Fee'
-          AND COALESCE(regular_fee, 0) = 0
-        RETURNING player_id
-        `,
-      [Number(player_id)]
-    );
-
     // Insert fee
     const result = await client.query(
       `

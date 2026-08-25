@@ -6,129 +6,171 @@ exports.addCoach = async (req, res) => {
   const {
     full_name,
     phone_number,
+    secondary_phone_number,
     specialization,
     experience,
     salary,
     join_date,
+    contact_name,
+    contact_relation,
+    contact_phone,
+    remarks,
+    advance_amount,
+    advance_date,
+    advance_remarks,
   } = req.body;
+
+  const errors = {};
+
+  const phoneRegex = /^[6-9]\d{9}$/;
+  const nameRegex = /^[A-Za-z\s.'-]+$/;
+
+  if (!full_name?.trim()) {
+    errors.full_name = "Full name is required.";
+  } else if (full_name.trim().length > 250) {
+    errors.full_name = "Full name cannot exceed 250 characters.";
+  } else if (!nameRegex.test(full_name.trim())) {
+    errors.full_name = "Full name contains invalid characters.";
+  }
+
+  if (!phone_number?.trim()) {
+    errors.phone_number = "Phone number is required.";
+  } else if (!phoneRegex.test(phone_number.trim())) {
+    errors.phone_number = "Invalid phone number.";
+  }
+
+  if (
+    secondary_phone_number &&
+    !phoneRegex.test(secondary_phone_number.trim())
+  ) {
+    errors.secondary_phone_number = "Invalid secondary phone number.";
+  }
+
+  if (!specialization?.trim()) {
+    errors.specialization = "Specialization is required.";
+  } else if (specialization.trim().length > 250) {
+    errors.specialization =
+      "Specialization cannot exceed 250 characters.";
+  }
+
+  if (
+    experience === undefined ||
+    experience === null ||
+    experience === ""
+  ) {
+    errors.experience = "Experience is required.";
+  } else if (
+    isNaN(Number(experience)) ||
+    Number(experience) < 0
+  ) {
+    errors.experience = "Experience cannot be negative.";
+  }
+
+  if (
+    salary === undefined ||
+    salary === null ||
+    salary === ""
+  ) {
+    errors.salary = "Salary is required.";
+  } else if (
+    isNaN(Number(salary)) ||
+    Number(salary) <= 0
+  ) {
+    errors.salary = "Salary must be greater than zero.";
+  }
+
+  if (!join_date) {
+    errors.join_date = "Join date is required.";
+  } else if (isNaN(Date.parse(join_date))) {
+    errors.join_date = "Invalid join date.";
+  }
+
+  if (contact_name) {
+    if (contact_name.trim().length > 250) {
+      errors.contact_name =
+        "Contact name cannot exceed 250 characters.";
+    } else if (!nameRegex.test(contact_name.trim())) {
+      errors.contact_name = "Invalid contact name.";
+    }
+  }
+
+  if (
+    contact_relation &&
+    contact_relation.trim().length > 100
+  ) {
+    errors.contact_relation =
+      "Contact relation cannot exceed 100 characters.";
+  }
+
+  if (
+    contact_phone &&
+    !phoneRegex.test(contact_phone.trim())
+  ) {
+    errors.contact_phone =
+      "Invalid contact phone number.";
+  }
+
+  if (remarks && remarks.trim().length > 1000) {
+    errors.remarks =
+      "Remarks cannot exceed 1000 characters.";
+  }
+
+  if (
+    advance_amount !== undefined &&
+    advance_amount !== null &&
+    advance_amount !== ""
+  ) {
+    if (
+      isNaN(Number(advance_amount)) ||
+      Number(advance_amount) <= 0
+    ) {
+      errors.advance_amount =
+        "Advance amount must be greater than zero.";
+    }
+
+    if (!advance_date) {
+      errors.advance_date =
+        "Advance date is required when advance amount is provided.";
+    }
+  }
+
+  if (advance_date && isNaN(Date.parse(advance_date))) {
+    errors.advance_date = "Invalid advance date.";
+  }
+
+  if (
+    advance_remarks &&
+    advance_remarks.trim().length > 1000
+  ) {
+    errors.advance_remarks =
+      "Advance remarks cannot exceed 1000 characters.";
+  }
+
+  if (Object.keys(errors).length > 0) {
+    return res.status(400).json({
+      success: false,
+      message: "Validation failed.",
+      errors,
+    });
+  }
 
   let client;
   const uploadedS3Files = [];
 
   try {
-    // Required field validation
-    if (
-      !full_name?.trim() ||
-      !phone_number?.trim() ||
-      !specialization?.trim() ||
-      experience == null ||
-      salary == null ||
-      !join_date
-    ) {
-      return sendErrorResponse(
-        res,
-        400,
-        "All fields are required."
-      );
-    }
-
-    // Phone validation
-    if (
-      !/^[6-9]\d{9}$/.test(
-        phone_number.trim()
-      )
-    ) {
-      return sendErrorResponse(
-        res,
-        400,
-        "Invalid phone number."
-      );
-    }
-
-    // Experience validation
-    if (
-      isNaN(Number(experience)) ||
-      Number(experience) < 0
-    ) {
-      return sendErrorResponse(
-        res,
-        400,
-        "Experience cannot be negative."
-      );
-    }
-
-    // Salary validation
-    if (
-      isNaN(Number(salary)) ||
-      Number(salary) <= 0
-    ) {
-      return sendErrorResponse(
-        res,
-        400,
-        "Salary must be greater than zero."
-      );
-    }
-
     client = await pool.connect();
 
     await client.query("BEGIN");
 
-    const currentYear =
-      new Date().getFullYear();
-
-    const yearCode =
-      String(currentYear).slice(-2);
-
-    const prefix =
-      `C${yearCode}`;
-
-    // Prevent duplicate coach code generation
-    await client.query(
-      `SELECT pg_advisory_xact_lock($1)`,
-      [currentYear]
+    const existingCoach = await client.query(
+      `
+      SELECT 1
+      FROM tbl_coach
+      WHERE phone_number = $1
+      LIMIT 1
+      `,
+      [phone_number.trim()]
     );
-
-    const coachCodeResult =
-      await client.query(
-        `
-        SELECT
-          COALESCE(
-            MAX(
-              CAST(
-                SUBSTRING(
-                  coach_code FROM 4
-                ) AS INTEGER
-              )
-            ),
-            0
-          ) AS last_number
-        FROM tbl_coach
-        WHERE coach_code LIKE $1
-        `,
-        [`${prefix}%`]
-      );
-
-    const nextNumber =
-      Number(
-        coachCodeResult.rows[0].last_number
-      ) + 1;
-
-    const coach_code =
-      `${prefix}${String(nextNumber).padStart(
-        4,
-        "0"
-      )}`;
-
-    const existingCoach =
-      await client.query(
-        `
-        SELECT 1
-        FROM tbl_coach
-        WHERE phone_number = $1
-        LIMIT 1
-        `,
-        [phone_number.trim()]
-      );
 
     if (existingCoach.rowCount > 0) {
       await client.query("ROLLBACK");
@@ -140,111 +182,138 @@ exports.addCoach = async (req, res) => {
       );
     }
 
-    const result =
-      await client.query(
-        `
-        INSERT INTO tbl_coach
-        (
-          coach_code,
-          full_name,
-          phone_number,
-          specialization,
-          experience,
-          salary,
-          join_date,
-          id_increment
-        )
-        VALUES
-        (
-          $1,$2,$3,$4,$5,$6,$7,$8
-        )
-        RETURNING *;
-        `,
-        [
-          coach_code,
-          full_name.trim(),
-          phone_number.trim(),
-          specialization.trim(),
-          Number(experience),
-          Number(salary),
-          join_date,
-          nextNumber,
-        ]
-      );
+    const currentYear = new Date().getFullYear();
+    const yearCode = String(currentYear).slice(-2);
+    const prefix = `C${yearCode}`;
 
-    const coachId =
-      result.rows[0].coach_id;
+    await client.query(
+      `SELECT pg_advisory_xact_lock($1)`,
+      [currentYear]
+    );
 
-    // ==========================================
-    // Upload Multiple Documents to S3
-    // ==========================================
+    const coachCodeResult = await client.query(
+      `
+      SELECT COALESCE(
+        MAX(
+          CAST(
+            SUBSTRING(coach_code FROM 4) AS INTEGER
+          )
+        ),
+        0
+      ) AS last_number
+      FROM tbl_coach
+      WHERE coach_code LIKE $1
+      `,
+      [`${prefix}%`]
+    );
+
+    const nextNumber =
+      Number(coachCodeResult.rows[0].last_number) + 1;
+
+    const coach_code =
+      `${prefix}${String(nextNumber).padStart(4, "0")}`;
+
+    const result = await client.query(
+      `
+      INSERT INTO tbl_coach
+      (
+        coach_code,
+        full_name,
+        phone_number,
+        secondary_phone_number,
+        specialization,
+        experience,
+        salary,
+        join_date,
+        contact_name,
+        contact_relation,
+        contact_phone,
+        remarks,
+        id_increment
+      )
+      VALUES
+      (
+        $1, $2, $3, $4, $5, $6, $7,
+        $8, $9, $10, $11, $12, $13
+      )
+      RETURNING *
+      `,
+      [
+        coach_code,
+        full_name.trim(),
+        phone_number.trim(),
+        secondary_phone_number?.trim() || null,
+        specialization.trim(),
+        Number(experience),
+        Number(salary),
+        join_date,
+        contact_name?.trim() || null,
+        contact_relation?.trim() || null,
+        contact_phone?.trim() || null,
+        remarks?.trim() || null,
+        nextNumber,
+      ]
+    );
+
+    const coach = result.rows[0];
+    const coachId = coach.coach_id;
 
     if (
-      req.files &&
-      req.files.length > 0
+      advance_amount !== undefined &&
+      advance_amount !== null &&
+      advance_amount !== ""
     ) {
-      for (const file of req.files) {
-        try {
-          // Upload file to S3
-          const s3Key = await uploadToS3(
-            file,
-            "coaches"
-          );
-
-          // Keep track of uploaded files
-          // for cleanup if transaction fails
-          uploadedS3Files.push(s3Key);
-
-          // Store S3 key in common documents table
-          await client.query(
-            `
-        INSERT INTO tbl_documents
+      await client.query(
+        `
+        INSERT INTO tbl_employee_advances
         (
           coach_id,
-          document_url
+          amount,
+          advance_date,
+          remarks
         )
-        VALUES
-        (
-          $1,
-          $2
-        )
+        VALUES ($1, $2, $3, $4)
         `,
-            [
-              coachId,
-              s3Key,
-            ]
-          );
+        [
+          coachId,
+          Number(advance_amount),
+          advance_date,
+          advance_remarks?.trim() || null,
+        ]
+      );
+    }
 
-        } catch (uploadError) {
-          console.error(
-            "S3 upload failed:",
-            uploadError
-          );
+    if (req.files?.length > 0) {
+      for (const file of req.files) {
+        const s3Key = await uploadToS3(file, "coaches");
 
-          throw new Error(
-            `Failed to upload document: ${file.originalname}`
-          );
-        }
+        uploadedS3Files.push(s3Key);
+
+        await client.query(
+          `
+          INSERT INTO tbl_documents
+          (
+            coach_id,
+            document_url
+          )
+          VALUES ($1, $2)
+          `,
+          [coachId, s3Key]
+        );
       }
     }
 
-    const userResult =
-      await client.query(
-        `
-        SELECT full_name
-        FROM tbl_users
-        WHERE user_id = $1
-        `,
-        [req.user.user_id]
-      );
+    const userResult = await client.query(
+      `
+      SELECT full_name
+      FROM tbl_users
+      WHERE user_id = $1
+      `,
+      [req.user.user_id]
+    );
 
     const performedBy =
-      userResult.rows[0]?.full_name ||
-      "System";
-
-    // ==========================================
-    // Notification
-    // ==========================================
+      userResult.rows[0]?.full_name || "System";
 
     await client.query(
       `
@@ -255,13 +324,12 @@ exports.addCoach = async (req, res) => {
         description,
         performed_by
       )
-      VALUES
-      ($1,$2,$3,$4)
+      VALUES ($1, $2, $3, $4)
       `,
       [
         "Coach",
         "Created",
-        `Coach ${result.rows[0].full_name} was added.`,
+        `Coach ${coach.full_name} was added.`,
         performedBy,
       ]
     );
@@ -272,93 +340,105 @@ exports.addCoach = async (req, res) => {
       res,
       201,
       "Coach added successfully.",
-      result.rows[0]
+      coach
     );
 
   } catch (error) {
-
-    console.error(
-      "Add coach error:",
-      error
-    );
+    console.error("Add coach error:", error);
 
     if (client) {
-      try {
-        await client.query(
-          "ROLLBACK"
-        );
-      } catch (rollbackError) {
-        console.error(
-          "Rollback error:",
-          rollbackError
-        );
-      }
+      await client.query("ROLLBACK").catch((err) => {
+        console.error("Rollback error:", err);
+      });
     }
 
+    if (uploadedS3Files.length > 0) {
+      await Promise.allSettled(
+        uploadedS3Files.map((key) => deletefroms3(key))
+      );
+    }
 
-    if (
-      uploadedS3Files.length > 0
-    ) {
-      for (
-        const s3Key
-        of uploadedS3Files
-      ) {
-        try {
-          await deletefroms3(
-            s3Key
-          );
-        } catch (deleteError) {
-          console.error(
-            `Failed to delete S3 file ${s3Key}:`,
-            deleteError
-          );
-        }
-      }
+    if (error.code === "23505") {
+      return sendErrorResponse(
+        res,
+        409,
+        "A coach with this information already exists."
+      );
+    }
+
+    if (error.code === "23503") {
+      return sendErrorResponse(
+        res,
+        400,
+        "Invalid related record."
+      );
+    }
+
+    if (error.code === "22P02" || error.code === "22007") {
+      return sendErrorResponse(
+        res,
+        400,
+        "Invalid data format."
+      );
     }
 
     return sendErrorResponse(
       res,
       500,
-      error.message ||
-      "Internal Server Error"
+      "Failed to add coach."
     );
 
   } finally {
-
     if (client) {
       client.release();
     }
   }
 };
 
-
 exports.getAllCoaches = async (req, res) => {
   try {
     const [result, statistics] = await Promise.all([
       pool.query(`
-        SELECT
-          c.*,
+          SELECT
+            c.*,
 
-          COALESCE(
-            JSON_AGG(
-              d.document_url
-              ORDER BY d.document_id
-            ) FILTER (
-              WHERE d.document_id IS NOT NULL
-            ),
-            '[]'
-          ) AS documents
+            COALESCE(
+              JSON_AGG(
+                d.document_url
+                ORDER BY d.document_id
+              ) FILTER (
+                WHERE d.document_id IS NOT NULL
+              ),
+              '[]'
+            ) AS documents,
 
-        FROM tbl_coach c
+            latest_advance.amount AS advance_amount,
+            latest_advance.advance_date
 
-        LEFT JOIN tbl_documents d
-          ON d.coach_id = c.coach_id
+          FROM tbl_coach c
 
-        GROUP BY
-          c.coach_id
+          LEFT JOIN tbl_documents d
+            ON d.coach_id = c.coach_id
 
-        ORDER BY
-          c.coach_id DESC
+          LEFT JOIN LATERAL (
+            SELECT
+              ea.advance_id,
+              ea.amount,
+              ea.advance_date
+            FROM tbl_employee_advances ea
+            WHERE ea.coach_id = c.coach_id
+            ORDER BY ea.advance_id DESC
+            LIMIT 1
+          ) latest_advance
+            ON TRUE
+
+          GROUP BY
+            c.coach_id,
+            latest_advance.advance_id,
+            latest_advance.amount,
+            latest_advance.advance_date
+
+          ORDER BY c.coach_id DESC
       `),
 
       pool.query(`
@@ -394,10 +474,7 @@ exports.getAllCoaches = async (req, res) => {
             }
 
             try {
-              const signedUrl =
-                await getSignedVideoUrl(documentUrl);
-
-              return signedUrl;
+              return await getSignedVideoUrl(documentUrl);
             } catch (error) {
               console.error(
                 "Failed to generate signed URL:",
@@ -409,12 +486,20 @@ exports.getAllCoaches = async (req, res) => {
           })
         );
 
-        // Remove original documents field
         delete coach.documents;
 
         return {
           ...coach,
-          document_urls: document_urls.filter(Boolean),
+          advance_amount:
+            coach.advance_amount !== null
+              ? Number(coach.advance_amount)
+              : 0,
+
+          advance_date:
+            coach.advance_date || null,
+
+          document_urls:
+            document_urls.filter(Boolean),
         };
       })
     );
@@ -461,8 +546,6 @@ exports.getAllCoaches = async (req, res) => {
 };
 
 
-
-
 exports.getCoachById = async (req, res) => {
   const { id } = req.params;
 
@@ -485,11 +568,11 @@ exports.getCoachById = async (req, res) => {
   try {
     const result = await pool.query(
       `
-SELECT
-c.*
-  FROM tbl_coach c
-      WHERE c.coach_id = $1
-  `,
+    SELECT
+    c.*
+    FROM tbl_coach c
+    WHERE c.coach_id = $1
+    `,
       [id]
     );
 
@@ -510,25 +593,198 @@ c.*
 
 exports.updateCoach = async (req, res) => {
   const { id } = req.params;
+  const errors = {};
+
+  const phoneRegex = /^[6-9]\d{9}$/;
+  const nameRegex = /^[A-Za-z\s.'-]+$/;
 
   if (!id) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Coach ID is required."
-    );
+    errors.id = "Coach ID is required.";
+  } else if (!Number.isInteger(Number(id))) {
+    errors.id = "Invalid Coach ID.";
   }
 
-  if (!Number.isInteger(Number(id))) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Invalid Coach ID."
-    );
+  if (req.body.phone_number) {
+    req.body.phone_number = req.body.phone_number.trim();
+
+    if (!phoneRegex.test(req.body.phone_number)) {
+      errors.phone_number = "Invalid phone number.";
+    }
+  }
+
+  if (req.body.secondary_phone_number) {
+    req.body.secondary_phone_number =
+      req.body.secondary_phone_number.trim();
+
+    if (!phoneRegex.test(req.body.secondary_phone_number)) {
+      errors.secondary_phone_number =
+        "Invalid secondary phone number.";
+    }
+  }
+
+  if (req.body.contact_phone) {
+    req.body.contact_phone =
+      req.body.contact_phone.trim();
+
+    if (!phoneRegex.test(req.body.contact_phone)) {
+      errors.contact_phone =
+        "Invalid contact phone number.";
+    }
+  }
+
+  if (req.body.full_name) {
+    req.body.full_name =
+      req.body.full_name.trim();
+
+    if (req.body.full_name.length > 250) {
+      errors.full_name =
+        "Full name cannot exceed 250 characters.";
+    } else if (!nameRegex.test(req.body.full_name)) {
+      errors.full_name =
+        "Full name contains invalid characters.";
+    }
+  }
+
+  if (req.body.specialization) {
+    req.body.specialization =
+      req.body.specialization.trim();
+
+    if (req.body.specialization.length > 250) {
+      errors.specialization =
+        "Specialization cannot exceed 250 characters.";
+    }
+  }
+
+  if (
+    req.body.experience !== undefined &&
+    req.body.experience !== null &&
+    req.body.experience !== ""
+  ) {
+    if (
+      isNaN(Number(req.body.experience)) ||
+      Number(req.body.experience) < 0
+    ) {
+      errors.experience =
+        "Experience cannot be negative.";
+    }
+  }
+
+  if (
+    req.body.salary !== undefined &&
+    req.body.salary !== null &&
+    req.body.salary !== ""
+  ) {
+    if (
+      isNaN(Number(req.body.salary)) ||
+      Number(req.body.salary) <= 0
+    ) {
+      errors.salary =
+        "Salary must be greater than zero.";
+    }
+  }
+
+  if (
+    req.body.rating !== undefined &&
+    req.body.rating !== null &&
+    req.body.rating !== ""
+  ) {
+    if (
+      isNaN(Number(req.body.rating)) ||
+      Number(req.body.rating) < 0 ||
+      Number(req.body.rating) > 5
+    ) {
+      errors.rating =
+        "Rating must be between 0 and 5.";
+    }
+  }
+
+  if (req.body.join_date) {
+    if (isNaN(Date.parse(req.body.join_date))) {
+      errors.join_date =
+        "Invalid join date.";
+    }
+  }
+
+  if (req.body.contact_name) {
+    req.body.contact_name =
+      req.body.contact_name.trim();
+
+    if (req.body.contact_name.length > 250) {
+      errors.contact_name =
+        "Contact name cannot exceed 250 characters.";
+    } else if (!nameRegex.test(req.body.contact_name)) {
+      errors.contact_name =
+        "Invalid contact name.";
+    }
+  }
+
+  if (req.body.contact_relation) {
+    req.body.contact_relation =
+      req.body.contact_relation.trim();
+
+    if (req.body.contact_relation.length > 100) {
+      errors.contact_relation =
+        "Contact relation cannot exceed 100 characters.";
+    }
+  }
+
+  if (req.body.remarks) {
+    req.body.remarks =
+      req.body.remarks.trim();
+
+    if (req.body.remarks.length > 1000) {
+      errors.remarks =
+        "Remarks cannot exceed 1000 characters.";
+    }
+  }
+
+  if (
+    req.body.advance_amount !== undefined &&
+    req.body.advance_amount !== null &&
+    req.body.advance_amount !== ""
+  ) {
+    if (
+      isNaN(Number(req.body.advance_amount)) ||
+      Number(req.body.advance_amount) < 0
+    ) {
+      errors.advance_amount =
+        "Advance amount cannot be negative.";
+    }
+
+    if (
+      Number(req.body.advance_amount) > 0 &&
+      !req.body.advance_date
+    ) {
+      errors.advance_date =
+        "Advance date is required when advance amount is provided.";
+    }
+  }
+
+  if (
+    req.body.advance_date &&
+    isNaN(Date.parse(req.body.advance_date))
+  ) {
+    errors.advance_date =
+      "Invalid advance date.";
+  }
+
+  if (
+    req.body.advance_remarks &&
+    req.body.advance_remarks.trim().length > 1000
+  ) {
+    errors.advance_remarks =
+      "Advance remarks cannot exceed 1000 characters.";
+  }
+
+  if (Object.keys(errors).length > 0) {
+    return res.status(400).json({
+      success: false,
+      message: "Validation failed.",
+      errors,
+    });
   }
 
   let client;
-
   const uploadedS3Files = [];
 
   try {
@@ -536,16 +792,15 @@ exports.updateCoach = async (req, res) => {
 
     await client.query("BEGIN");
 
-    const existingCoach =
-      await client.query(
-        `
-SELECT *
-  FROM tbl_coach
-        WHERE coach_id = $1
+    const existingCoach = await client.query(
+      `
+      SELECT *
+      FROM tbl_coach
+      WHERE coach_id = $1
         AND is_active = TRUE
-  `,
-        [id]
-      );
+      `,
+      [Number(id)]
+    );
 
     if (existingCoach.rowCount === 0) {
       await client.query("ROLLBACK");
@@ -553,46 +808,24 @@ SELECT *
       return sendErrorResponse(
         res,
         404,
-        "Coach not found."
-      );
-    }
-
-
-    if (req.body.phone_number) {
-      req.body.phone_number =
-        req.body.phone_number.trim();
-    }
-
-    if (
-      req.body.phone_number &&
-      !/^[6-9]\d{9}$/.test(
-        req.body.phone_number
-      )
-    ) {
-      await client.query("ROLLBACK");
-
-      return sendErrorResponse(
-        res,
-        400,
-        "Invalid phone number."
+        "Active coach not found."
       );
     }
 
     if (req.body.phone_number) {
-      const phoneExists =
-        await client.query(
-          `
-          SELECT 1
-          FROM tbl_coach
-          WHERE phone_number = $1
+      const phoneExists = await client.query(
+        `
+        SELECT 1
+        FROM tbl_coach
+        WHERE phone_number = $1
           AND coach_id <> $2
-          LIMIT 1
-          `,
-          [
-            req.body.phone_number,
-            id,
-          ]
-        );
+        LIMIT 1
+        `,
+        [
+          req.body.phone_number,
+          Number(id),
+        ]
+      );
 
       if (phoneExists.rowCount > 0) {
         await client.query("ROLLBACK");
@@ -605,56 +838,19 @@ SELECT *
       }
     }
 
-
-    if (
-      req.body.experience !== undefined &&
-      req.body.experience !== null &&
-      req.body.experience !== "" &&
-      (
-        isNaN(
-          Number(req.body.experience)
-        ) ||
-        Number(req.body.experience) < 0
-      )
-    ) {
-      await client.query("ROLLBACK");
-
-      return sendErrorResponse(
-        res,
-        400,
-        "Experience cannot be negative."
-      );
-    }
-
-    if (
-      req.body.salary !== undefined &&
-      req.body.salary !== null &&
-      req.body.salary !== "" &&
-      (
-        isNaN(
-          Number(req.body.salary)
-        ) ||
-        Number(req.body.salary) <= 0
-      )
-    ) {
-      await client.query("ROLLBACK");
-
-      return sendErrorResponse(
-        res,
-        400,
-        "Salary must be greater than zero."
-      );
-    }
-
-
     const allowedFields = [
       "full_name",
       "phone_number",
+      "secondary_phone_number",
       "specialization",
       "experience",
       "salary",
       "join_date",
+      "contact_name",
+      "contact_relation",
+      "contact_phone",
       "rating",
+      "remarks",
     ];
 
     const numericFields = [
@@ -666,29 +862,16 @@ SELECT *
     const updates = [];
     const values = [];
 
-    let index = 1;
-
-
     for (const field of allowedFields) {
-      if (
-        Object.hasOwn(
-          req.body,
-          field
-        )
-      ) {
-        let value =
-          req.body[field];
+      if (Object.hasOwn(req.body, field)) {
+        let value = req.body[field];
 
-        if (
-          typeof value === "string"
-        ) {
+        if (typeof value === "string") {
           value = value.trim();
         }
 
         if (
-          numericFields.includes(
-            field
-          ) &&
+          numericFields.includes(field) &&
           value !== null &&
           value !== ""
         ) {
@@ -696,234 +879,209 @@ SELECT *
         }
 
         updates.push(
-          `${field} = $${index} `
+          `${field} = $${values.length + 1}`
         );
 
         values.push(
-          value === ""
-            ? null
-            : value
+          value === "" ? null : value
         );
-
-        index++;
       }
     }
 
     let result;
 
-
-
     if (updates.length > 0) {
-      values.push(id);
+      values.push(Number(id));
 
       result = await client.query(
         `
         UPDATE tbl_coach
         SET ${updates.join(", ")}
-        WHERE coach_id = $${index}
-        AND is_active = TRUE
-RETURNING *;
-`,
+        WHERE coach_id = $${values.length}
+          AND is_active = TRUE
+        RETURNING *
+        `,
         values
       );
-
-      if (result.rowCount === 0) {
-        await client.query("ROLLBACK");
-
-        return sendErrorResponse(
-          res,
-          404,
-          "Coach not found."
-        );
-      }
     } else {
-
       result = {
-        rows: [
-          existingCoach.rows[0],
-        ],
+        rows: [existingCoach.rows[0]],
         rowCount: 1,
       };
     }
 
-    const coachId =
-      result.rows[0].coach_id;
-
+    const coach = result.rows[0];
+    const coachId = coach.coach_id;
 
     if (
-      req.files &&
-      req.files.length > 0
+      req.body.advance_amount !== undefined &&
+      req.body.advance_amount !== null &&
+      req.body.advance_amount !== ""
     ) {
+      await client.query(
+        `
+        INSERT INTO tbl_employee_advances
+        (
+          coach_id,
+          amount,
+          advance_date,
+          remarks
+        )
+        VALUES ($1, $2, $3, $4)
+        `,
+        [
+          coachId,
+          Number(req.body.advance_amount),
+          req.body.advance_date || null,
+          req.body.advance_remarks?.trim() || null,
+        ]
+      );
+    }
+
+    if (req.files?.length > 0) {
       for (const file of req.files) {
-        try {
-          // Upload file to S3
-          const s3Key =
-            await uploadToS3(
-              file,
-              "coaches"
-            );
+        const s3Key = await uploadToS3(
+          file,
+          "coaches"
+        );
 
-          // Track uploaded file
-          // for cleanup if transaction fails
-          uploadedS3Files.push(
-            s3Key
-          );
+        uploadedS3Files.push(s3Key);
 
-          // Store S3 key in common documents table
-          await client.query(
-            `
-            INSERT INTO tbl_documents
-  (
-    coach_id,
-    document_url
-  )
-VALUES
-  ($1, $2)
-            `,
-            [
-              coachId,
-              s3Key,
-            ]
-          );
-
-        } catch (uploadError) {
-          console.error(
-            "S3 upload failed:",
-            uploadError
-          );
-
-          throw new Error(
-            `Failed to upload document: ${file.originalname} `
-          );
-        }
+        await client.query(
+          `
+          INSERT INTO tbl_documents
+          (
+            coach_id,
+            document_url
+          )
+          VALUES ($1, $2)
+          `,
+          [coachId, s3Key]
+        );
       }
     }
 
+    const documents = await client.query(
+      `
+      SELECT
+        document_id,
+        document_url,
+        created_at
+      FROM tbl_documents
+      WHERE coach_id = $1
+      ORDER BY document_id
+      `,
+      [coachId]
+    );
 
-    const documents =
-      await client.query(
-        `
-SELECT
-document_id,
-  document_url,
-  created_at
-        FROM tbl_documents
-        WHERE coach_id = $1
-        ORDER BY document_id;
-`,
-        [coachId]
-      );
+    const latestAdvance = await client.query(
+      `
+      SELECT
+        advance_id,
+        amount,
+        advance_date,
+        remarks
+      FROM tbl_employee_advances
+      WHERE coach_id = $1
+      ORDER BY advance_id DESC
+      LIMIT 1
+      `,
+      [coachId]
+    );
 
+    const userResult = await client.query(
+      `
+      SELECT full_name
+      FROM tbl_users
+      WHERE user_id = $1
+      `,
+      [req.user.user_id]
+    );
 
-    const reqUserDetails =
-      await client.query(
-        `
-        SELECT full_name
-        FROM tbl_users
-        WHERE user_id = $1
-  `,
-        [req.user.user_id]
-      );
-
-    const reqUser =
-      reqUserDetails.rows[0];
-
-    if (!reqUser) {
-      throw new Error(
-        "Logged-in user not found."
-      );
-    }
+    const performedBy =
+      userResult.rows[0]?.full_name || "System";
 
     await client.query(
       `
       INSERT INTO tbl_notification_logs
-  (
-    module_name,
-    action,
-    description,
-    performed_by
-  )
-VALUES
-  ($1, $2, $3, $4)
+      (
+        module_name,
+        action,
+        description,
+        performed_by
+      )
+      VALUES ($1, $2, $3, $4)
       `,
       [
         "Coach",
         "Updated",
-        `Coach ${result.rows[0].full_name} was updated.`,
-        reqUser.full_name,
+        `Coach ${coach.full_name} was updated.`,
+        performedBy,
       ]
     );
 
     await client.query("COMMIT");
+
+    const advance =
+      latestAdvance.rows[0] || null;
 
     return sendSuccessResponse(
       res,
       200,
       "Coach updated successfully.",
       {
-        ...result.rows[0],
-        documents:
-          documents.rows,
+        ...coach,
+        advance_amount:
+          advance?.amount !== null &&
+            advance?.amount !== undefined
+            ? Number(advance.amount)
+            : 0,
+        advance_date:
+          advance?.advance_date || null,
+        advance_remarks:
+          advance?.remarks || null,
+        documents: documents.rows,
       }
     );
 
   } catch (error) {
-
     console.error(
       "Update coach error:",
       error
     );
 
-    // ==========================================
-    // Rollback Database
-    // ==========================================
-
     if (client) {
-      try {
-        await client.query(
-          "ROLLBACK"
-        );
-      } catch (rollbackError) {
+      await client.query("ROLLBACK").catch((err) => {
         console.error(
           "Rollback error:",
-          rollbackError
+          err
         );
-      }
+      });
     }
 
-    // ==========================================
-    // Delete Newly Uploaded S3 Files
-    // ==========================================
+    if (uploadedS3Files.length > 0) {
+      await Promise.allSettled(
+        uploadedS3Files.map((key) =>
+          deletefroms3(key)
+        )
+      );
+    }
 
-    if (
-      uploadedS3Files.length > 0
-    ) {
-      for (
-        const s3Key
-        of uploadedS3Files
-      ) {
-        try {
-          await deletefroms3(
-            s3Key
-          );
-        } catch (deleteError) {
-          console.error(
-            `Failed to delete S3 file ${s3Key}: `,
-            deleteError
-          );
-        }
-      }
+    if (error.code === "23505") {
+      return sendErrorResponse(
+        res,
+        409,
+        "A coach with the provided information already exists."
+      );
     }
 
     return sendErrorResponse(
       res,
       500,
-      error.message ||
-      "Internal Server Error"
+      "Failed to update coach."
     );
 
   } finally {
-
     if (client) {
       client.release();
     }

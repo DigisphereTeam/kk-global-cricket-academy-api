@@ -1,13 +1,6 @@
 const pool = require("../config/dbConfig");
 const { sendErrorResponse, sendSuccessResponse } = require("../utils/apiResponse");
 
-const statusFlow = {
-    Pending: ["Confirmed", "Cancelled"],
-    Confirmed: ["Completed", "Cancelled"],
-    Completed: [],
-    Cancelled: [],
-};
-
 exports.createGroundBooking = async (req, res) => {
     let client;
 
@@ -422,11 +415,16 @@ exports.getMonthlyGroundBookingSlots = async (req, res) => {
             `
             SELECT
                 booking_date,
-                time_slot
+                time_slot,
+                status
             FROM tbl_ground_booking
             WHERE EXTRACT(MONTH FROM booking_date) = $1
-              AND EXTRACT(YEAR FROM booking_date) = $2
-              AND LOWER(status) = 'confirmed'
+            AND EXTRACT(YEAR FROM booking_date) = $2
+            AND LOWER(status) IN (
+                'confirmed',
+                'rescheduled approved',
+                'completed'
+            )
             ORDER BY booking_date ASC, time_slot ASC
             `,
             [selectedMonth, selectedYear]

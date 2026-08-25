@@ -1850,7 +1850,6 @@ exports.getEmployeeStatistics = async (req, res) => {
       return true;
     }
 
-    // Must be YYYY-MM-DD
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
       return false;
     }
@@ -1896,11 +1895,9 @@ exports.getEmployeeStatistics = async (req, res) => {
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
 
-  // First day of current month
   const defaultFromDate =
     `${year}-${String(month + 1).padStart(2, "0")}-01`;
 
-  // Last day of current month
   const lastDayDate = new Date(
     year,
     month + 1,
@@ -1914,12 +1911,11 @@ exports.getEmployeeStatistics = async (req, res) => {
       lastDayDate.getDate()
     ).padStart(2, "0")}`;
 
-  const fromDate = from_date || defaultFromDate;
-  const toDate = to_date || defaultToDate;
+  const fromDate =
+    from_date || defaultFromDate;
 
-  // ==========================================
-  // VALIDATE DATE RANGE
-  // ==========================================
+  const toDate =
+    to_date || defaultToDate;
 
   if (
     new Date(fromDate) >
@@ -1933,68 +1929,123 @@ exports.getEmployeeStatistics = async (req, res) => {
   }
 
   try {
-
     if (employee_type === "Player") {
       const result = await pool.query(
         `
-      SELECT
+        SELECT
 
-      (
-        SELECT COALESCE(SUM(p.admission_fee), 0)
-        FROM tbl_players p
-        WHERE p.admission_date >= $1::date
-          AND p.admission_date < ($2::date + INTERVAL '1 day')
-          AND COALESCE(p.admission_fee, 0) >= 0
-          AND COALESCE(p.admission_fee, 0) <> 'NaN'::numeric
-      ) AS admission_fee,
+          (
+            SELECT COALESCE(
+              SUM(p.admission_fee),
+              0
+            )
+            FROM tbl_players p
+            WHERE p.admission_date >= $1::date
+              AND p.admission_date <
+                  ($2::date + INTERVAL '1 day')
+              AND COALESCE(p.admission_fee, 0) >= 0
+              AND COALESCE(p.admission_fee, 0)
+                  <> 'NaN'::numeric
+          ) AS admission_fee,
 
-      (
-        SELECT COALESCE(SUM(regular_amount), 0)
-        FROM (
+          (
+            SELECT COALESCE(
+              SUM(regular_amount),
+              0
+            )
+            FROM (
 
-          SELECT
-            COALESCE(pf.amount, 0) AS regular_amount
-          FROM tbl_player_fees pf
-          WHERE pf.status = 'Paid'
-            AND pf.payment_date >= $1::date
-            AND pf.payment_date < ($2::date + INTERVAL '1 day')
+              SELECT
+                COALESCE(
+                  pf.amount,
+                  0
+                ) AS regular_amount
+              FROM tbl_player_fees pf
+              WHERE pf.status = 'Paid'
+                AND pf.is_active = TRUE
+                AND pf.payment_date >= $1::date
+                AND pf.payment_date <
+                    ($2::date + INTERVAL '1 day')
 
-          UNION ALL
+              UNION ALL
 
-          SELECT
-            COALESCE(p.regular_fee, 0) AS regular_amount
-          FROM tbl_players p
-          WHERE LOWER(TRIM(p.fee_type)) = 'regular fee'
-            AND COALESCE(p.regular_fee, 0) >= 0
-            AND p.regular_fee <> 'NaN'::numeric
-            AND p.admission_date >= $1::date
-            AND p.admission_date < ($2::date + INTERVAL '1 day')
+              SELECT
+                COALESCE(
+                  p.regular_fee,
+                  0
+                ) AS regular_amount
+              FROM tbl_players p
+              WHERE p.fee_status = 'Paid'
+                AND COALESCE(
+                  p.regular_fee,
+                  0
+                ) >= 0
+                AND p.regular_fee <> 'NaN'::numeric
+                AND p.admission_date >= $1::date
+                AND p.admission_date <
+                    ($2::date + INTERVAL '1 day')
 
-        ) AS regular_revenue_data
-      ) AS regular_fee,
+            ) AS regular_revenue_data
+          ) AS regular_fee,
 
-      (
-        SELECT COALESCE(SUM(o.fee_amount), 0)
-        FROM tbl_one_on_one_applications o
-        WHERE o.application_date >= $1::date
-          AND o.application_date < ($2::date + INTERVAL '1 day')
-      ) AS one_on_one_fee,
+          (
+            SELECT COALESCE(
+              SUM(o.fee_amount),
+              0
+            )
+            FROM tbl_one_on_one_applications o
+            WHERE o.is_active = TRUE
+              AND o.payment_status = 'Paid'
+              AND o.application_date >= $1::date
+              AND o.application_date <
+                  ($2::date + INTERVAL '1 day')
+          ) AS one_on_one_fee,
 
-      (
-        SELECT COALESCE(SUM(o.fee_amount), 0)
-        FROM tbl_one_on_one_applications o
-        INNER JOIN tbl_players p
-          ON p.player_id = o.player_id
-        WHERE o.application_date >= $1::date
-          AND o.application_date < ($2::date + INTERVAL '1 day')
-          AND p.fee_type = 'Admission Fee'
-          AND p.regular_fee = 0
-      ) AS only_one_on_one_fee
-    `,
-        [fromDate, toDate]
+          (
+            SELECT COALESCE(
+              SUM(o.fee_amount),
+              0
+            )
+            FROM tbl_one_on_one_applications o
+            INNER JOIN tbl_players p
+              ON p.player_id = o.player_id
+            WHERE o.is_active = TRUE
+              AND o.payment_status = 'Paid'
+              AND o.application_date >= $1::date
+              AND o.application_date <
+                  ($2::date + INTERVAL '1 day')
+              AND LOWER(
+                    TRIM(p.fee_type)
+                  ) = 'admission fee'
+              AND COALESCE(
+                    p.regular_fee,
+                    0
+                  ) = 0
+          ) AS only_one_on_one_fee
+        `,
+        [
+          fromDate,
+          toDate,
+        ]
       );
 
       const row = result.rows[0];
+
+      const admissionFee =
+        Number(row.admission_fee || 0);
+
+      const regularFee =
+        Number(row.regular_fee || 0);
+
+      const totalOneOnOneFee =
+        Number(row.one_on_one_fee || 0);
+
+      const onlyOneOnOneFee =
+        Number(row.only_one_on_one_fee || 0);
+
+      const normalOneOnOneFee =
+        totalOneOnOneFee -
+        onlyOneOnOneFee;
 
       return sendSuccessResponse(
         res,
@@ -2002,31 +2053,13 @@ exports.getEmployeeStatistics = async (req, res) => {
         "Player statistics retrieved successfully.",
         {
           employee_type: "Player",
-
           from_date: fromDate,
           to_date: toDate,
-
           statistics: {
-
-            admission_fee: Number(
-              row.admission_fee || 0
-            ),
-
-            regular_fee: Number(
-              row.regular_fee || 0
-            ),
-
-            // one_on_one_fee: Number(
-            //   row.one_on_one_fee || 0
-            // ),
-
-            one_on_one_fee: Number(row.one_on_one_fee) - Number(
-              row.only_one_on_one_fee
-            ),
-
-            only_one_on_one_fee: Number(
-              row.only_one_on_one_fee || 0
-            ),
+            admission_fee: admissionFee,
+            regular_fee: regularFee,
+            one_on_one_fee: normalOneOnOneFee,
+            only_one_on_one_fee: onlyOneOnOneFee,
           },
         }
       );
@@ -2036,7 +2069,6 @@ exports.getEmployeeStatistics = async (req, res) => {
       const result = await pool.query(
         `
         SELECT
-
           COUNT(*) AS total_staff,
 
           COUNT(*) FILTER (
@@ -2054,9 +2086,13 @@ exports.getEmployeeStatistics = async (req, res) => {
         FROM tbl_staff
 
         WHERE join_date >= $1::date
-          AND join_date <= $2::date
+          AND join_date <
+              ($2::date + INTERVAL '1 day')
         `,
-        [fromDate, toDate]
+        [
+          fromDate,
+          toDate,
+        ]
       );
 
       const row = result.rows[0];
@@ -2069,23 +2105,18 @@ exports.getEmployeeStatistics = async (req, res) => {
           employee_type: "Staff",
           from_date: fromDate,
           to_date: toDate,
-
           statistics: {
-            total_staff: Number(
-              row.total_staff || 0
-            ),
+            total_staff:
+              Number(row.total_staff || 0),
 
-            active_staff: Number(
-              row.active_staff || 0
-            ),
+            active_staff:
+              Number(row.active_staff || 0),
 
-            inactive_staff: Number(
-              row.inactive_staff || 0
-            ),
+            inactive_staff:
+              Number(row.inactive_staff || 0),
 
-            total_departments: Number(
-              row.total_departments || 0
-            )
+            total_departments:
+              Number(row.total_departments || 0),
           },
         }
       );
@@ -2095,7 +2126,6 @@ exports.getEmployeeStatistics = async (req, res) => {
       const result = await pool.query(
         `
         SELECT
-
           COUNT(*) AS total_trainers,
 
           COUNT(*) FILTER (
@@ -2109,7 +2139,10 @@ exports.getEmployeeStatistics = async (req, res) => {
           COALESCE(
             ROUND(
               AVG(
-                experience::numeric
+                NULLIF(
+                  experience,
+                  ''
+                )::numeric
               ),
               1
             ),
@@ -2119,9 +2152,13 @@ exports.getEmployeeStatistics = async (req, res) => {
         FROM tbl_coach
 
         WHERE join_date >= $1::date
-          AND join_date <= $2::date
+          AND join_date <
+              ($2::date + INTERVAL '1 day')
         `,
-        [fromDate, toDate]
+        [
+          fromDate,
+          toDate,
+        ]
       );
 
       const row = result.rows[0];
@@ -2134,23 +2171,18 @@ exports.getEmployeeStatistics = async (req, res) => {
           employee_type: "Coach",
           from_date: fromDate,
           to_date: toDate,
-
           statistics: {
-            total_trainers: Number(
-              row.total_trainers || 0
-            ),
+            total_trainers:
+              Number(row.total_trainers || 0),
 
-            active_trainers: Number(
-              row.active_trainers || 0
-            ),
+            active_trainers:
+              Number(row.active_trainers || 0),
 
-            inactive_trainers: Number(
-              row.inactive_trainers || 0
-            ),
+            inactive_trainers:
+              Number(row.inactive_trainers || 0),
 
-            average_experience: Number(
-              row.average_experience || 0
-            ),
+            average_experience:
+              Number(row.average_experience || 0),
           },
         }
       );
@@ -2169,4 +2201,5 @@ exports.getEmployeeStatistics = async (req, res) => {
     );
   }
 };
+
 

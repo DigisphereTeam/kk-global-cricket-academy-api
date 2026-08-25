@@ -8,7 +8,6 @@ exports.getDashboardStatistics = async (req, res) => {
   try {
     const statisticsQuery = `
       SELECT
-
         (
           SELECT COUNT(*)
           FROM tbl_players
@@ -35,40 +34,121 @@ exports.getDashboardStatistics = async (req, res) => {
           FROM tbl_ground_booking
           WHERE status = 'Pending'
         ) AS approvals;
-      `;
-
+    `;
 
     const revenueQuery = `
-      SELECT
+      WITH revenue_data AS (
 
-        (
-          SELECT COUNT(*) AS pending_fee_count
-        FROM (
+        SELECT
+          COALESCE((
+            SELECT SUM(regular_amount)
+            FROM (
+              SELECT COALESCE(pf.amount, 0) AS regular_amount
+              FROM tbl_player_fees pf
+              WHERE pf.status = 'Paid'
+                AND pf.payment_date >= DATE_TRUNC('month', CURRENT_DATE)
+                AND pf.payment_date <
+                    DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
 
-    /* =========================
-       REGULAR PLAYERS
-       ========================= */
+              UNION ALL
 
-    SELECT DISTINCT p.player_id
-    FROM tbl_players p
-    WHERE p.is_active = TRUE
-      AND p.fee_type = 'Regular Fee'
-      AND p.regular_fee >= 0
-      AND p.admission_date <= CURRENT_DATE
+              SELECT COALESCE(p.regular_fee, 0) AS regular_amount
+              FROM tbl_players p
+              WHERE COALESCE(p.regular_fee, 0) > 0
+                AND p.regular_fee <> 'NaN'::numeric
+                AND p.admission_date >= DATE_TRUNC('month', CURRENT_DATE)
+                AND p.admission_date <
+                    DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+            ) regular_data
+          ), 0) AS regular_revenue,
 
-      -- Paid/covered last month
-      AND (
-          -- First month payment was stored in tbl_players
+          COALESCE((
+            SELECT SUM(fee_amount)
+            FROM tbl_one_on_one_applications
+            WHERE application_date >= DATE_TRUNC('month', CURRENT_DATE)
+              AND application_date <
+                  DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+          ), 0) AS one_on_one_revenue,
+
+          COALESCE((
+            SELECT SUM(hostel_fee)
+            FROM tbl_players
+            WHERE hostel_fee > 0
+              AND admission_date >= DATE_TRUNC('month', CURRENT_DATE)
+              AND admission_date <
+                  DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+          ), 0) AS hostel_fee_revenue,
+
+          COALESCE((
+            SELECT SUM(total_amount)
+            FROM tbl_ground_booking
+            WHERE status IN ('Confirmed', 'Completed')
+              AND booking_date >= DATE_TRUNC('month', CURRENT_DATE)
+              AND booking_date <
+                  DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+          ), 0) AS ground_revenue,
+
+          COALESCE((
+            SELECT SUM(net_salary)
+            FROM tbl_employee_salary
+            WHERE payment_date >= DATE_TRUNC('month', CURRENT_DATE)
+              AND payment_date <
+                  DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+          ), 0) AS salary_expense,
+
+          COALESCE((
+            SELECT SUM(amount)
+            FROM tbl_expenditure
+            WHERE expenditure_date >= DATE_TRUNC('month', CURRENT_DATE)
+              AND expenditure_date <
+                  DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+          ), 0) AS total_expenditure
+
+      ),
+
+      calculated_revenue AS (
+
+        SELECT
+          regular_revenue,
+          one_on_one_revenue,
+          hostel_fee_revenue,
+          ground_revenue,
+          salary_expense,
+          total_expenditure,
+
           (
+            regular_revenue
+            + one_on_one_revenue
+            + hostel_fee_revenue
+            + ground_revenue
+          ) AS monthly_revenue,
+
+          (
+            salary_expense
+            + total_expenditure
+          ) AS monthly_expenses
+
+        FROM revenue_data
+      ),
+
+      pending_players AS (
+
+        SELECT DISTINCT p.player_id
+        FROM tbl_players p
+        WHERE p.is_active = TRUE
+          AND p.regular_fee >= 0
+          AND p.admission_date <= CURRENT_DATE
+
+          AND (
+            (
               DATE_TRUNC('month', p.admission_date) =
-                  DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
+                DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
               AND p.fee_status = 'Paid'
-          )
+            )
 
-          OR
+            OR
 
-          -- Subsequent month payment was stored in tbl_player_fees
-          EXISTS (
+            EXISTS (
               SELECT 1
               FROM tbl_player_fees pf_last
               WHERE pf_last.player_id = p.player_id
@@ -78,214 +158,89 @@ exports.getDashboardStatistics = async (req, res) => {
                     DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
                 AND pf_last.payment_date <
                     DATE_TRUNC('month', CURRENT_DATE)
+            )
           )
-      )
 
-      -- Has NOT paid this month
-      AND NOT EXISTS (
-          SELECT 1
-          FROM tbl_player_fees pf_current
-          WHERE pf_current.player_id = p.player_id
-            AND pf_current.status = 'Paid'
-            AND pf_current.is_active = TRUE
-            AND pf_current.payment_date >=
-                DATE_TRUNC('month', CURRENT_DATE)
-            AND pf_current.payment_date <
-                DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
-      )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM tbl_player_fees pf_current
+            WHERE pf_current.player_id = p.player_id
+              AND pf_current.status = 'Paid'
+              AND pf_current.is_active = TRUE
+              AND pf_current.payment_date >=
+                  DATE_TRUNC('month', CURRENT_DATE)
+              AND pf_current.payment_date <
+                  DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+          )
 
+        UNION
 
-    UNION
+        SELECT DISTINCT pf_last.player_id
+        FROM tbl_player_fees pf_last
+        WHERE pf_last.status = 'Paid'
+          AND pf_last.is_active = TRUE
+          AND pf_last.payment_date >=
+              DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
+          AND pf_last.payment_date <
+              DATE_TRUNC('month', CURRENT_DATE)
 
+          AND NOT EXISTS (
+            SELECT 1
+            FROM tbl_player_fees pf_current
+            WHERE pf_current.player_id = pf_last.player_id
+              AND pf_current.status = 'Paid'
+              AND pf_current.is_active = TRUE
+              AND pf_current.payment_date >=
+                  DATE_TRUNC('month', CURRENT_DATE)
+              AND pf_current.payment_date <
+                  DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+          )
 
-    /* =========================
-       PLAYERS FROM FEE TABLE
-       ========================= */
-
-    SELECT DISTINCT pf_last.player_id
-    FROM tbl_player_fees pf_last
-    WHERE pf_last.status = 'Paid'
-      AND pf_last.is_active = TRUE
-
-      -- Paid last month
-      AND pf_last.payment_date >=
-          DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
-      AND pf_last.payment_date <
-          DATE_TRUNC('month', CURRENT_DATE)
-
-      -- Has NOT paid this month
-      AND NOT EXISTS (
-          SELECT 1
-          FROM tbl_player_fees pf_current
-          WHERE pf_current.player_id = pf_last.player_id
-            AND pf_current.status = 'Paid'
-            AND pf_current.is_active = TRUE
-            AND pf_current.payment_date >=
-                DATE_TRUNC('month', CURRENT_DATE)
-            AND pf_current.payment_date <
-                DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
-      )
-
-
-    UNION
-
-
-    /* =========================
-       ONE-ON-ONE PLAYERS
-       ========================= */
+        UNION
 
         SELECT DISTINCT last_month.player_id
         FROM tbl_one_on_one_applications last_month
         WHERE last_month.is_active = TRUE
           AND last_month.payment_status = 'Paid'
-
-          -- Paid last month
-        AND last_month.application_date >=
+          AND last_month.application_date >=
               DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
-        AND last_month.application_date <
+          AND last_month.application_date <
               DATE_TRUNC('month', CURRENT_DATE)
 
-          -- Has NOT paid this month
-        AND NOT EXISTS (
-              SELECT 1
-              FROM tbl_one_on_one_applications this_month
-              WHERE this_month.player_id = last_month.player_id
-                AND this_month.is_active = TRUE
-                AND this_month.payment_status = 'Paid'
-                AND this_month.application_date >=
-                    DATE_TRUNC('month', CURRENT_DATE)
-                AND this_month.application_date <
-                    DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM tbl_one_on_one_applications this_month
+            WHERE this_month.player_id = last_month.player_id
+              AND this_month.is_active = TRUE
+              AND this_month.payment_status = 'Paid'
+              AND this_month.application_date >=
+                  DATE_TRUNC('month', CURRENT_DATE)
+              AND this_month.application_date <
+                  DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
           )
+      )
 
-          ) AS pending_players
+      SELECT
+        (
+          SELECT COUNT(*)
+          FROM pending_players
+        ) AS pending_fees,
 
-          ) AS pending_fees,
-
-
+        regular_revenue,
+        one_on_one_revenue,
+        hostel_fee_revenue,
+        ground_revenue,
+        salary_expense,
+        total_expenditure,
+        monthly_revenue,
+        monthly_expenses,
 
         (
+          monthly_revenue - monthly_expenses
+        ) AS monthly_net_revenue
 
-          SELECT COALESCE(SUM(regular_amount), 0)
-          FROM (
-
-            SELECT
-              COALESCE(pf.amount, 0) AS regular_amount
-            FROM tbl_player_fees pf
-            WHERE pf.status = 'Paid'
-              AND DATE_TRUNC('month', pf.payment_date)
-                  = DATE_TRUNC('month', CURRENT_DATE)
-
-            UNION ALL
-
-            SELECT
-              COALESCE(p.regular_fee, 0) AS regular_amount
-            FROM tbl_players p
-            WHERE p.regular_fee > 0
-              AND DATE_TRUNC('month', p.admission_date)
-                  = DATE_TRUNC('month', CURRENT_DATE)
-
-          ) AS regular_revenue_data
-
-        ) AS regular_revenue,
-
-
-        (
-          SELECT COALESCE(SUM(fee_amount), 0)
-
-          FROM tbl_one_on_one_applications
-
-          WHERE DATE_TRUNC('month', application_date)
-                = DATE_TRUNC('month', CURRENT_DATE)
-
-        ) AS one_on_one_revenue,
-
-
-        (
-        SELECT COALESCE(
-          SUM(total_amount),
-          0
-        )
-        FROM tbl_ground_booking
-        WHERE status IN ('Confirmed', 'Completed')
-          AND DATE_TRUNC('month', booking_date)
-              = DATE_TRUNC('month', CURRENT_DATE)
-      ) AS ground_revenue,
-
-
-        (
-          SELECT COALESCE(SUM(net_salary), 0)
-
-          FROM tbl_employee_salary
-
-          WHERE DATE_TRUNC('month', payment_date)
-                = DATE_TRUNC('month', CURRENT_DATE)
-
-        ) AS salary_expense,
-
-
-        (
-          SELECT COALESCE(SUM(amount), 0)
-
-          FROM tbl_expenditure
-
-          WHERE DATE_TRUNC('month', expenditure_date)
-                = DATE_TRUNC('month', CURRENT_DATE)
-
-        ) AS total_expenditure,
-
-
-        (
-          SELECT COALESCE(SUM(amount), 0)
-          FROM (
-
-            SELECT amount
-            FROM tbl_player_fees
-            WHERE status = 'Paid'
-              AND payment_date >= DATE_TRUNC('month', CURRENT_DATE)
-              AND payment_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
-
-            UNION ALL
-
-            SELECT regular_fee
-            FROM tbl_players
-            WHERE regular_fee > 0
-              AND admission_date >= DATE_TRUNC('month', CURRENT_DATE)
-              AND admission_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
-
-            UNION ALL
-
-            SELECT fee_amount
-            FROM tbl_one_on_one_applications
-            WHERE application_date >= DATE_TRUNC('month', CURRENT_DATE)
-              AND application_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
-
-            UNION ALL
-
-            SELECT total_amount
-            FROM tbl_ground_booking
-            WHERE status = 'Confirmed'
-              AND booking_date >= DATE_TRUNC('month', CURRENT_DATE)
-              AND booking_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
-
-            UNION ALL
-
-            SELECT -net_salary
-            FROM tbl_employee_salary
-            WHERE payment_date >= DATE_TRUNC('month', CURRENT_DATE)
-              AND payment_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
-
-            UNION ALL
-
-            SELECT -amount
-            FROM tbl_expenditure
-            WHERE expenditure_date >= DATE_TRUNC('month', CURRENT_DATE)
-              AND expenditure_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
-
-          ) revenue
-          ) AS monthly_revenue
-        `;
-
+      FROM calculated_revenue;
+    `;
 
     const [
       statisticsResult,
@@ -295,10 +250,8 @@ exports.getDashboardStatistics = async (req, res) => {
       pool.query(revenueQuery),
     ]);
 
-
     const stats = statisticsResult.rows[0];
     const revenue = revenueResult.rows[0];
-
 
     return sendSuccessResponse(
       res,
@@ -330,7 +283,15 @@ exports.getDashboardStatistics = async (req, res) => {
         ),
 
         monthly_revenue: Number(
-          revenue.monthly_revenue
+          revenue.monthly_net_revenue // revenue.monthly_revenue
+        ),
+
+        monthly_expenses: Number(
+          revenue.monthly_expenses
+        ),
+
+        monthly_net_revenue: Number(
+          revenue.monthly_net_revenue
         ),
 
         regular_revenue: Number(
@@ -339,6 +300,10 @@ exports.getDashboardStatistics = async (req, res) => {
 
         one_on_one_revenue: Number(
           revenue.one_on_one_revenue
+        ),
+
+        hostel_fee_revenue: Number(
+          revenue.hostel_fee_revenue
         ),
 
         ground_revenue: Number(
@@ -356,7 +321,6 @@ exports.getDashboardStatistics = async (req, res) => {
     );
 
   } catch (error) {
-
     console.error(
       "Dashboard Error:",
       error
@@ -365,19 +329,16 @@ exports.getDashboardStatistics = async (req, res) => {
     return sendErrorResponse(
       res,
       500,
-      error.message ||
-      "Internal Server Error"
+      error.message || "Internal Server Error"
     );
   }
 };
 
+
+
 exports.getDashboardCharts = async (req, res) => {
   try {
     const [playerGrowth, feeCollection, attendance] = await Promise.all([
-
-      // =========================================
-      // Player Growth Chart
-      // =========================================
 
       pool.query(`
         WITH months AS (
@@ -416,32 +377,19 @@ exports.getDashboardCharts = async (req, res) => {
       `),
 
 
-      // =========================================
-      // Fee Collection
-      // =========================================
-
       pool.query(`
         SELECT
-
-          /* =====================================
-             PENDING FEES - PLAYER COUNT
-             ===================================== */
 
           (
             SELECT COUNT(*)
 
             FROM (
 
-              /* =========================
-                 REGULAR PLAYERS
-                 ========================= */
-
               SELECT DISTINCT p.player_id
 
               FROM tbl_players p
 
               WHERE p.is_active = TRUE
-                AND p.fee_type = 'Regular Fee'
                 AND p.regular_fee >= 0
                 AND p.admission_date <= CURRENT_DATE
 
@@ -492,10 +440,6 @@ exports.getDashboardCharts = async (req, res) => {
                   )
                 )
 
-                /* =========================
-                   HAS NOT PAID THIS MONTH
-                   ========================= */
-
                 AND NOT EXISTS (
                   SELECT 1
 
@@ -521,11 +465,6 @@ exports.getDashboardCharts = async (req, res) => {
 
               UNION
 
-
-              /* =========================
-                 PLAYERS FROM FEE TABLE
-                 ========================= */
-
               SELECT DISTINCT pf_last.player_id
 
               FROM tbl_player_fees pf_last
@@ -547,7 +486,6 @@ exports.getDashboardCharts = async (req, res) => {
                       CURRENT_DATE
                     )
 
-                /* Has NOT paid this month */
 
                 AND NOT EXISTS (
                   SELECT 1
@@ -575,11 +513,6 @@ exports.getDashboardCharts = async (req, res) => {
 
 
               UNION
-
-
-              /* =========================
-                 ONE-ON-ONE PLAYERS
-                 ========================= */
 
               SELECT DISTINCT last_month.player_id
 
@@ -653,7 +586,6 @@ exports.getDashboardCharts = async (req, res) => {
               FROM tbl_players p
 
               WHERE p.is_active = TRUE
-                AND p.fee_type = 'Regular Fee'
                 AND p.regular_fee >= 0
                 AND p.admission_date <= CURRENT_DATE
 
