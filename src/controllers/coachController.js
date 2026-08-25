@@ -20,37 +20,74 @@ exports.addCoach = async (req, res) => {
     advance_remarks,
   } = req.body;
 
-  const errors = {};
-
   const phoneRegex = /^[6-9]\d{9}$/;
   const nameRegex = /^[A-Za-z\s.'-]+$/;
 
   if (!full_name?.trim()) {
-    errors.full_name = "Full name is required.";
-  } else if (full_name.trim().length > 250) {
-    errors.full_name = "Full name cannot exceed 250 characters.";
-  } else if (!nameRegex.test(full_name.trim())) {
-    errors.full_name = "Full name contains invalid characters.";
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Full name is required.",
+    });
+  }
+
+  if (full_name.trim().length > 250) {
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Full name cannot exceed 250 characters.",
+    });
+  }
+
+  if (!nameRegex.test(full_name.trim())) {
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Full name contains invalid characters.",
+    });
   }
 
   if (!phone_number?.trim()) {
-    errors.phone_number = "Phone number is required.";
-  } else if (!phoneRegex.test(phone_number.trim())) {
-    errors.phone_number = "Invalid phone number.";
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Phone number is required.",
+    });
+  }
+
+  if (!phoneRegex.test(phone_number.trim())) {
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Invalid phone number.",
+    });
   }
 
   if (
     secondary_phone_number &&
     !phoneRegex.test(secondary_phone_number.trim())
   ) {
-    errors.secondary_phone_number = "Invalid secondary phone number.";
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Invalid secondary phone number.",
+    });
   }
 
   if (!specialization?.trim()) {
-    errors.specialization = "Specialization is required.";
-  } else if (specialization.trim().length > 250) {
-    errors.specialization =
-      "Specialization cannot exceed 250 characters.";
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Specialization is required.",
+    });
+  }
+
+  if (specialization.trim().length > 250) {
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Specialization cannot exceed 250 characters.",
+    });
   }
 
   if (
@@ -58,12 +95,22 @@ exports.addCoach = async (req, res) => {
     experience === null ||
     experience === ""
   ) {
-    errors.experience = "Experience is required.";
-  } else if (
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Experience is required.",
+    });
+  }
+
+  if (
     isNaN(Number(experience)) ||
     Number(experience) < 0
   ) {
-    errors.experience = "Experience cannot be negative.";
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Experience cannot be negative.",
+    });
   }
 
   if (
@@ -71,26 +118,55 @@ exports.addCoach = async (req, res) => {
     salary === null ||
     salary === ""
   ) {
-    errors.salary = "Salary is required.";
-  } else if (
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Salary is required.",
+    });
+  }
+
+  if (
     isNaN(Number(salary)) ||
     Number(salary) <= 0
   ) {
-    errors.salary = "Salary must be greater than zero.";
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Salary must be greater than zero.",
+    });
   }
 
   if (!join_date) {
-    errors.join_date = "Join date is required.";
-  } else if (isNaN(Date.parse(join_date))) {
-    errors.join_date = "Invalid join date.";
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Join date is required.",
+    });
+  }
+
+  if (isNaN(Date.parse(join_date))) {
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Invalid join date.",
+    });
   }
 
   if (contact_name) {
     if (contact_name.trim().length > 250) {
-      errors.contact_name =
-        "Contact name cannot exceed 250 characters.";
-    } else if (!nameRegex.test(contact_name.trim())) {
-      errors.contact_name = "Invalid contact name.";
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: "Contact name cannot exceed 250 characters.",
+      });
+    }
+
+    if (!nameRegex.test(contact_name.trim())) {
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: "Invalid contact name.",
+      });
     }
   }
 
@@ -98,21 +174,30 @@ exports.addCoach = async (req, res) => {
     contact_relation &&
     contact_relation.trim().length > 100
   ) {
-    errors.contact_relation =
-      "Contact relation cannot exceed 100 characters.";
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Contact relation cannot exceed 100 characters.",
+    });
   }
 
   if (
     contact_phone &&
     !phoneRegex.test(contact_phone.trim())
   ) {
-    errors.contact_phone =
-      "Invalid contact phone number.";
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Invalid contact phone number.",
+    });
   }
 
   if (remarks && remarks.trim().length > 1000) {
-    errors.remarks =
-      "Remarks cannot exceed 1000 characters.";
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Remarks cannot exceed 1000 characters.",
+    });
   }
 
   if (
@@ -124,33 +209,39 @@ exports.addCoach = async (req, res) => {
       isNaN(Number(advance_amount)) ||
       Number(advance_amount) <= 0
     ) {
-      errors.advance_amount =
-        "Advance amount must be greater than zero.";
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: "Advance amount must be greater than zero.",
+      });
     }
 
     if (!advance_date) {
-      errors.advance_date =
-        "Advance date is required when advance amount is provided.";
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message:
+          "Advance date is required when advance amount is provided.",
+      });
     }
   }
 
   if (advance_date && isNaN(Date.parse(advance_date))) {
-    errors.advance_date = "Invalid advance date.";
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Invalid advance date.",
+    });
   }
 
   if (
     advance_remarks &&
     advance_remarks.trim().length > 1000
   ) {
-    errors.advance_remarks =
-      "Advance remarks cannot exceed 1000 characters.";
-  }
-
-  if (Object.keys(errors).length > 0) {
     return res.status(400).json({
       success: false,
-      message: "Validation failed.",
-      errors,
+      statusCode: 400,
+      message: "Advance remarks cannot exceed 1000 characters.",
     });
   }
 

@@ -30,37 +30,84 @@ exports.createPlayerAdmission = async (req, res) => {
     blood_group,
   } = req.body;
 
-  const errors = {};
-
   const phoneRegex = /^[6-9]\d{9}$/;
   const nameRegex = /^[A-Za-z\s.'-]+$/;
 
   if (!full_name?.trim()) {
-    errors.full_name = "Full name is required.";
-  } else if (full_name.trim().length > 250) {
-    errors.full_name = "Full name cannot exceed 250 characters.";
-  } else if (!nameRegex.test(full_name.trim())) {
-    errors.full_name = "Full name contains invalid characters.";
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Full name is required.",
+    });
+  }
+
+  if (full_name.trim().length > 250) {
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Full name cannot exceed 250 characters.",
+    });
+  }
+
+  if (!nameRegex.test(full_name.trim())) {
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Full name contains invalid characters.",
+    });
   }
 
   if (!gender?.trim()) {
-    errors.gender = "Gender is required.";
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Gender is required.",
+    });
   }
 
-  if (!age || isNaN(age) || Number(age) <= 0 || Number(age) > 100) {
-    errors.age = "Age must be between 1 and 100.";
+  if (
+    !age ||
+    isNaN(age) ||
+    Number(age) <= 0 ||
+    Number(age) > 100
+  ) {
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Age must be between 1 and 100.",
+    });
   }
 
   if (!phone_number?.trim()) {
-    errors.phone_number = "Phone number is required.";
-  } else if (!phoneRegex.test(phone_number.trim())) {
-    errors.phone_number = "Invalid phone number.";
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Phone number is required.",
+    });
+  }
+
+  if (!phoneRegex.test(phone_number.trim())) {
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Invalid phone number.",
+    });
   }
 
   if (!address?.trim()) {
-    errors.address = "Address is required.";
-  } else if (address.trim().length > 500) {
-    errors.address = "Address cannot exceed 500 characters.";
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Address is required.",
+    });
+  }
+
+  if (address.trim().length > 500) {
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Address cannot exceed 500 characters.",
+    });
   }
 
   if (
@@ -68,12 +115,19 @@ exports.createPlayerAdmission = async (req, res) => {
     isNaN(admission_fee) ||
     Number(admission_fee) <= 0
   ) {
-    errors.admission_fee =
-      "Admission fee must be greater than zero.";
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Admission fee must be greater than zero.",
+    });
   }
 
   if (!payment_type?.trim()) {
-    errors.payment_type = "Payment type is required.";
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Payment type is required.",
+    });
   }
 
   if (
@@ -82,8 +136,11 @@ exports.createPlayerAdmission = async (req, res) => {
     hostel_fee !== "" &&
     (isNaN(hostel_fee) || Number(hostel_fee) < 0)
   ) {
-    errors.hostel_fee =
-      "Hostel fee cannot be negative.";
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Hostel fee cannot be negative.",
+    });
   }
 
   if (
@@ -92,117 +149,139 @@ exports.createPlayerAdmission = async (req, res) => {
     regular_fee !== "" &&
     (isNaN(regular_fee) || Number(regular_fee) < 0)
   ) {
-    errors.regular_fee =
-      "Regular fee cannot be negative.";
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Regular fee cannot be negative.",
+    });
   }
 
-  if (
-    father_name &&
-    (
-      father_name.trim().length > 250 ||
-      !nameRegex.test(father_name.trim())
-    )
-  ) {
-    errors.father_name = "Invalid father name.";
+  if (father_name) {
+    if (father_name.trim().length > 250) {
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: "Father name cannot exceed 250 characters.",
+      });
+    }
+
+    if (!nameRegex.test(father_name.trim())) {
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: "Invalid father name.",
+      });
+    }
   }
 
-  if (
-    mother_name &&
-    (
-      mother_name.trim().length > 250 ||
-      !nameRegex.test(mother_name.trim())
-    )
-  ) {
-    errors.mother_name = "Invalid mother name.";
+  if (mother_name) {
+    if (mother_name.trim().length > 250) {
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: "Mother name cannot exceed 250 characters.",
+      });
+    }
+
+    if (!nameRegex.test(mother_name.trim())) {
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: "Invalid mother name.",
+      });
+    }
   }
 
-  if (
-    contact_name &&
-    (
-      contact_name.trim().length > 250 ||
-      !nameRegex.test(contact_name.trim())
-    )
-  ) {
-    errors.contact_name = "Invalid contact name.";
+  if (contact_name) {
+    if (contact_name.trim().length > 250) {
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: "Contact name cannot exceed 250 characters.",
+      });
+    }
+
+    if (!nameRegex.test(contact_name.trim())) {
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: "Invalid contact name.",
+      });
+    }
   }
 
-  if (
-    father_phone &&
-    !phoneRegex.test(father_phone.trim())
-  ) {
-    errors.father_phone =
-      "Invalid father phone number.";
+  if (father_phone && !phoneRegex.test(father_phone.trim())) {
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Invalid father phone number.",
+    });
   }
 
-  if (
-    mother_phone &&
-    !phoneRegex.test(mother_phone.trim())
-  ) {
-    errors.mother_phone =
-      "Invalid mother phone number.";
+  if (mother_phone && !phoneRegex.test(mother_phone.trim())) {
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Invalid mother phone number.",
+    });
   }
 
-  if (
-    contact_phone &&
-    !phoneRegex.test(contact_phone.trim())
-  ) {
-    errors.contact_phone =
-      "Invalid emergency contact phone number.";
+  if (contact_phone && !phoneRegex.test(contact_phone.trim())) {
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Invalid emergency contact phone number.",
+    });
   }
 
-  if (
-    date_of_birth &&
-    isNaN(Date.parse(date_of_birth))
-  ) {
-    errors.date_of_birth =
-      "Invalid date of birth.";
+  if (date_of_birth && isNaN(Date.parse(date_of_birth))) {
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Invalid date of birth.",
+    });
   }
 
-  if (
-    admission_date &&
-    isNaN(Date.parse(admission_date))
-  ) {
-    errors.admission_date =
-      "Invalid admission date.";
+  if (admission_date && isNaN(Date.parse(admission_date))) {
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Invalid admission date.",
+    });
   }
 
   if (
     father_occupation &&
     father_occupation.trim().length > 250
   ) {
-    errors.father_occupation =
-      "Father occupation cannot exceed 250 characters.";
-  }
-
-  if (
-    relation &&
-    relation.trim().length > 100
-  ) {
-    errors.relation =
-      "Relation cannot exceed 100 characters.";
-  }
-
-  if (
-    blood_group &&
-    blood_group.trim().length > 10
-  ) {
-    errors.blood_group =
-      "Invalid blood group.";
-  }
-
-  if (
-    remarks &&
-    remarks.trim().length > 1000
-  ) {
-    errors.remarks =
-      "Remarks cannot exceed 1000 characters.";
-  }
-
-  if (Object.keys(errors).length > 0) {
     return res.status(400).json({
       success: false,
-      message: "Validation failed.",
-      errors,
+      statusCode: 400,
+      message: "Father occupation cannot exceed 250 characters.",
+    });
+  }
+
+  if (relation && relation.trim().length > 100) {
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Relation cannot exceed 100 characters.",
+    });
+  }
+
+  if (blood_group && blood_group.trim().length > 10) {
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Invalid blood group.",
+    });
+  }
+
+  if (remarks && remarks.trim().length > 1000) {
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      message: "Remarks cannot exceed 1000 characters.",
     });
   }
 
