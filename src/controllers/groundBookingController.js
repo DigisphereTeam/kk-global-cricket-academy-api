@@ -104,11 +104,35 @@ exports.createGroundBooking = async (req, res) => {
             );
         }
 
+        if (isNaN(Date.parse(booking_date))) {
+            return sendErrorResponse(
+                res,
+                400,
+                "Invalid booking date."
+            );
+        }
+
         const remaining_amount = total_amount - advance_paid;
 
         client = await pool.connect();
 
         await client.query("BEGIN");
+
+        const dateResult = await client.query(`
+            SELECT CURRENT_DATE AS current_date
+        `);
+
+        const currentDate = dateResult.rows[0].current_date;
+
+        if (booking_date < currentDate) {
+            await client.query("ROLLBACK");
+
+            return sendErrorResponse(
+                res,
+                400,
+                "Booking date cannot be in the past."
+            );
+        }
 
         const currentYear = new Date().getFullYear();
         const yearCode = String(currentYear).slice(-2);
