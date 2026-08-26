@@ -947,11 +947,22 @@ exports.updateApplication = async (req, res) => {
   const { application_id } = req.params;
 
   if (!application_id) {
-    return sendErrorResponse(res, 400, "Application ID is required");
+    return sendErrorResponse(
+      res,
+      400,
+      "Application ID is required"
+    );
   }
 
-  if (isNaN(application_id)) {
-    return sendErrorResponse(res, 400, "Invalid application ID");
+  if (
+    isNaN(application_id) ||
+    Number(application_id) <= 0
+  ) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Invalid application ID"
+    );
   }
 
   try {
@@ -970,51 +981,212 @@ exports.updateApplication = async (req, res) => {
 
     let index = 1;
 
+    const existingApplication = await pool.query(
+      `
+      SELECT
+        oa.application_id,
+        oa.player_id,
+        oa.coach_id,
+        oa.preferred_slot,
+        oa.application_date,
+        oa.application_type,
+        oa.focus_area,
+        oa.payment_type,
+        oa.fee_amount,
+        oa.monthly_performance_review,
+        oa.remarks,
+        p.full_name AS player_name,
+        p.is_active AS player_is_active,
+        c.full_name AS coach_name
+      FROM tbl_one_on_one_applications oa
+      INNER JOIN tbl_players p
+        ON oa.player_id = p.player_id
+      INNER JOIN tbl_coach c
+        ON oa.coach_id = c.coach_id
+      WHERE oa.application_id = $1
+      `,
+      [application_id]
+    );
+
+    if (existingApplication.rowCount === 0) {
+      return sendErrorResponse(
+        res,
+        404,
+        "Application not found"
+      );
+    }
+
+    const currentApplication =
+      existingApplication.rows[0];
+
+    if (currentApplication.player_is_active !== true) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Inactive player application cannot be updated"
+      );
+    }
+
+    if (req.body.coach_id !== undefined) {
+      if (
+        isNaN(req.body.coach_id) ||
+        Number(req.body.coach_id) <= 0
+      ) {
+        return sendErrorResponse(
+          res,
+          400,
+          "Invalid coach ID"
+        );
+      }
+
+      const coach = await pool.query(
+        `
+        SELECT
+          coach_id,
+          full_name
+        FROM tbl_coach
+        WHERE coach_id = $1
+        `,
+        [Number(req.body.coach_id)]
+      );
+
+      if (coach.rowCount === 0) {
+        return sendErrorResponse(
+          res,
+          404,
+          "Coach not found"
+        );
+      }
+    }
+
+    if (req.body.fee_amount !== undefined) {
+      if (
+        req.body.fee_amount === null ||
+        isNaN(req.body.fee_amount) ||
+        Number(req.body.fee_amount) <= 0
+      ) {
+        return sendErrorResponse(
+          res,
+          400,
+          "Fee amount must be greater than zero"
+        );
+      }
+    }
+
+    if (req.body.focus_area !== undefined) {
+      if (
+        typeof req.body.focus_area !== "string" ||
+        !req.body.focus_area.trim()
+      ) {
+        return sendErrorResponse(
+          res,
+          400,
+          "Focus area cannot be empty"
+        );
+      }
+    }
+
+    if (req.body.preferred_slot !== undefined) {
+      if (
+        typeof req.body.preferred_slot !== "string" ||
+        !req.body.preferred_slot.trim()
+      ) {
+        return sendErrorResponse(
+          res,
+          400,
+          "Preferred slot cannot be empty"
+        );
+      }
+    }
+
+    const finalCoachId =
+      req.body.coach_id !== undefined
+        ? Number(req.body.coach_id)
+        : Number(currentApplication.coach_id);
+
+    const finalPreferredSlot =
+      req.body.preferred_slot !== undefined
+        ? req.body.preferred_slot.trim()
+        : currentApplication.preferred_slot;
+
+    const coachSlotConflict = await pool.query(
+      `
+      SELECT
+        oa.application_id,
+        oa.player_id,
+        p.full_name AS player_name,
+        oa.preferred_slot
+      FROM tbl_one_on_one_applications oa
+      INNER JOIN tbl_players p
+        ON oa.player_id = p.player_id
+      WHERE oa.coach_id = $1
+        AND oa.preferred_slot = $2
+        AND oa.application_id <> $3
+      LIMIT 1
+      `,
+      [
+        finalCoachId,
+        finalPreferredSlot,
+        application_id,
+      ]
+    );
+
+    if (coachSlotConflict.rowCount > 0) {
+      return sendErrorResponse(
+        res,
+        409,
+        `Coach is already booked for this time slot by ${coachSlotConflict.rows[0].player_name}.`
+      );
+    }
+
     for (const field of allowedFields) {
       if (req.body[field] !== undefined) {
-        updates.push(`${field} = $${index}`);
-        values.push(req.body[field]);
+        let value = req.body[field];
+
+        if (field === "coach_id") {
+          value = Number(value);
+        }
+
+        if (field === "fee_amount") {
+          value = Number(value);
+        }
+
+        if (
+          field === "focus_area" ||
+          field === "preferred_slot"
+        ) {
+          value = value.trim();
+        }
+
+        if (
+          field === "monthly_performance_review" ||
+          field === "remarks"
+        ) {
+          value =
+            value === "" ? null : value;
+        }
+
+        updates.push(
+          `${field} = $${index}`
+        );
+
+        values.push(value);
         index++;
       }
     }
 
     if (updates.length === 0) {
-      return sendErrorResponse(res, 400, "No fields provided to update");
+      return sendErrorResponse(
+        res,
+        400,
+        "No fields provided to update"
+      );
     }
 
-    // Check application exists
-    const existingApplication = await pool.query(
-      `
-      SELECT application_id
-      FROM tbl_one_on_one_applications
-      WHERE application_id = $1
-      `,
-      [application_id],
+    updates.push(
+      "updated_at = CURRENT_TIMESTAMP"
     );
 
-    if (existingApplication.rowCount === 0) {
-      return sendErrorResponse(res, 404, "Application not found");
-    }
-
-    // Check coach if updating coach_id
-    if (req.body.coach_id !== undefined) {
-      const coach = await pool.query(
-        `
-        SELECT coach_id
-        FROM tbl_coach
-        WHERE coach_id = $1
-        `,
-        [req.body.coach_id],
-      );
-
-      if (coach.rowCount === 0) {
-        return sendErrorResponse(res, 404, "Coach not found");
-      }
-    }
-
-    updates.push("updated_at = CURRENT_TIMESTAMP");
-
-    // Add application_id for WHERE condition
     values.push(application_id);
 
     const result = await pool.query(
@@ -1022,25 +1194,84 @@ exports.updateApplication = async (req, res) => {
       UPDATE tbl_one_on_one_applications
       SET ${updates.join(", ")}
       WHERE application_id = $${index}
-      RETURNING *
+      RETURNING *;
       `,
-      values,
+      values
+    );
+
+    const updatedApplication =
+      result.rows[0];
+
+    const updatedCoachResult =
+      await pool.query(
+        `
+        SELECT
+          coach_id,
+          full_name
+        FROM tbl_coach
+        WHERE coach_id = $1
+        `,
+        [updatedApplication.coach_id]
+      );
+
+    const updatedCoach =
+      updatedCoachResult.rows[0];
+
+    const userResult = await pool.query(
+      `
+      SELECT
+        full_name
+      FROM tbl_users
+      WHERE user_id = $1
+      `,
+      [req.user.user_id]
+    );
+
+    const performedBy =
+      userResult.rows[0]?.full_name ||
+      "System";
+
+    await pool.query(
+      `
+      INSERT INTO tbl_notification_logs
+      (
+        module_name,
+        action,
+        description,
+        performed_by
+      )
+      VALUES
+      ($1, $2, $3, $4)
+      `,
+      [
+        "One-on-One Training",
+        "Updated",
+        `${currentApplication.player_name}'s one-on-one training application was updated. Coach: ${updatedCoach?.full_name || "N/A"}, Slot: ${updatedApplication.preferred_slot}.`,
+        performedBy,
+      ]
     );
 
     return sendSuccessResponse(
       res,
       200,
       "One-on-one application updated successfully",
-      result.rows[0],
+      updatedApplication
     );
   } catch (error) {
+    console.error(
+      "Update One-on-One Application Error:",
+      error
+    );
+
     return sendErrorResponse(
       res,
       500,
-      error.message || "Internal Server Error",
+      error.message ||
+      "Internal Server Error"
     );
   }
 };
+
 
 exports.deleteApplication = async (req, res) => {
   const { application_id } = req.params;
