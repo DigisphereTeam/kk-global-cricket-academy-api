@@ -193,7 +193,6 @@ exports.renewOneOnOne = async (req, res) => {
   } = req.body;
 
   try {
-    // Validate required fields
     if (
       !coach_id ||
       !focus_area ||
@@ -208,7 +207,6 @@ exports.renewOneOnOne = async (req, res) => {
       );
     }
 
-    // Validate coach ID
     if (
       isNaN(coach_id) ||
       Number(coach_id) <= 0
@@ -220,7 +218,6 @@ exports.renewOneOnOne = async (req, res) => {
       );
     }
 
-    // Validate fee amount
     if (Number(fee_amount) <= 0) {
       return sendErrorResponse(
         res,
@@ -229,7 +226,6 @@ exports.renewOneOnOne = async (req, res) => {
       );
     }
 
-    // Get application details
     const applicationResult = await pool.query(
       `
       SELECT
@@ -261,7 +257,6 @@ exports.renewOneOnOne = async (req, res) => {
 
     const application = applicationResult.rows[0];
 
-    // Check player status
     if (application.player_is_active !== true) {
       return sendErrorResponse(
         res,
@@ -270,7 +265,6 @@ exports.renewOneOnOne = async (req, res) => {
       );
     }
 
-    // Only latest application can be renewed
     const latestApplication = await pool.query(
       `
       SELECT
@@ -287,8 +281,9 @@ exports.renewOneOnOne = async (req, res) => {
 
     if (
       latestApplication.rowCount === 0 ||
-      Number(latestApplication.rows[0].application_id) !==
-      Number(application_id)
+      Number(
+        latestApplication.rows[0].application_id
+      ) !== Number(application_id)
     ) {
       return sendErrorResponse(
         res,
@@ -297,7 +292,6 @@ exports.renewOneOnOne = async (req, res) => {
       );
     }
 
-    // Validate selected coach
     const coachResult = await pool.query(
       `
       SELECT
@@ -306,7 +300,7 @@ exports.renewOneOnOne = async (req, res) => {
       FROM tbl_coach
       WHERE coach_id = $1
       `,
-      [coach_id]
+      [Number(coach_id)]
     );
 
     if (coachResult.rowCount === 0) {
@@ -321,8 +315,44 @@ exports.renewOneOnOne = async (req, res) => {
 
     const renewalDate = new Date();
 
-    // Check if player already has an application
-    // for the current month
+    const coachSlotConflict = await pool.query(
+      `
+      SELECT
+        oa.application_id,
+        oa.player_id,
+        p.full_name AS player_name
+      FROM tbl_one_on_one_applications oa
+      INNER JOIN tbl_players p
+        ON oa.player_id = p.player_id
+      WHERE oa.coach_id = $1
+        AND oa.preferred_slot = $2
+        AND EXTRACT(
+          MONTH FROM oa.application_date
+        ) = EXTRACT(
+          MONTH FROM $3::date
+        )
+        AND EXTRACT(
+          YEAR FROM oa.application_date
+        ) = EXTRACT(
+          YEAR FROM $3::date
+        )
+      LIMIT 1
+      `,
+      [
+        Number(coach_id),
+        preferred_slot.trim(),
+        renewalDate,
+      ]
+    );
+
+    if (coachSlotConflict.rowCount > 0) {
+      return sendErrorResponse(
+        res,
+        409,
+        `Coach ${selectedCoach.full_name} is already booked for this time slot by ${coachSlotConflict.rows[0].player_name}.`
+      );
+    }
+
     const existingApplication = await pool.query(
       `
       SELECT
@@ -357,7 +387,6 @@ exports.renewOneOnOne = async (req, res) => {
       );
     }
 
-    // Create renewal
     const renewal = await pool.query(
       `
       INSERT INTO tbl_one_on_one_applications
@@ -395,13 +424,12 @@ exports.renewOneOnOne = async (req, res) => {
         focus_area.trim(),
         payment_type,
         fee_amount,
-        preferred_slot,
+        preferred_slot.trim(),
         monthly_performance_review || null,
         remarks || null,
       ]
     );
 
-    // Get user who performed the renewal
     const userResult = await pool.query(
       `
       SELECT
@@ -415,7 +443,6 @@ exports.renewOneOnOne = async (req, res) => {
     const performedBy =
       userResult.rows[0]?.full_name || "System";
 
-    // Notification log
     await pool.query(
       `
       INSERT INTO tbl_notification_logs
