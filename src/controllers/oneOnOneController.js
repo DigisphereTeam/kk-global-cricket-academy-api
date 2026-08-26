@@ -183,6 +183,7 @@ exports.renewOneOnOne = async (req, res) => {
   }
 
   const {
+    coach_id,
     focus_area,
     payment_type,
     fee_amount,
@@ -192,7 +193,9 @@ exports.renewOneOnOne = async (req, res) => {
   } = req.body;
 
   try {
+    // Validate required fields
     if (
+      !coach_id ||
       !focus_area ||
       !payment_type ||
       fee_amount == null ||
@@ -205,6 +208,19 @@ exports.renewOneOnOne = async (req, res) => {
       );
     }
 
+    // Validate coach ID
+    if (
+      isNaN(coach_id) ||
+      Number(coach_id) <= 0
+    ) {
+      return sendErrorResponse(
+        res,
+        400,
+        "Invalid coach ID."
+      );
+    }
+
+    // Validate fee amount
     if (Number(fee_amount) <= 0) {
       return sendErrorResponse(
         res,
@@ -213,6 +229,7 @@ exports.renewOneOnOne = async (req, res) => {
       );
     }
 
+    // Get application details
     const applicationResult = await pool.query(
       `
       SELECT
@@ -244,6 +261,7 @@ exports.renewOneOnOne = async (req, res) => {
 
     const application = applicationResult.rows[0];
 
+    // Check player status
     if (application.player_is_active !== true) {
       return sendErrorResponse(
         res,
@@ -252,6 +270,7 @@ exports.renewOneOnOne = async (req, res) => {
       );
     }
 
+    // Only latest application can be renewed
     const latestApplication = await pool.query(
       `
       SELECT
@@ -268,7 +287,7 @@ exports.renewOneOnOne = async (req, res) => {
 
     if (
       latestApplication.rowCount === 0 ||
-      latestApplication.rows[0].application_id !==
+      Number(latestApplication.rows[0].application_id) !==
       Number(application_id)
     ) {
       return sendErrorResponse(
@@ -278,8 +297,32 @@ exports.renewOneOnOne = async (req, res) => {
       );
     }
 
+    // Validate selected coach
+    const coachResult = await pool.query(
+      `
+      SELECT
+        coach_id,
+        full_name
+      FROM tbl_coach
+      WHERE coach_id = $1
+      `,
+      [coach_id]
+    );
+
+    if (coachResult.rowCount === 0) {
+      return sendErrorResponse(
+        res,
+        404,
+        "Coach not found."
+      );
+    }
+
+    const selectedCoach = coachResult.rows[0];
+
     const renewalDate = new Date();
 
+    // Check if player already has an application
+    // for the current month
     const existingApplication = await pool.query(
       `
       SELECT
@@ -314,6 +357,7 @@ exports.renewOneOnOne = async (req, res) => {
       );
     }
 
+    // Create renewal
     const renewal = await pool.query(
       `
       INSERT INTO tbl_one_on_one_applications
@@ -346,7 +390,7 @@ exports.renewOneOnOne = async (req, res) => {
       `,
       [
         application.player_id,
-        application.coach_id,
+        Number(coach_id),
         renewalDate,
         focus_area.trim(),
         payment_type,
@@ -357,6 +401,7 @@ exports.renewOneOnOne = async (req, res) => {
       ]
     );
 
+    // Get user who performed the renewal
     const userResult = await pool.query(
       `
       SELECT
@@ -370,6 +415,7 @@ exports.renewOneOnOne = async (req, res) => {
     const performedBy =
       userResult.rows[0]?.full_name || "System";
 
+    // Notification log
     await pool.query(
       `
       INSERT INTO tbl_notification_logs
@@ -385,7 +431,7 @@ exports.renewOneOnOne = async (req, res) => {
       [
         "One-on-One Training",
         "Renewed",
-        `${application.player_name} renewed one-on-one training with Coach ${application.coach_name}.`,
+        `${application.player_name} renewed one-on-one training with Coach ${selectedCoach.full_name}.`,
         performedBy,
       ]
     );
@@ -410,6 +456,7 @@ exports.renewOneOnOne = async (req, res) => {
     );
   }
 };
+
 
 exports.getAllApplications = async (req, res) => {
   const now = new Date();
