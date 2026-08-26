@@ -22,8 +22,14 @@ exports.getNotifications = async (req, res) => {
 
     const role = userResult.rows[0].role;
 
-    let query = "";
+    await pool.query(
+      `
+      DELETE FROM tbl_notification_logs
+      WHERE created_at < CURRENT_DATE - INTERVAL '7 days'
+      `
+    );
 
+    let query = "";
 
     if (role === "ADMIN") {
       query = `
@@ -37,9 +43,7 @@ exports.getNotifications = async (req, res) => {
           )
         ORDER BY created_at DESC;
       `;
-    }
-
-    else if (role === "PRIMARY") {
+    } else if (role === "PRIMARY") {
       query = `
         SELECT *
         FROM tbl_notification_logs
@@ -54,9 +58,7 @@ exports.getNotifications = async (req, res) => {
           )
         ORDER BY created_at DESC;
       `;
-    }
-
-    else {
+    } else {
       return sendErrorResponse(
         res,
         403,
@@ -72,7 +74,6 @@ exports.getNotifications = async (req, res) => {
       "Notifications fetched successfully.",
       result.rows
     );
-
   } catch (error) {
     console.error("Get Notifications Error:", error);
 
