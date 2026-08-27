@@ -767,17 +767,22 @@ exports.getAllPlayers = async (req, res) => {
             ) AS regular_revenue_data
           ) AS regular_fee,
 
-          (
-            SELECT COALESCE(
-              SUM(p.hostel_fee),
-              0
-            )
-            FROM tbl_players p
-            WHERE COALESCE(p.hostel_fee, 0) > 0
-              AND p.admission_date >=
-                DATE_TRUNC('month', CURRENT_DATE)
-              AND p.admission_date <
-                DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+                (
+          COALESCE((
+              SELECT SUM(hostel_fee)
+              FROM tbl_players
+              WHERE hostel_fee > 0
+                AND admission_date >= DATE_TRUNC('month', CURRENT_DATE)
+                AND admission_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+          ), 0)
+          +
+          COALESCE((
+              SELECT SUM(hostel_fee)
+              FROM tbl_player_fees
+              WHERE hostel_fee > 0
+                AND payment_date >= DATE_TRUNC('month', CURRENT_DATE)
+                AND payment_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+          ), 0)
           ) AS hostel_fee,
 
           (

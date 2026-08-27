@@ -70,14 +70,24 @@ exports.getDashboardStatistics = async (req, res) => {
                   DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
           ), 0) AS one_on_one_revenue,
 
-          COALESCE((
-            SELECT SUM(hostel_fee)
-            FROM tbl_players
-            WHERE hostel_fee > 0
-              AND admission_date >= DATE_TRUNC('month', CURRENT_DATE)
-              AND admission_date <
-                  DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
-          ), 0) AS hostel_fee_revenue,
+          (
+              COALESCE((
+                  SELECT SUM(hostel_fee)
+                  FROM tbl_players
+                  WHERE hostel_fee > 0
+                    AND admission_date >= DATE_TRUNC('month', CURRENT_DATE)
+                    AND admission_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+              ), 0)
+              +
+              COALESCE((
+                  SELECT SUM(hostel_fee)
+                  FROM tbl_player_fees
+                  WHERE hostel_fee > 0
+                    AND payment_date >= DATE_TRUNC('month', CURRENT_DATE)
+                    AND payment_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+              ), 0)
+          ) AS hostel_fee_revenue,
+
 
           COALESCE((
             SELECT SUM(total_amount)
