@@ -315,43 +315,43 @@ exports.renewOneOnOne = async (req, res) => {
 
     const renewalDate = new Date();
 
-    const coachSlotConflict = await pool.query(
-      `
-      SELECT
-        oa.application_id,
-        oa.player_id,
-        p.full_name AS player_name
-      FROM tbl_one_on_one_applications oa
-      INNER JOIN tbl_players p
-        ON oa.player_id = p.player_id
-      WHERE oa.coach_id = $1
-        AND oa.preferred_slot = $2
-        AND EXTRACT(
-          MONTH FROM oa.application_date
-        ) = EXTRACT(
-          MONTH FROM $3::date
-        )
-        AND EXTRACT(
-          YEAR FROM oa.application_date
-        ) = EXTRACT(
-          YEAR FROM $3::date
-        )
-      LIMIT 1
-      `,
-      [
-        Number(coach_id),
-        preferred_slot.trim(),
-        renewalDate,
-      ]
-    );
+    // const coachSlotConflict = await pool.query(
+    //   `
+    //   SELECT
+    //     oa.application_id,
+    //     oa.player_id,
+    //     p.full_name AS player_name
+    //   FROM tbl_one_on_one_applications oa
+    //   INNER JOIN tbl_players p
+    //     ON oa.player_id = p.player_id
+    //   WHERE oa.coach_id = $1
+    //     AND oa.preferred_slot = $2
+    //     AND EXTRACT(
+    //       MONTH FROM oa.application_date
+    //     ) = EXTRACT(
+    //       MONTH FROM $3::date
+    //     )
+    //     AND EXTRACT(
+    //       YEAR FROM oa.application_date
+    //     ) = EXTRACT(
+    //       YEAR FROM $3::date
+    //     )
+    //   LIMIT 1
+    //   `,
+    //   [
+    //     Number(coach_id),
+    //     preferred_slot.trim(),
+    //     renewalDate,
+    //   ]
+    // );
 
-    if (coachSlotConflict.rowCount > 0) {
-      return sendErrorResponse(
-        res,
-        409,
-        `Coach ${selectedCoach.full_name} is already booked for this time slot by ${coachSlotConflict.rows[0].player_name}.`
-      );
-    }
+    // if (coachSlotConflict.rowCount > 0) {
+    //   return sendErrorResponse(
+    //     res,
+    //     409,
+    //     `Coach ${selectedCoach.full_name} is already booked for this time slot by ${coachSlotConflict.rows[0].player_name}.`
+    //   );
+    // }
 
     const existingApplication = await pool.query(
       `
@@ -1136,35 +1136,35 @@ exports.updateApplication = async (req, res) => {
         ? req.body.preferred_slot.trim()
         : currentApplication.preferred_slot;
 
-    const coachSlotConflict = await pool.query(
-      `
-      SELECT
-        oa.application_id,
-        oa.player_id,
-        p.full_name AS player_name,
-        oa.preferred_slot
-      FROM tbl_one_on_one_applications oa
-      INNER JOIN tbl_players p
-        ON oa.player_id = p.player_id
-      WHERE oa.coach_id = $1
-        AND oa.preferred_slot = $2
-        AND oa.application_id <> $3
-      LIMIT 1
-      `,
-      [
-        finalCoachId,
-        finalPreferredSlot,
-        application_id,
-      ]
-    );
+    // const coachSlotConflict = await pool.query(
+    //   `
+    //   SELECT
+    //     oa.application_id,
+    //     oa.player_id,
+    //     p.full_name AS player_name,
+    //     oa.preferred_slot
+    //   FROM tbl_one_on_one_applications oa
+    //   INNER JOIN tbl_players p
+    //     ON oa.player_id = p.player_id
+    //   WHERE oa.coach_id = $1
+    //     AND oa.preferred_slot = $2
+    //     AND oa.application_id <> $3
+    //   LIMIT 1
+    //   `,
+    //   [
+    //     finalCoachId,
+    //     finalPreferredSlot,
+    //     application_id,
+    //   ]
+    // );
 
-    if (coachSlotConflict.rowCount > 0) {
-      return sendErrorResponse(
-        res,
-        409,
-        `Coach is already booked for this time slot by ${coachSlotConflict.rows[0].player_name}.`
-      );
-    }
+    // if (coachSlotConflict.rowCount > 0) {
+    //   return sendErrorResponse(
+    //     res,
+    //     409,
+    //     `Coach is already booked for this time slot by ${coachSlotConflict.rows[0].player_name}.`
+    //   );
+    // }
 
     for (const field of allowedFields) {
       if (req.body[field] !== undefined) {
