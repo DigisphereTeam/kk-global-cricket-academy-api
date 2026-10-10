@@ -1,7 +1,7 @@
 const pool = require("../config/dbConfig");
 
 const paymentTables = {
-  admission: {
+  "admission": {
     table: "tbl_players",
     idColumn: "player_id",
   },

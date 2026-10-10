@@ -597,15 +597,19 @@ exports.getAllApplications = async (req, res) => {
         Number(row.application_month) === month &&
         Number(row.application_year) === year;
 
+      const paymentStatus = isCurrentMonth
+        ? row.payment_status
+        : row.is_active
+          ? "Pending"
+          : row.payment_status;
+
       return {
         ...row,
         status: row.is_active ? "Active" : "Inactive",
         sessions: 1,
-        payment_status: isCurrentMonth
-          ? row.payment_status
-          : row.is_active
-            ? "Pending"
-            : row.payment_status,
+        payment_status: paymentStatus,
+        is_payment_confirmed:
+          paymentStatus === "Pending" ? false : row.is_payment_confirmed,
       };
     });
 

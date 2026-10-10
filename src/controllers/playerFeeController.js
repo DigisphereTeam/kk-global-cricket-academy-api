@@ -304,6 +304,7 @@ exports.getAllPlayerFees = async (req, res) => {
           return {
             ...fee,
             status: "Pending",
+            is_payment_confirmed: false,
           };
         }
       }
