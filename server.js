@@ -25,6 +25,7 @@ const attendanceRouter = require("./src/routes/attendanceRoutes");
 const { startAttendanceCron } = require("./src/jobs/attendance.cron");
 const feeDueNotificationCron = require("./src/jobs/feeNotificationCron");
 const groundBookingRouter = require("./src/routes/groundBookingRoutes");
+const paymentRouter = require("./src/routes/paymentRoutes");
 
 
 const app = express();
@@ -47,6 +48,7 @@ app.use("/coaches", coachRouter);
 app.use("/staff", staffRouter);
 app.use("/one-on-one-applications", oneOnOneRouter);
 app.use("/player-fees", playerFeeRouter);
+app.use("/payments", paymentRouter);
 app.use("/ground-bookings", groundBookingRouter);
 app.use("/events", eventRouter)
 app.use("/equipments", equipmentRouter);

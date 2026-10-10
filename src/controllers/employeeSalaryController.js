@@ -105,22 +105,6 @@ exports.createEmployeeSalary = async (req, res) => {
       );
     }
 
-    // Incentives are applicable only to coaches
-    if (
-      staff_id &&
-      (
-        Number(incentive_1 || 0) > 0 ||
-        Number(incentive_2 || 0) > 0 ||
-        Number(incentive_3 || 0) > 0
-      )
-    ) {
-      return sendErrorResponse(
-        res,
-        400,
-        "Incentives are applicable to coaches only."
-      );
-    }
-
     // Prevent duplicate salary
     let existingSalary;
 
@@ -478,22 +462,6 @@ OR
         res,
         409,
         "Salary already exists for this employee for the selected month."
-      );
-    }
-
-    // Incentives are applicable only to coaches
-    if (
-      salary.staff_id &&
-      (
-        Number(incentive_1 || 0) > 0 ||
-        Number(incentive_2 || 0) > 0 ||
-        Number(incentive_3 || 0) > 0
-      )
-    ) {
-      return sendErrorResponse(
-        res,
-        400,
-        "Incentives are applicable to coaches only."
       );
     }
 
@@ -1259,20 +1227,6 @@ exports.updateEmployeeSalary = async (req, res) => {
         res,
         400,
         "Incentives cannot be negative."
-      );
-    }
-
-    // Incentives only for coaches
-    if (
-      staff_id &&
-      (incentive_1 > 0 ||
-        incentive_2 > 0 ||
-        incentive_3 > 0)
-    ) {
-      return sendErrorResponse(
-        res,
-        400,
-        "Incentives are applicable to coaches only."
       );
     }
 

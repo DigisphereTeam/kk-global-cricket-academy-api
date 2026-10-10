@@ -274,6 +274,7 @@ exports.getAllPlayerFees = async (req, res) => {
         GROUP BY player_id
       ) latest
         ON latest.latest_fee_id = pf.fee_id
+      WHERE pf.is_active = TRUE
       ORDER BY
         pf.fee_id DESC;
     `;
