@@ -13,6 +13,10 @@ const paymentTables = {
     table: "tbl_one_on_one_applications",
     idColumn: "application_id",
   },
+  "ground-booking": {
+    table: "tbl_ground_booking",
+    idColumn: "booking_id",
+  },
 };
 
 const confirmPayment = async (req, res) => {
