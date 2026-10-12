@@ -551,6 +551,7 @@ exports.getAllApplications = async (req, res) => {
           ra.application_type,
           ra.application_date,
           ra.monthly_performance_review,
+          ra.is_payment_confirmed,
           ra.remarks,
           ra.is_active,
           ra.created_at,
